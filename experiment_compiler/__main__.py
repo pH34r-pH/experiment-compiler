@@ -42,8 +42,9 @@ def main(argv: list[str] | None = None) -> int:
             recipe = load_recipe(args.recipe) if args.recipe else None
             result = verify_bytes(bounded_read(args.package, MAX_TOTAL),
                                   expected_sha256=args.expected_sha256, recipe=recipe)
-        if args.receipt:
-            write_once(args.receipt, canonical(result))
+        receipt = getattr(args, "receipt", None)
+        if receipt:
+            write_once(receipt, canonical(result))
         sys.stdout.buffer.write(canonical(result))
         return 0
     except (PackageError, OSError) as exc:
