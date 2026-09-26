@@ -1,0 +1,202 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    "https://w3id.org/ro/terms/workflow-run/context"
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/wfrun/process/0.6"
+      },
+      "datePublished": "2026-09-26",
+      "description": "A bounded, independently reproducible public example with embedded code, data, tests, protocol, acceptance criteria, evidence and receipt.",
+      "hasPart": [
+        {
+          "@id": "experiment/README.md"
+        },
+        {
+          "@id": "experiment/data.csv"
+        },
+        {
+          "@id": "experiment/DATA-LICENSE.md"
+        },
+        {
+          "@id": "experiment/environment.json"
+        },
+        {
+          "@id": "experiment/experiment-config.json"
+        },
+        {
+          "@id": "experiment/acceptance.json"
+        },
+        {
+          "@id": "experiment/protocol.md"
+        },
+        {
+          "@id": "experiment/run_experiment.py"
+        },
+        {
+          "@id": "experiment/test_experiment.py"
+        },
+        {
+          "@id": "experiment/reproduce.py"
+        },
+        {
+          "@id": "experiment/expected-result.json"
+        },
+        {
+          "@id": "evidence/expected-result.json"
+        },
+        {
+          "@id": "evidence/reference-reproduction-receipt.json"
+        },
+        {
+          "@id": "evidence/resource-requirements.json"
+        },
+        {
+          "@id": "metadata/croissant.jsonld"
+        },
+        {
+          "@id": "dependency-closure.json"
+        }
+      ],
+      "license": {
+        "@id": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "mentions": [
+        {
+          "@id": "#reference-run"
+        },
+        {
+          "@id": "https://github.com/pH34r-pH/experiment-compiler/commit/a4bebe3fff748268f037e5fa622b51ad40322a91"
+        }
+      ],
+      "name": "Self-contained linear-regression Compiled Experiment"
+    },
+    {
+      "@id": "https://w3id.org/ro/wfrun/process/0.6",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "name": "Process Run Crate",
+      "version": "0.6"
+    },
+    {
+      "@id": "https://www.apache.org/licenses/LICENSE-2.0",
+      "@type": "CreativeWork",
+      "description": "License for the Experiment Compiler software and package metadata; embedded data declares its own CC0-1.0 license.",
+      "name": "Apache License 2.0"
+    },
+    {
+      "@id": "experiment/run_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode",
+        "SoftwareApplication"
+      ],
+      "name": "Exact-rational linear-regression training and evaluation implementation",
+      "programmingLanguage": "Python 3 standard library",
+      "softwareVersion": "1.0",
+      "url": "https://github.com/pH34r-pH/experiment-compiler/blob/a4bebe3fff748268f037e5fa622b51ad40322a91/examples/linear-regression-v1/source/run_experiment.py"
+    },
+    {
+      "@id": "#reference-run",
+      "@type": "CreateAction",
+      "actionStatus": "https://schema.org/CompletedActionStatus",
+      "description": "Run the frozen exact-rational 32-step training protocol and compare its held-out result with the embedded reference result.",
+      "instrument": {
+        "@id": "experiment/run_experiment.py"
+      },
+      "name": "Reference independent reproduction",
+      "object": [
+        {
+          "@id": "experiment/data.csv"
+        },
+        {
+          "@id": "experiment/experiment-config.json"
+        },
+        {
+          "@id": "experiment/protocol.md"
+        },
+        {
+          "@id": "experiment/acceptance.json"
+        }
+      ],
+      "result": [
+        {
+          "@id": "evidence/expected-result.json"
+        },
+        {
+          "@id": "evidence/reference-reproduction-receipt.json"
+        }
+      ]
+    },
+    {
+      "@id": "experiment/data.csv",
+      "@type": "File",
+      "encodingFormat": "text/csv",
+      "license": {
+        "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
+      },
+      "name": "Synthetic train/eval dataset"
+    },
+    {
+      "@id": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "@type": "CreativeWork",
+      "description": "Public-domain dedication for the synthetic example dataset.",
+      "name": "CC0 1.0 Universal"
+    },
+    {
+      "@id": "experiment/experiment-config.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Frozen training configuration"
+    },
+    {
+      "@id": "experiment/protocol.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "name": "Frozen reproduction protocol"
+    },
+    {
+      "@id": "experiment/acceptance.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Acceptance criteria"
+    },
+    {
+      "@id": "evidence/expected-result.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Reference scientific result",
+      "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78"
+    },
+    {
+      "@id": "evidence/reference-reproduction-receipt.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Reference reproduction receipt",
+      "sha256": "534a33e5f9ba2d3980859b687493e3855f94a45cd793439a80e5b8424259f11f"
+    },
+    {
+      "@id": "https://github.com/pH34r-pH/experiment-compiler/commit/a4bebe3fff748268f037e5fa622b51ad40322a91",
+      "@type": "SoftwareSourceCode",
+      "codeRepository": "https://github.com/pH34r-pH/experiment-compiler",
+      "name": "Frozen public scientific source snapshot",
+      "version": "a4bebe3fff748268f037e5fa622b51ad40322a91"
+    }
+  ]
+}

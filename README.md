@@ -36,6 +36,38 @@ This first POC proves **package-build compatibility and integrity**, not a self-
 
 A useful agent instruction is: “Inspect the package and its gap register. Verify the digest and inventory. Identify included files versus external prerequisites, and report what is still needed before attempting an independent reproduction. Do not substitute missing scientific semantics.”
 
+## Reproduce a self-contained Compiled Experiment
+
+The second example is intentionally tiny so the complete scientific closure can live inside one package. It trains a one-dimensional linear model on embedded synthetic CC0 data using exact rational arithmetic and evaluates a held-out split.
+
+Build it:
+
+```sh
+python -m experiment_compiler compile examples/linear-regression-v1/experiment.json
+python -m experiment_compiler verify dist/stdlib-linear-regression-v1-compiled-experiment.zip \
+  --recipe examples/linear-regression-v1/experiment.json
+```
+
+The frozen package identity is:
+
+```text
+File:    dist/stdlib-linear-regression-v1-compiled-experiment.zip
+Bytes:   14010
+SHA-256: 251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544
+```
+
+Then extract the ZIP and, from its `experiment/` directory, run:
+
+```sh
+python reproduce.py --output-dir reproduction
+```
+
+The package contains the training implementation, conformance tests, train/eval data and license, environment and training configuration, protocol, acceptance criteria, reference result bytes, a public-CI reproduction receipt, resource measurements, Croissant 1.1 dataset metadata, and RO-Crate 1.3 / Process Run Crate 0.6 provenance. `dependency-closure.json` classifies every required item as embedded or an immutable public standards/source reference; its unavailable set is empty.
+
+The reference public CI matrix observed peak process RSS between about 18.9 and 20.7 MiB on Ubuntu 24.04 across Python 3.11/3.13/3.14. The package records 32 MiB as conservative planning headroom. It is CPU-only and requires 0 bytes of VRAM.
+
+This example is a bounded reproducibility demonstration, not evidence that an arbitrary ML experiment becomes reproducible merely by putting files in a ZIP. The scientific claim is deliberately simple enough that the dependency closure is inspectable.
+
 ## How it is structured
 
 `experiment.json` is a small local build recipe: an ID, the `poc-v1` compatibility profile, source/evidence metadata and a list of explicitly selected files with hashes, sizes and archive paths. Scientific meaning stays in the research documents and existing standards. There is no #164-specific logic in the compiler.

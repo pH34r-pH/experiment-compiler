@@ -1,0 +1,136 @@
+{
+  "buildRecipeVersion": 1,
+  "id": "stdlib-linear-regression-v1-compiled-experiment",
+  "manifest": {
+    "evidence": {
+      "dependencyClosureSha256": "831de164f1c292113b92c793bac45dd485bb93a41811fd113b59181bd01971b1",
+      "referenceReceiptSha256": "534a33e5f9ba2d3980859b687493e3855f94a45cd793439a80e5b8424259f11f",
+      "referenceResultSha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+      "referenceWorkflowRunId": 36255160704,
+      "resourceRequirementsSha256": "94181b25c8f74c108eafb54bfe99d520ee68901cbfb384b0a78f38b61cb03d0d"
+    },
+    "packageType": "compiled-experiment",
+    "profile": "compiled-experiment-v1",
+    "schemaVersion": 1,
+    "source": {
+      "commit": "a4bebe3fff748268f037e5fa622b51ad40322a91",
+      "repository": "pH34r-pH/experiment-compiler"
+    },
+    "standards": {
+      "croissant": "1.1",
+      "processRunCrate": "0.6",
+      "roCrate": "1.3"
+    },
+    "status": "reproducible"
+  },
+  "members": [
+    {
+      "path": "experiment/README.md",
+      "sha256": "db68feecbc5e73fde6757ea0c026a977cfbfd752b658b967c1537465a6861be7",
+      "size": 1059,
+      "source": "source/README.md"
+    },
+    {
+      "path": "experiment/data.csv",
+      "sha256": "58840d311a5d00055846ab5384fd025c46d15c85a542a18f9bf38fc3fdac2c16",
+      "size": 50,
+      "source": "source/data.csv"
+    },
+    {
+      "path": "experiment/DATA-LICENSE.md",
+      "sha256": "ff2b1e2390be32ad4e9b655ade81c33562255a07135fb9451803f411fdd32906",
+      "size": 301,
+      "source": "source/DATA-LICENSE.md"
+    },
+    {
+      "path": "experiment/environment.json",
+      "sha256": "87444108a17d4fc4d51687e4004c98fb7475c746637e31973187718393771664",
+      "size": 257,
+      "source": "source/environment.json"
+    },
+    {
+      "path": "experiment/experiment-config.json",
+      "sha256": "f9fbaccb145695ed87e4185f0c5e097ef9a8617035182696b7908a1d46ecd013",
+      "size": 89,
+      "source": "source/experiment-config.json"
+    },
+    {
+      "path": "experiment/acceptance.json",
+      "sha256": "1d42b10f65478f5caa27966eacd9772e12aa8b4a3d50ebf4249550921249a85d",
+      "size": 146,
+      "source": "source/acceptance.json"
+    },
+    {
+      "path": "experiment/protocol.md",
+      "sha256": "e633be4df19f926f918ece3f1196fac1130f60f8dde0352087e9716632267628",
+      "size": 1643,
+      "source": "source/protocol.md"
+    },
+    {
+      "path": "experiment/run_experiment.py",
+      "sha256": "59d70c368ae09f79d9514ea6faf50d550567b9e06fccd6b64dfba1ed02decbda",
+      "size": 6473,
+      "source": "source/run_experiment.py"
+    },
+    {
+      "path": "experiment/test_experiment.py",
+      "sha256": "4f0b0fb03b1b0d6dcafadcf12e70a7a91fc232a641d277e71af6ea776764343f",
+      "size": 1867,
+      "source": "source/test_experiment.py"
+    },
+    {
+      "path": "experiment/reproduce.py",
+      "sha256": "33a624f1af81cfb0a8c24b63611dc5bc3cf2a2b281faef5d37e5e8ff33e0d01a",
+      "size": 1174,
+      "source": "source/reproduce.py"
+    },
+    {
+      "path": "experiment/expected-result.json",
+      "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+      "size": 631,
+      "source": "source/expected-result.json"
+    },
+    {
+      "path": "evidence/expected-result.json",
+      "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+      "size": 631,
+      "source": "source/expected-result.json"
+    },
+    {
+      "path": "evidence/reference-reproduction-receipt.json",
+      "sha256": "534a33e5f9ba2d3980859b687493e3855f94a45cd793439a80e5b8424259f11f",
+      "size": 1626,
+      "source": "evidence/reference-reproduction-receipt.json"
+    },
+    {
+      "path": "evidence/resource-requirements.json",
+      "sha256": "94181b25c8f74c108eafb54bfe99d520ee68901cbfb384b0a78f38b61cb03d0d",
+      "size": 989,
+      "source": "evidence/resource-requirements.json"
+    },
+    {
+      "path": "metadata/croissant.jsonld",
+      "sha256": "3f15d1a14a20de2e05660de00a8de4e1123d8ffed280a60a9db1ac28cc7b30b7",
+      "size": 2343,
+      "source": "metadata/croissant.jsonld"
+    },
+    {
+      "path": "ro-crate-metadata.json",
+      "sha256": "487240febf6a80043bb440ffea9dbddd2f2cc8544863a3e7b0be58fa3f9d8485",
+      "size": 5907,
+      "source": "ro-crate-metadata.json"
+    },
+    {
+      "path": "dependency-closure.json",
+      "sha256": "831de164f1c292113b92c793bac45dd485bb93a41811fd113b59181bd01971b1",
+      "size": 2318,
+      "source": "dependency-closure.json"
+    }
+  ],
+  "profile": "compiled-experiment-v1",
+  "title": "Self-contained stdlib linear-regression reproduction",
+  "expectedPackage": {
+    "sha256": "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544",
+    "size": 14010
+  }
+}

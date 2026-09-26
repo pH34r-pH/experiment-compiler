@@ -1,0 +1,84 @@
+{
+  "classifications": {
+    "embedded": [
+      {
+        "item": "training implementation",
+        "path": "experiment/run_experiment.py"
+      },
+      {
+        "item": "one-command reproduction entrypoint",
+        "path": "experiment/reproduce.py"
+      },
+      {
+        "item": "conformance tests",
+        "path": "experiment/test_experiment.py"
+      },
+      {
+        "item": "training/evaluation data and split labels",
+        "path": "experiment/data.csv"
+      },
+      {
+        "item": "dataset license notice",
+        "path": "experiment/DATA-LICENSE.md"
+      },
+      {
+        "item": "environment contract",
+        "path": "experiment/environment.json"
+      },
+      {
+        "item": "training configuration",
+        "path": "experiment/experiment-config.json"
+      },
+      {
+        "item": "protocol",
+        "path": "experiment/protocol.md"
+      },
+      {
+        "item": "acceptance criteria",
+        "path": "experiment/acceptance.json"
+      },
+      {
+        "item": "reference scientific result bytes",
+        "path": "evidence/expected-result.json"
+      },
+      {
+        "item": "reference reproduction receipt bytes",
+        "path": "evidence/reference-reproduction-receipt.json"
+      },
+      {
+        "item": "resource measurements and planning basis",
+        "path": "evidence/resource-requirements.json"
+      },
+      {
+        "item": "Croissant dataset metadata",
+        "path": "metadata/croissant.jsonld"
+      },
+      {
+        "item": "RO-Crate / Process Run Crate metadata",
+        "path": "ro-crate-metadata.json"
+      }
+    ],
+    "publicImmutableReferences": [
+      {
+        "identity": "https://github.com/pH34r-pH/experiment-compiler/commit/a4bebe3fff748268f037e5fa622b51ad40322a91",
+        "item": "scientific source snapshot"
+      },
+      {
+        "identity": "http://mlcommons.org/croissant/1.1",
+        "item": "Croissant 1.1 specification"
+      },
+      {
+        "identity": "https://w3id.org/ro/crate/1.3",
+        "item": "RO-Crate 1.3 specification"
+      },
+      {
+        "identity": "https://w3id.org/ro/wfrun/process/0.6",
+        "item": "Process Run Crate 0.6 profile"
+      }
+    ],
+    "unavailable": []
+  },
+  "experimentId": "stdlib-linear-regression-v1",
+  "runtimeNetworkRequired": false,
+  "schemaVersion": 1
+}

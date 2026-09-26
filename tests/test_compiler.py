@@ -22,6 +22,7 @@ from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/issue-164"
+SELF_CONTAINED = ROOT / "examples/linear-regression-v1"
 EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
 
 
@@ -91,6 +92,15 @@ class CompilerTests(unittest.TestCase):
         result = verify_bytes(self.build(), recipe=load_recipe(self.recipe_path))
         self.assertEqual(result["source"]["repository"], "example/research")
         self.assertFalse(result["matchedExpectedPackage"])
+
+    def test_compiled_experiment_v1_builds_without_issue164_logic(self):
+        output = self.root / "self-contained.zip"
+        result = compile_package(SELF_CONTAINED / "experiment.json", output)
+        self.assertEqual(result["profile"], "compiled-experiment-v1")
+        self.assertEqual(result["source"]["repository"], "pH34r-pH/experiment-compiler")
+        checked = verify_bytes(output.read_bytes(), recipe=load_recipe(SELF_CONTAINED / "experiment.json"))
+        self.assertEqual(checked["profile"], "compiled-experiment-v1")
+        self.assertEqual(checked["memberCount"], 18)
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")

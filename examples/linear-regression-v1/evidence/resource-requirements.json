@@ -1,0 +1,33 @@
+{
+  "accelerator": {
+    "basis": "CPU-only standard-library implementation; no accelerator runtime is imported or used.",
+    "peakVramBytes": 0,
+    "required": false
+  },
+  "experimentId": "stdlib-linear-regression-v1",
+  "ram": {
+    "measurement": "resource.getrusage(RUSAGE_SELF).ru_maxrss on GitHub-hosted Ubuntu 24.04, normalized from KiB to bytes.",
+    "observedMaximumBytes": 21655552,
+    "observedPeakRssBytes": [
+      {
+        "python": "3.11.16",
+        "value": 19832832
+      },
+      {
+        "python": "3.13.15",
+        "value": 21041152
+      },
+      {
+        "python": "3.14.7",
+        "value": 21655552
+      }
+    ],
+    "planningBasis": "32 MiB is conservative headroom above the maximum peak RSS observed across the public Ubuntu 24.04 CI matrix; it is a planning estimate, not a hard runtime minimum.",
+    "planningRamBytes": 33554432
+  },
+  "referenceWorkflow": {
+    "python311JobId": 108440436565,
+    "runId": 36255160704
+  },
+  "schemaVersion": 1
+}

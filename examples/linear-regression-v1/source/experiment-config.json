@@ -1,0 +1,6 @@
+{
+  "initialBias": "0",
+  "initialWeight": "0",
+  "learningRate": "1/4",
+  "steps": 32
+}
