@@ -93,3 +93,29 @@ def describe_recipe(recipe_path: Path) -> dict:
         "standards": recipe["manifest"]["standards"],
         "package": expected,
     }
+
+
+def discover_recipes(root: Path) -> list[Path]:
+    """Discover compiled-experiment-v1 recipes by convention, with no registry file."""
+    root = root.resolve()
+    recipes: list[Path] = []
+    ids: set[str] = set()
+    for path in sorted(root.rglob("experiment.json")):
+        recipe = load_recipe(path)
+        if recipe["profile"] != "compiled-experiment-v1":
+            continue
+        if recipe["id"] in ids:
+            raise PackageError(f"Duplicate compiled experiment id: {recipe['id']}")
+        ids.add(recipe["id"])
+        recipes.append(path)
+    if not recipes:
+        raise PackageError(f"No compiled-experiment-v1 recipes found under: {root}")
+    return recipes
+
+
+def describe_catalog(root: Path) -> dict:
+    """Derive a deterministic public catalog from all discovered compiled experiments."""
+    return {
+        "schemaVersion": 1,
+        "experiments": [describe_recipe(path) for path in discover_recipes(root)],
+    }
