@@ -17,7 +17,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from experiment_compiler.catalog import describe_recipe
+from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
     json_value, load_recipe, safe_path, sha256, unique_paths, verify_bytes)
 
@@ -112,6 +112,16 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(descriptor["resources"]["accelerator"]["peakVramBytes"], 0)
         self.assertEqual(descriptor["reproduction"]["entrypoint"], "experiment/reproduce.py")
         self.assertEqual(descriptor["contents"]["unavailable"], [])
+
+    def test_catalog_discovery_excludes_historical_poc_without_registry(self):
+        recipes = discover_recipes(ROOT / "examples")
+        self.assertEqual(recipes, [SELF_CONTAINED / "experiment.json"])
+        catalog = describe_catalog(ROOT / "examples")
+        self.assertEqual(catalog["schemaVersion"], 1)
+        self.assertEqual([item["id"] for item in catalog["experiments"]],
+                         ["stdlib-linear-regression-v1-compiled-experiment"])
+        self.assertEqual(catalog["experiments"][0]["package"]["sha256"],
+                         "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")
