@@ -82,6 +82,8 @@ The `Experiment Compiler lifecycle` GitHub Actions workflow tests and rebuilds t
 
 The public compiler is now the reviewed source used by the Fleet/Portfolio publication path for the active self-contained Compiled Experiment. Fleet pins an exact public compiler revision, rebuilds and verifies the package, reproduces it from the extracted ZIP, and derives Portfolio display metadata from these authoritative artifacts rather than maintaining a second catalog by hand. The historical #164 POC remains available as a compatibility artifact.
 
+Public catalog discovery is convention-based: `experiment-compiler catalog examples` scans for `**/experiment.json`, selects `compiled-experiment-v1` recipes, and derives each entry from its existing artifacts. Adding another real Compiled Experiment does not require editing a registry, site catalog, or experiment-specific publisher constant; the historical `poc-v1` fixture is excluded automatically.
+
 This repository itself still needs no private DSL checkout, GitHub App key, Azure identity, GPU, PyTorch, or Fleet access. The derived project site is built from the same authoritative metadata projection; GitHub Pages/custom-domain activation is an operational deployment step rather than a separate content source.
 
 ## License
