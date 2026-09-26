@@ -20,3 +20,12 @@ This release preserves the initial POC wire format. A future complete research p
 `compiled-experiment-v1` does not authorize the compiler to execute package content. The public lifecycle separately exercises the known reviewed example after compilation: it verifies the ZIP, extracts it with Python's standard library, invokes the declared `experiment/reproduce.py` entrypoint, and compares the newly produced result bytes with the embedded reference result.
 
 A self-contained example should make its dependency closure explicit. The first example embeds code, tests, data/license/splits, environment, configuration, protocol, acceptance criteria, reference evidence/receipt, and resource measurements. Open-standard specifications may remain immutable public references. Missing prerequisites belong in an explicit unavailable list rather than being inferred or silently fetched.
+
+
+## Standards validation boundary
+
+The self-contained example uses Croissant 1.1, RO-Crate 1.3 and Process Run Crate 0.6.
+
+CI runs the pinned MLCommons `mlcroissant==1.1.0` validator against the packaged Croissant metadata. For RO-Crate / Process Run Crate, the repository gates the normative MUST-level contract relevant to this crate with `scripts/validate_current_ro_profiles.py`, directly matching the current profile URIs and required root/software/action relationships.
+
+As of this implementation, `roc-validator==0.11.2` ships a Process Run Crate 0.5 profile and does not ship RO-Crate 1.3 / Process Run Crate 0.6 profiles. It therefore must not be presented as evidence of 1.3/0.6 conformance: auto-detection falls back to an older RO-Crate profile. When an external validator implements the current 1.3/0.6 pair, it should replace or supplement the local MUST gate. The local gate explicitly reports that it is a contract check, not standards certification.
