@@ -1,5 +1,9 @@
 {
   "buildRecipeVersion": 1,
+  "expectedPackage": {
+    "sha256": "c14446905cac42958d1e41fd10ff25f3afc1720d2862c7a529b67b48709a4442",
+    "size": 13412
+  },
   "id": "stdlib-linear-regression-v1-compiled-experiment",
   "manifest": {
     "evidence": {
