@@ -31,6 +31,14 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Offline tests including historical checksum and hostile inputs
         run: python -m unittest discover -s tests -v
+      - name: Exercise self-contained reproduction source and report closure
+        run: |
+          set -euo pipefail
+          cd examples/linear-regression-v1/source
+          python reproduce.py --output-dir "$RUNNER_TEMP/linear-reproduction"
+          sha256sum README.md data.csv DATA-LICENSE.md environment.json experiment-config.json acceptance.json protocol.md run_experiment.py test_experiment.py reproduce.py expected-result.json
+          cat "$RUNNER_TEMP/linear-reproduction/reproduction-receipt.json"
+
       - name: Build twice and compare exact published POC
         run: |
           set -euo pipefail
