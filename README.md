@@ -52,8 +52,8 @@ The frozen package identity is:
 
 ```text
 File:    dist/stdlib-linear-regression-v1-compiled-experiment.zip
-Bytes:   13412
-SHA-256: c14446905cac42958d1e41fd10ff25f3afc1720d2862c7a529b67b48709a4442
+Bytes:   14010
+SHA-256: 251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544
 ```
 
 Then extract the ZIP and, from its `experiment/` directory, run:
