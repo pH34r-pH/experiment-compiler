@@ -130,10 +130,10 @@ jobs:
       - name: Derive metadata and build static site
         run: |
           set -euo pipefail
-          python -m experiment_compiler describe examples/linear-regression-v1/experiment.json \
-            --output "$RUNNER_TEMP/descriptor.json"
+          python -m experiment_compiler catalog examples --output "$RUNNER_TEMP/catalog.json"
           python scripts/build_pages_site.py --output "$RUNNER_TEMP/site"
-          test "$(jq -r '.package.sha256' "$RUNNER_TEMP/descriptor.json")" = '251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544'
+          test "$(jq -r '.experiments | length' "$RUNNER_TEMP/catalog.json")" -ge 1
+          jq -e '.experiments[] | select(.package.sha256 == "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")' "$RUNNER_TEMP/catalog.json" >/dev/null
           test -f "$RUNNER_TEMP/site/packages/251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544.zip"
       - name: Retain site preview
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
