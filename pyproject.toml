@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "experiment-compiler"
+version = "0.1.0a1"
+description = "Offline deterministic packaging for standards-based Compiled Experiments"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "Tyler J.H.G."}]
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+]
+
+[project.scripts]
+experiment-compiler = "experiment_compiler.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/pH34r-pH/experiment-compiler"
+Issues = "https://github.com/pH34r-pH/experiment-compiler/issues"
+
+[tool.setuptools.packages.find]
+include = ["experiment_compiler*"]

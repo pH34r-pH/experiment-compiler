@@ -1,0 +1,103 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    "https://w3id.org/ro/terms/workflow-run/context"
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {"@id": "./"},
+      "conformsTo": {"@id": "https://w3id.org/ro/crate/1.3"}
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "conformsTo": {"@id": "https://w3id.org/ro/wfrun/process/0.6"},
+      "name": "domain-scaling-lab issue #164 AdamW unit-hypersphere reproduction object",
+      "description": "Standards-first encoding attempt for the frozen issue #164 unit-hypersphere recurrent depth-3 AdamW experiment. This crate metadata records only facts supported by the historical repository artifacts and Process Run Crate vocabulary; unresolved training semantics are intentionally not invented.",
+      "mentions": [
+        {"@id": "#historical-run"},
+        {"@id": "#protocol"},
+        {"@id": "#result"},
+        {"@id": "#reproduction"}
+      ]
+    },
+    {
+      "@id": "https://w3id.org/ro/wfrun/process/0.6",
+      "@type": "CreativeWork",
+      "name": "Process Run Crate",
+      "version": "0.6"
+    },
+    {
+      "@id": "https://github.com/pH34r-pH/domain-scaling-lab",
+      "@type": "SoftwareSourceCode",
+      "name": "domain-scaling-lab",
+      "codeRepository": "https://github.com/pH34r-pH/domain-scaling-lab",
+      "version": "82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6"
+    },
+    {
+      "@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/src/domain_scaling_lab/retained_radius_topology.py",
+      "@type": ["SoftwareSourceCode", "SoftwareApplication"],
+      "name": "Issue #164 retained-radius versus hyperspherical recurrent-depth implementation",
+      "isPartOf": {"@id": "https://github.com/pH34r-pH/domain-scaling-lab"},
+      "softwareVersion": "82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6",
+      "url": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/src/domain_scaling_lab/retained_radius_topology.py"
+    },
+    {
+      "@id": "#protocol",
+      "@type": "CreativeWork",
+      "name": "Issue #164 frozen protocol",
+      "identifier": "sha256:a9880ddac80589ff97e3dce13f73ec2aeaeb160c109f2dbe27415c3f47935229",
+      "version": "3b4a43c712c87608fa8b2b176e410f0680657209"
+    },
+    {
+      "@id": "#historical-run",
+      "@type": "CreateAction",
+      "name": "Issue #164 qualifying AdamW topology experiment",
+      "actionStatus": "https://schema.org/CompletedActionStatus",
+      "instrument": {"@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/src/domain_scaling_lab/retained_radius_topology.py"},
+      "object": [
+        {"@id": "#protocol"}
+      ],
+      "result": [
+        {"@id": "#result"},
+        {"@id": "#trace"},
+        {"@id": "#summary"},
+        {"@id": "#reproduction"}
+      ]
+    },
+    {
+      "@id": "#result",
+      "@type": "MediaObject",
+      "name": "Issue #164 primary results",
+      "contentUrl": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/artifacts/retained_radius_topology/selection_v1/issue_164_results.json",
+      "sha256": "909f08d00cd5048ba2a18305513d14fdf51f51cae10fe26bce4905206a789def",
+      "contentSize": "1958585"
+    },
+    {
+      "@id": "#trace",
+      "@type": "MediaObject",
+      "name": "Issue #164 validation trace",
+      "contentUrl": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/artifacts/retained_radius_topology/selection_v1/issue_164_trace.jsonl",
+      "sha256": "19121baca6d4b403995bfb6aac011366df76a396b9b3f54388a5de6880ddab03",
+      "contentSize": "392789"
+    },
+    {
+      "@id": "#summary",
+      "@type": "MediaObject",
+      "name": "Issue #164 result summary",
+      "contentUrl": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/artifacts/retained_radius_topology/selection_v1/issue_164_summary.json",
+      "sha256": "71f2b4d3df6b435595f4c2cac9397ea1b398d529078d8e2dda6b6cbe2e8fc9ee",
+      "contentSize": "45285"
+    },
+    {
+      "@id": "#reproduction",
+      "@type": "MediaObject",
+      "name": "Issue #164 deterministic reproduction receipt",
+      "contentUrl": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/artifacts/retained_radius_topology/selection_v1/issue_164_reproduction.json",
+      "sha256": "0e7d70afc370b188c2cc7aa42156a90bee3da65a32c486f7b338a6dce0704bd6",
+      "contentSize": "747"
+    }
+  ]
+}

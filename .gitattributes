@@ -1,0 +1,4 @@
+* text=auto eol=lf
+# These are historical hash-pinned bytes, not files to normalize.
+examples/issue-164/inputs/** -text
+examples/issue-164/reference-manifest.json -text
