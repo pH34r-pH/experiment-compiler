@@ -1,0 +1,31 @@
+{
+  "experimentId": "stdlib-linear-regression-v1",
+  "inputs": {
+    "acceptance.json": "1d42b10f65478f5caa27966eacd9772e12aa8b4a3d50ebf4249550921249a85d",
+    "data.csv": "58840d311a5d00055846ab5384fd025c46d15c85a542a18f9bf38fc3fdac2c16",
+    "environment.json": "87444108a17d4fc4d51687e4004c98fb7475c746637e31973187718393771664",
+    "expected-result.json": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+    "experiment-config.json": "f9fbaccb145695ed87e4185f0c5e097ef9a8617035182696b7908a1d46ecd013",
+    "protocol.md": "e633be4df19f926f918ece3f1196fac1130f60f8dde0352087e9716632267628",
+    "reproduce.py": "33a624f1af81cfb0a8c24b63611dc5bc3cf2a2b281faef5d37e5e8ff33e0d01a",
+    "run_experiment.py": "59d70c368ae09f79d9514ea6faf50d550567b9e06fccd6b64dfba1ed02decbda",
+    "test_experiment.py": "4f0b0fb03b1b0d6dcafadcf12e70a7a91fc232a641d277e71af6ea776764343f"
+  },
+  "referenceResultSha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+  "resources": {
+    "peakRssBytes": 19832832,
+    "peakRssMeasurement": "resource.getrusage(RUSAGE_SELF).ru_maxrss (KiB on Linux, normalized to bytes)",
+    "peakVramBytes": 0,
+    "peakVramMeasurement": "CPU-only standard-library implementation; no accelerator runtime is used"
+  },
+  "resultSha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+  "runtime": {
+    "implementation": "CPython",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "pythonVersion": "3.11.16"
+  },
+  "schemaVersion": 1,
+  "scientificMatch": true,
+  "scope": "bounded-independent-reproduction",
+  "status": "passed"
+}
