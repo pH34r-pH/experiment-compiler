@@ -88,3 +88,29 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+
+  standards-validation:
+    name: Validate Croissant and RO-Crate metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Build the pinned self-contained package
+        run: |
+          set -euo pipefail
+          python -m experiment_compiler compile examples/linear-regression-v1/experiment.json \
+            --output "$RUNNER_TEMP/compiled-experiment.zip"
+          mkdir -p "$RUNNER_TEMP/compiled-experiment"
+          python -m zipfile -e "$RUNNER_TEMP/compiled-experiment.zip" "$RUNNER_TEMP/compiled-experiment"
+      - name: Install pinned external standards validators
+        run: python -m pip install --disable-pip-version-check "mlcroissant==1.1.0" "roc-validator==0.11.2"
+      - name: Validate Croissant 1.1 metadata
+        run: mlcroissant validate --jsonld "$RUNNER_TEMP/compiled-experiment/metadata/croissant.jsonld"
+      - name: Validate RO-Crate and declared Process Run Crate profile
+        run: rocrate-validator validate "$RUNNER_TEMP/compiled-experiment"
