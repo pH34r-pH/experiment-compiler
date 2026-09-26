@@ -11,11 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from experiment_compiler.catalog import describe_recipe
+from experiment_compiler.catalog import describe_catalog, discover_recipes
 from experiment_compiler.core import canonical, compile_package
-
-
-RECIPE = ROOT / "examples/linear-regression-v1/experiment.json"
 
 
 def main() -> int:
@@ -30,11 +27,13 @@ def main() -> int:
     shutil.copytree(ROOT / "site/assets", destination / "assets")
     shutil.copy2(ROOT / "site/index.html", destination / "index.html")
 
-    descriptor = describe_recipe(RECIPE)
-    package_sha = descriptor["package"]["sha256"]
-    package_path = destination / "packages" / f"{package_sha}.zip"
-    package_path.parent.mkdir(parents=True)
-    compile_package(RECIPE, package_path)
+    recipes_root = ROOT / "examples"
+    catalog = describe_catalog(recipes_root)
+    package_dir = destination / "packages"
+    package_dir.mkdir(parents=True)
+    for recipe_path, descriptor in zip(discover_recipes(recipes_root), catalog["experiments"], strict=True):
+        package_path = package_dir / f"{descriptor['package']['sha256']}.zip"
+        compile_package(recipe_path, package_path)
 
     data = {
         "schemaVersion": 1,
@@ -42,13 +41,13 @@ def main() -> int:
             "name": "Experiment Compiler",
             "repository": "https://github.com/pH34r-pH/experiment-compiler",
         },
-        "experiments": [descriptor],
+        "experiments": catalog["experiments"],
     }
     data_dir = destination / "data"
     data_dir.mkdir()
     (data_dir / "experiments.json").write_bytes(canonical(data))
     (destination / ".nojekyll").write_text("")
-    print(json.dumps({"packageSha256": package_sha, "site": str(destination)}, sort_keys=True))
+    print(json.dumps({"experimentCount": len(catalog["experiments"]), "site": str(destination)}, sort_keys=True))
     return 0
 
 
