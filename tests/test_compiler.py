@@ -100,7 +100,7 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(result["source"]["repository"], "pH34r-pH/experiment-compiler")
         checked = verify_bytes(output.read_bytes(), recipe=load_recipe(SELF_CONTAINED / "experiment.json"))
         self.assertEqual(checked["profile"], "compiled-experiment-v1")
-        self.assertEqual(checked["memberCount"], 17)
+        self.assertEqual(checked["memberCount"], 18)
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")
