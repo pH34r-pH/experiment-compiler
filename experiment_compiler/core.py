@@ -102,14 +102,24 @@ def _size(value: Any) -> bool:
     return type(value) is int and 0 <= value <= MAX_FILE
 
 
-def validate_header(header: Any) -> None:
-    keys = {"schemaVersion", "packageType", "status", "source", "standards", "evidence"}
-    if not isinstance(header, dict) or set(header) != keys:
-        raise PackageError("poc-v1 manifest header has unexpected or missing fields")
-    if (type(header["schemaVersion"]) is not int or header["schemaVersion"] != 1 or
-            header["packageType"] != "experiment-compiler-qualification-candidate" or
-            header["status"] != "qualification-candidate"):
-        raise PackageError("Unsupported manifest profile")
+def validate_header(header: Any) -> str:
+    historical = {"schemaVersion", "packageType", "status", "source", "standards", "evidence"}
+    compiled = historical | {"profile"}
+    if not isinstance(header, dict) or set(header) not in (historical, compiled):
+        raise PackageError("Manifest header has unexpected or missing fields")
+    if type(header["schemaVersion"]) is not int or header["schemaVersion"] != 1:
+        raise PackageError("Unsupported manifest schema version")
+    if set(header) == historical:
+        if (header["packageType"] != "experiment-compiler-qualification-candidate" or
+                header["status"] != "qualification-candidate"):
+            raise PackageError("Unsupported poc-v1 manifest profile")
+        profile = "poc-v1"
+    else:
+        if (header["profile"] != "compiled-experiment-v1" or
+                header["packageType"] != "compiled-experiment" or
+                header["status"] != "reproducible"):
+            raise PackageError("Unsupported compiled experiment manifest profile")
+        profile = "compiled-experiment-v1"
     source = header["source"]
     if (not isinstance(source, dict) or set(source) != {"repository", "commit"} or
             not isinstance(source["repository"], str) or not source["repository"] or
@@ -117,6 +127,7 @@ def validate_header(header: Any) -> None:
         raise PackageError("Source must declare a repository and full commit SHA")
     if not isinstance(header["standards"], dict) or not isinstance(header["evidence"], dict):
         raise PackageError("Standards and evidence must be JSON objects")
+    return profile
 
 
 def load_recipe(path: Path) -> dict:
@@ -125,12 +136,13 @@ def load_recipe(path: Path) -> dict:
     if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"expectedPackage"}:
         raise PackageError("Recipe has unexpected or missing fields")
     if (type(recipe["buildRecipeVersion"]) is not int or recipe["buildRecipeVersion"] != 1 or
-            recipe["profile"] != "poc-v1"):
+            recipe["profile"] not in {"poc-v1", "compiled-experiment-v1"}):
         raise PackageError("Unsupported recipe version/profile")
     if (not isinstance(recipe["id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", recipe["id"]) or
             not isinstance(recipe["title"], str) or not recipe["title"]):
         raise PackageError("Recipe requires a portable ID and title")
-    validate_header(recipe["manifest"])
+    if validate_header(recipe["manifest"]) != recipe["profile"]:
+        raise PackageError("Recipe profile differs from manifest profile")
     members = recipe["members"]
     if not isinstance(members, list) or not 1 <= len(members) < MAX_MEMBERS:
         raise PackageError("Recipe requires a bounded, nonempty member list")
@@ -239,7 +251,7 @@ def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dic
             manifest = json_value(manifest_raw)
             if not isinstance(manifest, dict) or "members" not in manifest:
                 raise PackageError("Missing manifest member inventory")
-            validate_header({k: v for k, v in manifest.items() if k != "members"})
+            profile = validate_header({k: v for k, v in manifest.items() if k != "members"})
             members = manifest["members"]
             if not isinstance(members, list) or not members:
                 raise PackageError("Manifest member list must be nonempty")
@@ -258,11 +270,12 @@ def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dic
                 if item["path"].endswith((".json", ".jsonld")):
                     if not isinstance(json_value(payload), (dict, list)):
                         raise PackageError("JSON members must have an object or array root")
-            if recipe and manifest != manifest_for(recipe):
+            if recipe and (profile != recipe["profile"] or manifest != manifest_for(recipe)):
                 raise PackageError("Package manifest differs from reviewed recipe")
     except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
         raise PackageError(f"Invalid package: {exc}") from exc
     return {"schemaVersion": 1, "status": "integrity-verified", "scope": "package-integrity-only",
-            "scientificReproduction": "not-run", "packageSha256": actual, "packageSizeBytes": len(data),
+            "scientificReproduction": "not-run", "profile": profile,
+            "packageSha256": actual, "packageSizeBytes": len(data),
             "memberCount": len(infos), "manifestSha256": sha256(manifest_raw),
             "source": manifest["source"], "matchedExpectedPackage": bool(expected or expected_sha256)}
