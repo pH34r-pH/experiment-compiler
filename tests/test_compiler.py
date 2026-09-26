@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from experiment_compiler.catalog import describe_recipe
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
     json_value, load_recipe, safe_path, sha256, unique_paths, verify_bytes)
 
@@ -101,6 +102,16 @@ class CompilerTests(unittest.TestCase):
         checked = verify_bytes(output.read_bytes(), recipe=load_recipe(SELF_CONTAINED / "experiment.json"))
         self.assertEqual(checked["profile"], "compiled-experiment-v1")
         self.assertEqual(checked["memberCount"], 18)
+
+    def test_catalog_metadata_is_derived_from_authoritative_artifacts(self):
+        descriptor = describe_recipe(SELF_CONTAINED / "experiment.json")
+        self.assertEqual(descriptor["title"], "Self-contained stdlib linear-regression reproduction")
+        self.assertIn("32 full-batch gradient-descent updates", descriptor["hypothesis"])
+        self.assertEqual(descriptor["package"]["sha256"], "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
+        self.assertEqual(descriptor["resources"]["ram"]["planningRamBytes"], 33554432)
+        self.assertEqual(descriptor["resources"]["accelerator"]["peakVramBytes"], 0)
+        self.assertEqual(descriptor["reproduction"]["entrypoint"], "experiment/reproduce.py")
+        self.assertEqual(descriptor["contents"]["unavailable"], [])
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")
