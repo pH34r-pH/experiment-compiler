@@ -60,6 +60,20 @@ jobs:
           sha256sum "$GITHUB_WORKSPACE/dist/stdlib-linear-regression-v1-compiled-experiment.zip"
           cat "$GITHUB_WORKSPACE/dist/linear-reproduction-receipt.json"
 
+      - name: Validate open-standard metadata with current reference validators
+        if: matrix.python == '3.11'
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/standards-validator"
+          "$RUNNER_TEMP/standards-validator/bin/python" -m pip install --disable-pip-version-check \
+            mlcroissant==1.1.0 roc-validator==0.10.0
+          "$RUNNER_TEMP/standards-validator/bin/mlcroissant" validate \
+            --jsonld "$RUNNER_TEMP/compiled-experiment/metadata/croissant.jsonld" \
+            | tee dist/croissant-validation.txt
+          "$RUNNER_TEMP/standards-validator/bin/rocrate-validator" validate \
+            "$RUNNER_TEMP/compiled-experiment" \
+            | tee dist/rocrate-validation.txt
+
       - name: Build twice and compare exact published POC
         run: |
           set -euo pipefail
