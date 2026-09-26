@@ -80,7 +80,9 @@ See [the recipe contract](docs/build-recipe.md), [origins](ORIGINS.md) and [cont
 
 The `Experiment Compiler lifecycle` GitHub Actions workflow tests and rebuilds the POC on pull requests, pushes to `main`, and manual dispatch. Manual rebuilds need no copied IDs or credentials. CI checks the known historical checksum, builds twice, verifies the inventory, tests the installed wheel, and uploads the ZIP, receipts and Python wheel. A passing run qualifies those packaging checks only.
 
-The existing Fleet/Portfolio production path is unchanged. This public repository needs no private DSL checkout, GitHub App key, Azure identity, GPU, PyTorch, or access to Fleet. Broader package discovery, scientific replay and production adoption are follow-up work.
+The public compiler is now the reviewed source used by the Fleet/Portfolio publication path for the active self-contained Compiled Experiment. Fleet pins an exact public compiler revision, rebuilds and verifies the package, reproduces it from the extracted ZIP, and derives Portfolio display metadata from these authoritative artifacts rather than maintaining a second catalog by hand. The historical #164 POC remains available as a compatibility artifact.
+
+This repository itself still needs no private DSL checkout, GitHub App key, Azure identity, GPU, PyTorch, or Fleet access. The derived project site is built from the same authoritative metadata projection; GitHub Pages/custom-domain activation is an operational deployment step rather than a separate content source.
 
 ## License
 
