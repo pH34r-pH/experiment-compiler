@@ -1,0 +1,8 @@
+Experiment Compiler
+Copyright 2026 Tyler J.H.G.
+
+Original design and implementation by Tyler J.H.G. (pH34r-pH).
+The first compatibility fixture preserves the previously published #164
+research-package member bytes. See ORIGINS.md for source lineage and scope.
+Names of external standards and referenced projects remain with their owners.
+No endorsement by MLCommons, RO-Crate maintainers, or referenced projects is implied.

@@ -1,0 +1,20 @@
+{
+  "@context": {
+    "croissant": "http://mlcommons.org/croissant/",
+    "schema": "https://schema.org/"
+  },
+  "@type": "croissant:TaskSolution",
+  "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-native-solution",
+  "schema:name": "Historical domain-scaling-lab #164 implementation",
+  "schema:isBasedOn": {
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-problem"
+  },
+  "croissant:implementation": {
+    "@type": "schema:SoftwareSourceCode",
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/src/domain_scaling_lab/retained_radius_topology.py"
+  },
+  "croissant:output": {
+    "@type": "schema:Dataset",
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/tree/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/artifacts/retained_radius_topology/selection_v1"
+  }
+}

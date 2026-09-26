@@ -1,0 +1,36 @@
+{
+  "@context": {
+    "croissant": "http://mlcommons.org/croissant/",
+    "schema": "https://schema.org/"
+  },
+  "@type": "croissant:TaskProblem",
+  "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-problem",
+  "schema:name": "Reproduce the frozen issue #164 unit-hypersphere result",
+  "schema:description": "Conceptual-reproducibility encoding attempt for the frozen #164 scientific problem. This file intentionally uses only current Croissant Tasks vocabulary. Training-procedure semantics that the vocabulary cannot state are not hidden in custom properties.",
+  "croissant:input": {
+    "@type": "schema:Dataset",
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-dataset"
+  },
+  "croissant:implementation": {
+    "@type": "croissant:ImplementationSpec",
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-implementation-spec",
+    "croissant:tests": [
+      {
+        "@type": "schema:URL",
+        "@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/research-342-reproducible-ml-standards/tests/test_issue_164_adamw_contract.py"
+      },
+      {
+        "@type": "schema:URL",
+        "@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6/tests/test_retained_radius_topology_evidence.py"
+      }
+    ],
+    "croissant:environment": {
+      "@type": "schema:CreativeWork",
+      "@id": "https://github.com/pH34r-pH/domain-scaling-lab/blob/research-342-reproducible-ml-standards/research/reproducibility/issue_164/adamw_contract_v1.md"
+    }
+  },
+  "croissant:execution": {
+    "@type": "croissant:ExecutionSpec",
+    "@id": "https://github.com/pH34r-pH/domain-scaling-lab/issues/342#issue-164-execution-spec"
+  }
+}
