@@ -34,6 +34,7 @@
     {"path": "experiment/run_experiment.py", "sha256": "59d70c368ae09f79d9514ea6faf50d550567b9e06fccd6b64dfba1ed02decbda", "size": 6473, "source": "source/run_experiment.py"},
     {"path": "experiment/test_experiment.py", "sha256": "4f0b0fb03b1b0d6dcafadcf12e70a7a91fc232a641d277e71af6ea776764343f", "size": 1867, "source": "source/test_experiment.py"},
     {"path": "experiment/reproduce.py", "sha256": "33a624f1af81cfb0a8c24b63611dc5bc3cf2a2b281faef5d37e5e8ff33e0d01a", "size": 1174, "source": "source/reproduce.py"},
+    {"path": "experiment/expected-result.json", "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78", "size": 631, "source": "source/expected-result.json"},
     {"path": "evidence/expected-result.json", "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78", "size": 631, "source": "source/expected-result.json"},
     {"path": "evidence/reference-reproduction-receipt.json", "sha256": "534a33e5f9ba2d3980859b687493e3855f94a45cd793439a80e5b8424259f11f", "size": 1626, "source": "evidence/reference-reproduction-receipt.json"},
     {"path": "evidence/resource-requirements.json", "sha256": "94181b25c8f74c108eafb54bfe99d520ee68901cbfb384b0a78f38b61cb03d0d", "size": 989, "source": "evidence/resource-requirements.json"},
