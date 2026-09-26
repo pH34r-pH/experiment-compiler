@@ -17,14 +17,10 @@
     {
       "@id": "./",
       "@type": "Dataset",
-      "conformsTo": [
-        {
-          "@id": "https://w3id.org/ro/crate/1.3"
-        },
-        {
-          "@id": "https://w3id.org/ro/wfrun/process/0.6"
-        }
-      ],
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/wfrun/process/0.6"
+      },
+      "datePublished": "2026-09-26",
       "description": "A bounded, independently reproducible public example with embedded code, data, tests, protocol, acceptance criteria, evidence and receipt.",
       "hasPart": [
         {
@@ -58,6 +54,9 @@
           "@id": "experiment/reproduce.py"
         },
         {
+          "@id": "experiment/expected-result.json"
+        },
+        {
           "@id": "evidence/expected-result.json"
         },
         {
@@ -73,6 +72,9 @@
           "@id": "dependency-closure.json"
         }
       ],
+      "license": {
+        "@id": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
       "mentions": [
         {
           "@id": "#reference-run"
@@ -84,9 +86,37 @@
       "name": "Self-contained linear-regression Compiled Experiment"
     },
     {
+      "@id": "https://w3id.org/ro/wfrun/process/0.6",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "name": "Process Run Crate",
+      "version": "0.6"
+    },
+    {
+      "@id": "https://www.apache.org/licenses/LICENSE-2.0",
+      "@type": "CreativeWork",
+      "description": "License for the Experiment Compiler software and package metadata; embedded data declares its own CC0-1.0 license.",
+      "name": "Apache License 2.0"
+    },
+    {
+      "@id": "experiment/run_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode",
+        "SoftwareApplication"
+      ],
+      "name": "Exact-rational linear-regression training and evaluation implementation",
+      "programmingLanguage": "Python 3 standard library",
+      "softwareVersion": "1.0",
+      "url": "https://github.com/pH34r-pH/experiment-compiler/blob/a4bebe3fff748268f037e5fa622b51ad40322a91/examples/linear-regression-v1/source/run_experiment.py"
+    },
+    {
       "@id": "#reference-run",
       "@type": "CreateAction",
       "actionStatus": "https://schema.org/CompletedActionStatus",
+      "description": "Run the frozen exact-rational 32-step training protocol and compare its held-out result with the embedded reference result.",
       "instrument": {
         "@id": "experiment/run_experiment.py"
       },
@@ -115,33 +145,6 @@
       ]
     },
     {
-      "@id": "experiment/run_experiment.py",
-      "@type": [
-        "File",
-        "SoftwareSourceCode"
-      ],
-      "name": "Exact-rational training and evaluation implementation",
-      "programmingLanguage": "Python 3 standard library"
-    },
-    {
-      "@id": "experiment/reproduce.py",
-      "@type": [
-        "File",
-        "SoftwareSourceCode"
-      ],
-      "name": "One-command reproduction entrypoint",
-      "programmingLanguage": "Python 3 standard library"
-    },
-    {
-      "@id": "experiment/test_experiment.py",
-      "@type": [
-        "File",
-        "SoftwareSourceCode"
-      ],
-      "name": "Conformance tests",
-      "programmingLanguage": "Python 3 standard library"
-    },
-    {
       "@id": "experiment/data.csv",
       "@type": "File",
       "encodingFormat": "text/csv",
@@ -149,6 +152,30 @@
         "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
       },
       "name": "Synthetic train/eval dataset"
+    },
+    {
+      "@id": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "@type": "CreativeWork",
+      "description": "Public-domain dedication for the synthetic example dataset.",
+      "name": "CC0 1.0 Universal"
+    },
+    {
+      "@id": "experiment/experiment-config.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Frozen training configuration"
+    },
+    {
+      "@id": "experiment/protocol.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown",
+      "name": "Frozen reproduction protocol"
+    },
+    {
+      "@id": "experiment/acceptance.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "name": "Acceptance criteria"
     },
     {
       "@id": "evidence/expected-result.json",
@@ -170,15 +197,6 @@
       "codeRepository": "https://github.com/pH34r-pH/experiment-compiler",
       "name": "Frozen public scientific source snapshot",
       "version": "a4bebe3fff748268f037e5fa622b51ad40322a91"
-    },
-    {
-      "@id": "https://w3id.org/ro/wfrun/process/0.6",
-      "@type": [
-        "CreativeWork",
-        "Profile"
-      ],
-      "name": "Process Run Crate",
-      "version": "0.6"
     }
   ]
 }
