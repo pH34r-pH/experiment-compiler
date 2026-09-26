@@ -128,5 +128,9 @@
     }
   ],
   "profile": "compiled-experiment-v1",
-  "title": "Self-contained stdlib linear-regression reproduction"
+  "title": "Self-contained stdlib linear-regression reproduction",
+  "expectedPackage": {
+    "sha256": "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544",
+    "size": 14010
+  }
 }
