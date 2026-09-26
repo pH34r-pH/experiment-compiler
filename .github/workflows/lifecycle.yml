@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build and verify POC (Python ${{ matrix.python }})
+    name: Build and reproduce Compiled Experiments (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -31,13 +31,34 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Offline tests including historical checksum and hostile inputs
         run: python -m unittest discover -s tests -v
-      - name: Exercise self-contained reproduction source and report closure
+      - name: Exercise self-contained scientific source
         run: |
           set -euo pipefail
           cd examples/linear-regression-v1/source
-          python reproduce.py --output-dir "$RUNNER_TEMP/linear-reproduction"
-          sha256sum README.md data.csv DATA-LICENSE.md environment.json experiment-config.json acceptance.json protocol.md run_experiment.py test_experiment.py reproduce.py expected-result.json
-          cat "$RUNNER_TEMP/linear-reproduction/reproduction-receipt.json"
+          python reproduce.py --output-dir "$RUNNER_TEMP/source-reproduction"
+          cat "$RUNNER_TEMP/source-reproduction/reproduction-receipt.json"
+
+      - name: Compile, verify, extract and independently reproduce compiled-experiment-v1
+        run: |
+          set -euo pipefail
+          python -m experiment_compiler compile examples/linear-regression-v1/experiment.json \
+            --output dist/stdlib-linear-regression-v1-compiled-experiment.zip \
+            --receipt dist/linear-build-receipt.json
+          python -m experiment_compiler compile examples/linear-regression-v1/experiment.json \
+            --output "$RUNNER_TEMP/linear-rebuilt.zip"
+          cmp dist/stdlib-linear-regression-v1-compiled-experiment.zip "$RUNNER_TEMP/linear-rebuilt.zip"
+          python -m experiment_compiler verify dist/stdlib-linear-regression-v1-compiled-experiment.zip \
+            --recipe examples/linear-regression-v1/experiment.json \
+            --receipt dist/linear-verification.json
+          mkdir -p "$RUNNER_TEMP/compiled-experiment"
+          python -m zipfile -e dist/stdlib-linear-regression-v1-compiled-experiment.zip "$RUNNER_TEMP/compiled-experiment"
+          cd "$RUNNER_TEMP/compiled-experiment/experiment"
+          python reproduce.py --output-dir "$RUNNER_TEMP/package-reproduction"
+          cmp "$RUNNER_TEMP/package-reproduction/result.json" "$RUNNER_TEMP/compiled-experiment/evidence/expected-result.json"
+          cp "$RUNNER_TEMP/package-reproduction/result.json" "$GITHUB_WORKSPACE/dist/linear-reproduction-result.json"
+          cp "$RUNNER_TEMP/package-reproduction/reproduction-receipt.json" "$GITHUB_WORKSPACE/dist/linear-reproduction-receipt.json"
+          sha256sum "$GITHUB_WORKSPACE/dist/stdlib-linear-regression-v1-compiled-experiment.zip"
+          cat "$GITHUB_WORKSPACE/dist/linear-reproduction-receipt.json"
 
       - name: Build twice and compare exact published POC
         run: |
@@ -58,6 +79,8 @@ jobs:
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" compile "$GITHUB_WORKSPACE/examples/issue-164/experiment.json" --output "$RUNNER_TEMP/installed-poc.zip"
           cmp "$GITHUB_WORKSPACE/dist/issue-164-experiment-package.zip" "$RUNNER_TEMP/installed-poc.zip"
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" verify "$RUNNER_TEMP/installed-poc.zip" --recipe "$GITHUB_WORKSPACE/examples/issue-164/experiment.json"
+          "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" compile "$GITHUB_WORKSPACE/examples/linear-regression-v1/experiment.json" --output "$RUNNER_TEMP/installed-linear.zip"
+          "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" verify "$RUNNER_TEMP/installed-linear.zip" --recipe "$GITHUB_WORKSPACE/examples/linear-regression-v1/experiment.json"
       - name: Retain compiled package, wheel and scoped receipts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
