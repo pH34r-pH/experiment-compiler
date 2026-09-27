@@ -103,6 +103,136 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(checked["profile"], "compiled-experiment-v1")
         self.assertEqual(checked["memberCount"], 18)
 
+    def lifecycle_fixture(self, *, action_status=None, process_run=False):
+        root = self.root / "lifecycle"
+        root.mkdir()
+        files = {
+            "README.md": b"# Prospective example\n\n## Hypothesis\nA testable hypothesis.\n",
+            "protocol.md": b"# Protocol\n\n## Question\nCan a plan be packaged without a result?\n\n## Method\nNo execution has occurred.\n",
+            "runner.py": b"# Example executable identity\n",
+        }
+        action = {"@id": "#planned-run", "@type": "CreateAction",
+                  "actionStatus": "https://schema.org/PotentialActionStatus"}
+        graph = [
+            {"@id": "ro-crate-metadata.json", "@type": "CreativeWork", "about": {"@id": "./"},
+             "conformsTo": {"@id": "https://w3id.org/ro/crate/1.3"}},
+            {"@id": "./", "@type": "Dataset", "name": "Prospective example",
+             "description": "A plan-only lifecycle fixture.",
+             "conformsTo": [{"@id": "https://w3id.org/ro/crate/1.3"}],
+             "mainEntity": {"@id": "experiment/protocol.md"},
+             "hasPart": [{"@id": "experiment/README.md"}, {"@id": "experiment/protocol.md"},
+                         {"@id": "experiment/runner.py"}]},
+            {"@id": "experiment/protocol.md", "@type": ["File", "CreativeWork"], "name": "Prospective protocol",
+             "creativeWorkStatus": "Draft", "potentialAction": {"@id": "#planned-run"}},
+            action,
+            {"@id": "experiment/README.md", "@type": "File", "encodingFormat": "text/markdown"},
+            {"@id": "experiment/runner.py", "@type": ["File", "SoftwareSourceCode"],
+             "programmingLanguage": "Python"},
+        ]
+        if process_run:
+            graph[1]["conformsTo"].append({"@id": "https://w3id.org/ro/wfrun/process/0.6"})
+            graph.append({"@id": "https://w3id.org/ro/wfrun/process/0.6",
+                          "@type": ["CreativeWork", "Profile"], "version": "0.6"})
+            graph.append({"@id": "#attempt-1", "@type": "CreateAction",
+                          "actionStatus": action_status or "https://schema.org/CompletedActionStatus",
+                          "instrument": {"@id": "experiment/runner.py"}})
+        context = ["https://w3id.org/ro/crate/1.3/context"]
+        if process_run:
+            context.append("https://w3id.org/ro/terms/workflow-run/context")
+        files["ro-crate-metadata.json"] = canonical({"@context": context,
+            "@graph": graph})
+        (root / "experiment").mkdir()
+        members = []
+        for name, content, path in (
+            ("experiment/README.md", files["README.md"], "experiment/README.md"),
+            ("experiment/protocol.md", files["protocol.md"], "experiment/protocol.md"),
+            ("experiment/runner.py", files["runner.py"], "experiment/runner.py"),
+            ("ro-crate-metadata.json", files["ro-crate-metadata.json"], "ro-crate-metadata.json"),
+        ):
+            if path != "ro-crate-metadata.json":
+                (root / path).write_bytes(content)
+            members.append({"source": name, "path": path, "sha256": sha256(content), "size": len(content)})
+        (root / "ro-crate-metadata.json").write_bytes(files["ro-crate-metadata.json"])
+        recipe = {
+            "buildRecipeVersion": 1, "id": "prospective-example", "title": "Prospective example",
+            "profile": "compiled-experiment-lifecycle-v1",
+            "manifest": {"schemaVersion": 2, "packageType": "compiled-experiment",
+                         "profile": "compiled-experiment-lifecycle-v1",
+                         "source": {"repository": "example/research", "commit": "a" * 40},
+                         "standards": {"roCrate": "1.3", "processRunCrate": "0.6"}, "evidence": {}},
+            "members": members,
+        }
+        path = root / "experiment.json"
+        path.write_bytes(canonical(recipe))
+        return path, recipe, graph
+
+    def test_lifecycle_plan_builds_without_result_or_process_run_claim(self):
+        recipe_path, _, _ = self.lifecycle_fixture()
+        output = self.root / "plan.zip"
+        result = compile_package(recipe_path, output)
+        self.assertEqual(result["profile"], "compiled-experiment-lifecycle-v1")
+        self.assertEqual(result["lifecycle"], {"creativeWorkStatus": "Draft", "attemptCount": 0,
+                         "processRunCrate": False, "potentialActionCount": 1})
+        self.assertEqual(result["scope"], "package-integrity-only")
+        self.assertEqual(result["scientificReproduction"], "not-run")
+        self.assertIsNone(describe_recipe(recipe_path)["scientificInterpretation"])
+        self.assertEqual(describe_catalog(recipe_path.parent)["experiments"][0]["lifecycle"]["attemptCount"], 0)
+
+    def test_lifecycle_execution_requires_explicit_action_status_and_run_profile(self):
+        recipe_path, recipe, graph = self.lifecycle_fixture(
+            action_status="https://schema.org/FailedActionStatus", process_run=True)
+        graph.append({"@id": "#attempt-2", "@type": "CreateAction",
+                      "actionStatus": "https://schema.org/FailedActionStatus",
+                      "instrument": {"@id": "experiment/runner.py"}})
+        metadata = recipe_path.parent / "ro-crate-metadata.json"
+        metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+            "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+        recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+        recipe["members"][3]["size"] = metadata.stat().st_size
+        recipe_path.write_bytes(canonical(recipe))
+        # Failed process provenance is valid package evidence, but integrity is
+        # not converted into a scientific negative or a successful reproduction.
+        output = self.root / "failed-attempt.zip"
+        result = compile_package(recipe_path, output)
+        self.assertEqual(result["lifecycle"]["attemptCount"], 2)
+        self.assertEqual(result["lifecycle"]["processRunCrate"], True)
+        self.assertIsNone(describe_recipe(recipe_path)["scientificInterpretation"])
+
+        graph[-1].pop("actionStatus")
+        metadata = recipe_path.parent / "ro-crate-metadata.json"
+        metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+            "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+        recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+        recipe["members"][3]["size"] = metadata.stat().st_size
+        recipe_path.write_bytes(canonical(recipe))
+        with self.assertRaises(PackageError):
+            compile_package(recipe_path, self.root / "invalid-attempt.zip")
+
+    def test_prospective_crate_cannot_claim_process_run_profile_without_attempt(self):
+        recipe_path, recipe, graph = self.lifecycle_fixture()
+        graph[1]["conformsTo"] = {"@id": "https://w3id.org/ro/wfrun/process/0.6"}
+        metadata = recipe_path.parent / "ro-crate-metadata.json"
+        metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+            "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+        recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+        recipe["members"][3]["size"] = metadata.stat().st_size
+        recipe_path.write_bytes(canonical(recipe))
+        with self.assertRaises(PackageError):
+            compile_package(recipe_path, self.root / "false-run-claim.zip")
+
+    def test_lifecycle_rejects_execution_with_undescribed_instrument(self):
+        recipe_path, recipe, graph = self.lifecycle_fixture(
+            action_status="https://schema.org/ActiveActionStatus", process_run=True)
+        graph[-1]["instrument"] = {"@id": "missing/runner.py"}
+        metadata = recipe_path.parent / "ro-crate-metadata.json"
+        metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+            "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+        recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+        recipe["members"][3]["size"] = metadata.stat().st_size
+        recipe_path.write_bytes(canonical(recipe))
+        with self.assertRaises(PackageError):
+            compile_package(recipe_path, self.root / "invalid-instrument.zip")
+
     def test_catalog_metadata_is_derived_from_authoritative_artifacts(self):
         descriptor = describe_recipe(SELF_CONTAINED / "experiment.json")
         self.assertEqual(descriptor["title"], "Self-contained stdlib linear-regression reproduction")

@@ -32,8 +32,10 @@ def main() -> int:
     package_dir = destination / "packages"
     package_dir.mkdir(parents=True)
     for recipe_path, descriptor in zip(discover_recipes(recipes_root), catalog["experiments"], strict=True):
-        package_path = package_dir / f"{descriptor['package']['sha256']}.zip"
-        compile_package(recipe_path, package_path)
+        report = compile_package(recipe_path, package_dir / f"{descriptor['id']}.zip")
+        (package_dir / f"{descriptor['id']}.zip").rename(
+            package_dir / f"{report['packageSha256']}.zip")
+        descriptor["package"] = {"sha256": report["packageSha256"], "size": report["packageSizeBytes"]}
 
     data = {
         "schemaVersion": 1,
