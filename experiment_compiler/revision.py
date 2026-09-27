@@ -187,10 +187,12 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
 
     temporary = Path(tempfile.mkdtemp(prefix="compiled-experiment-revision-"))
     try:
-        recipe, files = _stage_recipe(recipe_path, temporary / "source")
+        recipe, files = _stage_recipe(recipe_path, temporary / "recipe-source")
         parent_identifier = _root_and_protocol(parent_crate)[0].get("identifier")
+        if not isinstance(parent_identifier, str) or not parent_identifier:
+            raise PackageError("Parent experiment has no stable RO-Crate identifier")
         parent_recipe_id = f"{parent_identifier[:60]}-attempt-{attempt_id}"
-        if recipe["id"] == parent_recipe_id:
+        if recipe["id"] in {parent_identifier, parent_recipe_id}:
             raise PackageError("A revision must use a new recipe ID")
         if "expectedPackage" in recipe:
             recipe.pop("expectedPackage")
@@ -240,12 +242,15 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
                       PROV + "wasDerivedFrom": {"@id": parent_member}})
         files["ro-crate-metadata.json"] = canonical(crate)
         files[parent_member] = parent_bytes
+        if "experiment.json" in files:
+            raise PackageError("Revision package member experiment.json conflicts with its source-owned recipe")
 
-        stage = temporary / "source"
+        stage = temporary / "closure"
+        stage.mkdir()
         members = []
         for archive_path, data in sorted(files.items()):
-            source = f"members/{archive_path}"
-            target = stage.joinpath(*source.split("/"))
+            source = archive_path
+            target = stage.joinpath(*safe_path(source).split("/"))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             members.append({"path": archive_path, "source": source,

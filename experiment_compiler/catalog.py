@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .core import (MAX_FILE, PackageError, bounded_read, json_value, load_recipe,
+from .core import (MAX_FILE, PackageError, _types, bounded_read, json_value, load_recipe,
                    validate_lifecycle_crate)
 
 
@@ -110,6 +110,20 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     closure = None
     if any(item["path"] == "dependency-closure.json" for item in recipe["members"]):
         closure = _json_member(recipe, recipe_path, "dependency-closure.json")
+    entities = {node["@id"]: node for node in graph if isinstance(node, dict) and isinstance(node.get("@id"), str)}
+    interpretations = []
+    for node in graph:
+        if not isinstance(node, dict) or "CreativeWork" not in _types(node.get("@type")):
+            continue
+        summary = node.get("abstract")
+        about = node.get("about")
+        about_ids = [item.get("@id") for item in (about if isinstance(about, list) else [about])
+                     if isinstance(item, dict)]
+        attempts = [identifier for identifier in about_ids
+                    if identifier in entities and "CreateAction" in _types(entities[identifier].get("@type"))]
+        if isinstance(summary, str) and summary.strip() and attempts:
+            interpretations.append({"record": node["@id"], "summary": summary,
+                                    "aboutAttempt": attempts[0]})
     return {
         "schemaVersion": 1,
         "id": recipe["id"],
@@ -121,7 +135,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "lifecycle": lifecycle,
         "contents": None if closure is None else closure.get("classifications"),
         "unavailablePrerequisites": None if closure is None else closure.get("classifications", {}).get("unavailable"),
-        "scientificInterpretation": None,
+        "scientificInterpretation": interpretations or None,
         "source": recipe["manifest"]["source"],
         "standards": recipe["manifest"]["standards"],
         "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],

@@ -1,6 +1,8 @@
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -8,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from experiment_compiler.core import MAX_FILE, PackageError, compile_package, json_value, load_recipe, sha256, verify_bytes
+from experiment_compiler.catalog import describe_catalog
+from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
 from experiment_compiler.runner import run_package
 
@@ -120,6 +124,22 @@ class RevisionTests(unittest.TestCase):
                 self.assertFalse(output.exists())
                 self.assertFalse(output.with_name(output.stem + ".source").exists())
 
+    def test_revision_rejects_reuse_of_parent_catalog_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            recipe_path = self._revision_recipe(directory)
+            recipe = json.loads(recipe_path.read_text())
+            recipe["id"] = "linear-regression-plan-v1"
+            recipe_path.write_text(json.dumps(recipe, indent=2) + "\n")
+            output = directory / "duplicate-id.zip"
+            with self.assertRaisesRegex(PackageError, "new recipe ID"):
+                revise_package(attempt, recipe_path, output,
+                               expected_sha256=sha256(attempt.read_bytes()),
+                               attempt_id=attempt_id)
+            self.assertFalse(output.exists())
+            self.assertFalse(output.with_name("duplicate-id.source").exists())
+
     def test_revision_rejects_oversized_parent_before_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -154,6 +174,73 @@ class RevisionTests(unittest.TestCase):
                     archive.writestr(name, content)
             with self.assertRaisesRegex(PackageError, "not an executed CreateAction"):
                 _read_parent_attempt(malformed.read_bytes(), attempt_id)
+
+    def test_finalization_binds_explicit_interpretation_and_review_to_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            attempt_bytes = attempt.read_bytes()
+            attempt_sha = sha256(attempt_bytes)
+            decision = directory / "decision.md"
+            decision.write_text("## Interpretation\nThe fixture run succeeded operationally; its scientific finding is inconclusive.\n")
+            review = directory / "review.md"
+            review.write_text("## Public release review\nThe fixture's synthetic inputs and outputs are shareable.\n")
+            final = directory / "final.zip"
+            result = finalize_package(
+                attempt, final, expected_sha256=attempt_sha, attempt_id=attempt_id,
+                experiment_id="linear-regression-final-v1", title="Final pipeline fixture",
+                decision_path=decision,
+                decision_summary="Operational success is recorded; the scientific finding remains inconclusive.",
+                review_path=review,
+                review_summary="The synthetic fixture closure is approved for this pipeline test.",
+                reviewer_name="Synthetic CI fixture reviewer",
+            )
+
+            self.assertEqual(attempt.read_bytes(), attempt_bytes)
+            self.assertEqual(result["parentPackageSha256"], attempt_sha)
+            recipe_path = final.with_name("final.source") / "experiment.json"
+            verified = verify_bytes(final.read_bytes(), recipe=load_recipe(recipe_path))
+            self.assertEqual(verified["lifecycle"]["creativeWorkStatus"], "Published")
+            self.assertEqual(verified["lifecycle"]["attemptCount"], 1)
+            profile_check = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/validate_current_ro_profiles.py"),
+                 str(recipe_path.parent)], capture_output=True, text=True)
+            self.assertEqual(profile_check.returncode, 0, profile_check.stdout + profile_check.stderr)
+            with zipfile.ZipFile(final) as archive:
+                crate = json_value(archive.read("ro-crate-metadata.json"))
+                decision_node = next(node for node in crate["@graph"]
+                                     if node.get("@id") == "evidence/scientific-decision.md")
+                review_node = next(node for node in crate["@graph"]
+                                   if node.get("@id") == "evidence/publication-review.md")
+                attempt_member = next(node for node in crate["@graph"]
+                                     if node.get("sha256") == attempt_sha)
+                self.assertEqual(archive.read(attempt_member["@id"]), attempt_bytes)
+                self.assertEqual(review_node["itemReviewed"]["@id"], attempt_member["@id"])
+                self.assertEqual(review_node["about"]["@id"], f"#attempt-{attempt_id}")
+                self.assertEqual(decision_node["about"]["@id"], f"#attempt-{attempt_id}")
+            catalog = describe_catalog(recipe_path.parent)
+            interpretation = catalog["experiments"][0]["scientificInterpretation"]
+            self.assertEqual(interpretation[0]["summary"],
+                             "Operational success is recorded; the scientific finding remains inconclusive.")
+
+    def test_finalization_rejects_missing_identity_without_writing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            decision = directory / "decision.md"
+            decision.write_text("An explicit source-authored decision.\n")
+            review = directory / "review.md"
+            review.write_text("An explicit source-authored review.\n")
+            final = directory / "final.zip"
+            with self.assertRaisesRegex(PackageError, "Selected attempt ID"):
+                finalize_package(
+                    attempt, final, expected_sha256=sha256(attempt.read_bytes()),
+                    attempt_id="wrong-attempt", experiment_id="linear-regression-final-v1",
+                    title="Final pipeline fixture", decision_path=decision,
+                    decision_summary="Explicit inconclusive interpretation.", review_path=review,
+                    review_summary="Explicit shareability review.", reviewer_name="Fixture reviewer")
+            self.assertFalse(final.exists())
+            self.assertFalse(final.with_name("final.source").exists())
 
 
 if __name__ == "__main__":
