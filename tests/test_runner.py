@@ -1,4 +1,6 @@
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,6 +71,65 @@ class RunnerBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "outside the reviewed path-only subset"):
             _admit_workflow(workflow, limits,
                             "python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3")
+
+    def test_cwl_document_references_are_rejected_before_subprocess_launch(self):
+        reference_documents = (
+            """cwlVersion: v1.2
+class: Workflow
+inputs: {}
+outputs: {}
+steps:
+  nested:
+    run: external-tool.cwl
+    in: {}
+    out: []
+""",
+            """cwlVersion: v1.2
+class: CommandLineTool
+$import: external-tool.cwl
+""",
+            """cwlVersion: v1.2
+class: CommandLineTool
+inputs:
+  config:
+    type: string
+    doc:
+      $include: external-description.txt
+""",
+        )
+        for workflow_text in reference_documents:
+            with self.subTest(workflow=workflow_text.splitlines()[1]), \
+                    tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                fixture = directory / "fixture"
+                shutil.copytree(ROOT / "examples/linear-regression-plan-v1", fixture)
+                workflow_path = fixture / "source/workflow.cwl"
+                workflow_path.write_text(workflow_text)
+                recipe_path = fixture / "experiment.json"
+                recipe = json.loads(recipe_path.read_text())
+                for member in recipe["members"]:
+                    if member["source"] == "source/workflow.cwl":
+                        workflow_bytes = workflow_path.read_bytes()
+                        member["sha256"] = sha256_bytes(workflow_bytes)
+                        member["size"] = len(workflow_bytes)
+                recipe_path.write_text(json.dumps(recipe, indent=2) + "\n")
+                plan = directory / "plan.zip"
+                built = compile_package(recipe_path, plan)
+                with patch.dict(os.environ, {
+                        "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                        "EXPERIMENT_RUNNER_SANDBOX": "test worker",
+                        "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                            '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                        "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+                        "TMPDIR": str(directory),
+                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                          return_value="3.2.20260720092025"), \
+                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                    with self.assertRaisesRegex(PackageError, "execution deferred:"):
+                        run_package(plan, directory / "result.zip",
+                                    expected_sha256=built["packageSha256"],
+                                    allow_workflow_execution=True)
+                    popen.assert_not_called()
 
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
