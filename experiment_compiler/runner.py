@@ -111,7 +111,7 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> set[str]
                 return
             seen.add(id(value))
             for key, child in value.items():
-                if key in {"run", "$import", "$include", "$schemas", "$graph", "$base"}:
+                if _is_document_reference_key(key):
                     raise PackageError(f"execution deferred: CWL document reference {key!r} is outside the single-tool subset")
                 reject_document_references(child, seen)
         elif isinstance(value, list):
@@ -246,9 +246,7 @@ def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None
             if id(value) in seen:
                 return
             seen.add(id(value))
-            if any(key in directive_keys or
-                   isinstance(key, str) and (key.endswith("#overrides") or key.endswith("#tool"))
-                   for key in value):
+            if any(key in directive_keys or _is_document_reference_key(key) for key in value):
                 raise PackageError("execution deferred: job order contains a CWL document reference or override")
             if value.get("class") == "File":
                 files.append(value)
@@ -274,6 +272,16 @@ def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None
             raise PackageError("execution deferred: unsafe job File path") from exc
         if f"experiment/{relative}" not in payload:
             raise PackageError(f"execution deferred: job File input is not embedded: {relative}")
+
+
+def _is_document_reference_key(key: Any) -> bool:
+    if key in {"run", "$import", "$include", "$schemas", "$graph", "$base",
+               "cwl:tool", "cwltool:overrides"}:
+        return True
+    if not isinstance(key, str):
+        return False
+    return any(key.endswith(f"#{suffix}") for suffix in
+               ("run", "import", "include", "schemas", "graph", "base", "tool", "overrides"))
 
 
 def _materialize(root: Path, payload: dict[str, bytes]) -> None:

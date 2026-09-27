@@ -96,6 +96,10 @@ inputs:
     doc:
       $include: external-description.txt
 """,
+            """cwlVersion: v1.2
+class: CommandLineTool
+"https://w3id.org/cwl/cwl#schemas": ["https://example.invalid/schema.yml"]
+""",
         )
         for workflow_text in reference_documents:
             with self.subTest(workflow=workflow_text.splitlines()[1]), \
@@ -139,6 +143,8 @@ inputs:
             '"cwltool:overrides": []\n' + base_job,
             '"cwl:tool": "external-tool.cwl"\n' + base_job,
             '"https://w3id.org/cwl/cwl#overrides": []\n' + base_job,
+            '"https://w3id.org/cwl/cwl#import": "https://example.invalid/job.yml"\n' + base_job,
+            base_job.replace("data:\n", 'data:\n  "https://w3id.org/cwl/cwl#include": "https://example.invalid/data.yml"\n'),
         )
         for job_text in job_documents:
             with self.subTest(job=job_text.splitlines()[0]), tempfile.TemporaryDirectory() as temporary:
