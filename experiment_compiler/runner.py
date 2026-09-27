@@ -161,7 +161,8 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> None:
                 wall_seconds > min(numeric_limits["wallSeconds"], 86400)):
             raise PackageError("execution deferred: CWL ToolTimeLimit exceeds worker wall-time limit")
         for value_from in _values_for_key(tool, "valueFrom"):
-            if not re.fullmatch(r"\$\((?:inputs\.[A-Za-z][A-Za-z0-9_]*\.path|runtime\.outdir)\)", value_from):
+            if re.search(r"\$\(|\$\{", value_from) and not re.fullmatch(
+                    r"\$\((?:inputs\.[A-Za-z][A-Za-z0-9_]*\.path|runtime\.outdir)\)", value_from):
                 raise PackageError("execution deferred: CWL expression is outside the reviewed path-only subset")
 
 

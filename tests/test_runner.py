@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import _collect_tree, _require_bounded_tmpfs, run_package
+from experiment_compiler.runner import _admit_workflow, _collect_tree, _require_bounded_tmpfs, run_package
 from experiment_compiler.runner import sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +45,19 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "DiskUsage", (), {"total": 32 * 1024 * 1024})()):
                 with self.assertRaisesRegex(PackageError, "outside the declared tmpfs"):
                     _require_bounded_tmpfs(path, root, 64)
+
+    def test_workflow_admission_allows_literal_arguments_and_rejects_other_expressions(self):
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / "examples/linear-regression-frozen-lifecycle-v1/source/workflow.cwl")
+                                  .read_text())
+        limits = {"cores": 1, "ramMiB": 64, "tmpdirMiB": 64, "outdirMiB": 64, "wallSeconds": 120}
+        _admit_workflow(workflow, limits,
+                        "python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3")
+        workflow["arguments"][1]["valueFrom"] = "$(inputs.reproduce.contents)"
+        with self.assertRaisesRegex(PackageError, "outside the reviewed path-only subset"):
+            _admit_workflow(workflow, limits,
+                            "python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3")
 
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:

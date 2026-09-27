@@ -50,7 +50,7 @@ jobs:
             mkdir -p "$output_dir"
             PLAN_SHA256="$(cut -d ' ' -f 1 "$RUNNER_TEMP/$experiment_id.plan.sha256")"
             EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
-            EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; /dev/shm tmp/out directories' \
+            EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
             EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
             EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
             TMPDIR="$TMPFS_ROOT" \
