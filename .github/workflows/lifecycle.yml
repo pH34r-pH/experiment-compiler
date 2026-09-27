@@ -77,6 +77,64 @@ jobs:
           assert catalog["experiments"][0]["lifecycle"]["processRunCrate"] is True
           print(json.dumps(details, indent=2))
           PY
+            if [ "$experiment_id" = "linear-regression-plan-v1" ]; then
+              revision_source="$RUNNER_TEMP/linear-regression-plan-v2-source"
+              revision_package="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/plan.zip"
+              revision_attempt="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/attempt.zip"
+              mkdir -p "$(dirname "$revision_package")"
+              python scripts/create_iteration_fixture.py \
+                --source examples/linear-regression-plan-v1 \
+                --output-dir "$revision_source" \
+                --id linear-regression-plan-v2
+              ATTEMPT_ID="$(PACKAGE_PATH="$output_dir/result.zip" python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(Path(os.environ["PACKAGE_PATH"])) as archive:
+              name = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+              print(json.loads(archive.read(name))["attemptId"])
+          PY
+          )"
+              ATTEMPT_SHA256="$(sha256sum "$output_dir/result.zip" | cut -d ' ' -f 1)"
+              python -m experiment_compiler revise "$output_dir/result.zip" \
+                --expected-sha256 "$ATTEMPT_SHA256" --attempt-id "$ATTEMPT_ID" \
+                --recipe "$revision_source/experiment.json" --output "$revision_package"
+              python -m experiment_compiler verify "$revision_package" \
+                --recipe "$revision_package.source/experiment.json"
+              REVISION_SHA256="$(sha256sum "$revision_package" | cut -d ' ' -f 1)"
+              REVISION_ID="linear-regression-plan-v2"
+              EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
+              EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
+              EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
+              EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
+              TMPDIR="$TMPFS_ROOT" \
+                python -m experiment_compiler.runner_cli run "$revision_package" \
+                  --output "$revision_attempt" --expected-sha256 "$REVISION_SHA256" --allow-workflow-execution
+              python -m experiment_compiler verify "$revision_attempt" \
+                --recipe "$revision_attempt.source/experiment.json"
+              python -m experiment_compiler catalog "$revision_attempt.source" \
+                --output "$revision_attempt.catalog.json"
+              PACKAGE_PATH="$revision_attempt" CATALOG_PATH="$revision_attempt.catalog.json" \
+              FIRST_ATTEMPT_PATH="$output_dir/result.zip" python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(Path(os.environ["PACKAGE_PATH"])) as archive:
+              receipt_name = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+              receipt = json.loads(archive.read(receipt_name))
+              assert receipt["status"] == "succeeded", receipt
+              assert receipt["planPackageSha256"]
+              names = archive.namelist()
+              assert any(name.endswith("/parent-attempt-package.zip") for name in names)
+          with zipfile.ZipFile(Path(os.environ["FIRST_ATTEMPT_PATH"])) as archive:
+              old_receipt_name = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+              old_receipt = json.loads(archive.read(old_receipt_name))
+          catalog = json.loads(Path(os.environ["CATALOG_PATH"]).read_text())
+          assert catalog["experiments"][0]["lifecycle"]["attemptCount"] == 1
+          assert old_receipt["attemptId"] != receipt["attemptId"]
+          print(json.dumps({"parentAttemptId": old_receipt["attemptId"],
+                            "revisedAttemptId": receipt["attemptId"],
+                            "status": receipt["status"]}, indent=2))
+          PY
+            fi
           done
       - name: Retain final package and catalog source closure
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

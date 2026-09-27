@@ -6,6 +6,7 @@ from pathlib import Path
 from . import __version__
 from .catalog import describe_catalog, describe_recipe
 from .core import PackageError, MAX_TOTAL, bounded_read, canonical, compile_package, load_recipe, verify_bytes, write_once
+from .revision import revise_package
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,6 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("package", type=Path)
     check.add_argument("--recipe", type=Path)
     check.add_argument("--expected-sha256")
+    revise = commands.add_parser("revise", help="compile a new plan revision from one verified attempt")
+    revise.add_argument("parent_package", type=Path)
+    revise.add_argument("--expected-sha256", required=True,
+                        help="exact digest of the parent attempt package")
+    revise.add_argument("--attempt-id", required=True,
+                        help="explicit attempt ID whose protocol is being revised")
+    revise.add_argument("--recipe", required=True, type=Path,
+                        help="source-owned recipe for the new prospective plan")
+    revise.add_argument("--output", required=True, type=Path,
+                        help="new immutable plan ZIP; writes a sibling .source closure")
     for command in (build, check):
         command.add_argument("--receipt", type=Path, help="write an integrity-only JSON receipt")
     args = parser.parse_args(argv)
@@ -43,6 +54,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.receipt and args.receipt.resolve() == output.resolve():
                 raise PackageError("Receipt must not replace package")
             result = compile_package(args.recipe, output)
+        elif args.command == "revise":
+            protected = {args.parent_package.resolve(), args.recipe.resolve()}
+            if args.output.resolve() in protected:
+                raise PackageError("Revision output must not replace its parent package or source recipe")
+            result = revise_package(args.parent_package, args.recipe, args.output,
+                                    expected_sha256=args.expected_sha256,
+                                    attempt_id=args.attempt_id)
         else:
             if args.receipt and args.receipt.resolve() == args.package.resolve():
                 raise PackageError("Receipt must not replace package")
