@@ -84,33 +84,44 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         workflow_document = yaml.safe_load(workflow)
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse worker limits or CWL: {exc}") from exc
-    _admit_workflow(workflow_document, limits, runner.get("workerImageBase"))
+    input_ids = _admit_workflow(workflow_document, limits, runner.get("workerImageBase"))
     try:
         job_document = yaml.safe_load(payload["experiment/job.yml"])
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
-    _admit_job(job_document, payload)
+    _admit_job(job_document, payload, input_ids)
     return closure, runner, limits, tmpfs_root
 
 
-def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> None:
+def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> set[str]:
     # This MVP intentionally supports one self-contained CommandLineTool. A
     # Workflow can point `run` at another CWL document; inspecting only the
     # entrypoint would let that document bypass all requirements below.
     if not isinstance(document, dict) or document.get("class") != "CommandLineTool":
         raise PackageError("execution deferred: only a single top-level CWL CommandLineTool is admitted")
+    declared_inputs = document.get("inputs")
+    if not isinstance(declared_inputs, dict) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name)
+            for name in declared_inputs):
+        raise PackageError("execution deferred: CommandLineTool inputs must be a mapping with simple names")
 
-    def reject_document_references(value: Any) -> None:
+    def reject_document_references(value: Any, seen: set[int]) -> None:
         if isinstance(value, dict):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
             for key, child in value.items():
-                if key in {"run", "$import", "$include", "$schemas", "$graph"}:
+                if key in {"run", "$import", "$include", "$schemas", "$graph", "$base"}:
                     raise PackageError(f"execution deferred: CWL document reference {key!r} is outside the single-tool subset")
-                reject_document_references(child)
+                reject_document_references(child, seen)
         elif isinstance(value, list):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
             for child in value:
-                reject_document_references(child)
+                reject_document_references(child, seen)
 
-    reject_document_references(document)
+    reject_document_references(document, set())
     required_limits = {"cores", "ramMiB", "tmpdirMiB", "outdirMiB", "wallSeconds"}
     if not isinstance(limits, dict) or not required_limits <= set(limits):
         raise PackageError("worker must declare CPU, memory, temporary/output storage and wall-time limits")
@@ -119,17 +130,23 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> None:
         raise PackageError("worker resource limits must be positive numbers")
     tools: list[dict] = []
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, seen: set[int]) -> None:
         if isinstance(value, dict):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
             if value.get("class") == "CommandLineTool":
                 tools.append(value)
             for child in value.values():
-                walk(child)
+                walk(child, seen)
         elif isinstance(value, list):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
             for child in value:
-                walk(child)
+                walk(child, seen)
 
-    walk(document)
+    walk(document, set())
     if not tools:
         raise PackageError("execution admission requires at least one CWL CommandLineTool")
     for tool in tools:
@@ -183,41 +200,70 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> None:
             if re.search(r"\$\(|\$\{", value_from) and not re.fullmatch(
                     r"\$\((?:inputs\.[A-Za-z][A-Za-z0-9_]*\.path|runtime\.outdir)\)", value_from):
                 raise PackageError("execution deferred: CWL expression is outside the reviewed path-only subset")
+    return set(declared_inputs)
 
 
-def _values_for_key(value: Any, key: str) -> list[str]:
+def _values_for_key(value: Any, key: str, _seen: set[int] | None = None) -> list[str]:
+    seen = set() if _seen is None else _seen
     found: list[str] = []
     if isinstance(value, dict):
+        if id(value) in seen:
+            return found
+        seen.add(id(value))
         if key in value:
             if not isinstance(value[key], str):
                 raise PackageError(f"CWL {key} values must be strings")
             found.append(value[key])
         for child in value.values():
-            found.extend(_values_for_key(child, key))
+            found.extend(_values_for_key(child, key, seen))
     elif isinstance(value, list):
+        if id(value) in seen:
+            return found
+        seen.add(id(value))
         for child in value:
-            found.extend(_values_for_key(child, key))
+            found.extend(_values_for_key(child, key, seen))
     return found
 
 
-def _admit_job(job: Any, payload: dict[str, bytes]) -> None:
+def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None:
     if not isinstance(job, dict):
         raise PackageError("execution admission requires a mapping CWL job document")
+    if any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in job):
+        raise PackageError("execution deferred: job order keys must be declared simple input names")
+    unknown_inputs = set(job) - input_ids
+    if unknown_inputs:
+        raise PackageError(f"execution deferred: job order contains undeclared inputs or directives: {sorted(unknown_inputs)}")
     files: list[dict] = []
+    directive_keys = {
+        "$import", "$include", "$schemas", "$graph", "$base",
+        "cwl:tool", "cwltool:overrides",
+        "https://w3id.org/cwl/cwl#tool", "https://w3id.org/cwl/cwl#overrides",
+        "https://w3id.org/cwl/cwl#base",
+    }
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, seen: set[int]) -> None:
         if isinstance(value, dict):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
+            if any(key in directive_keys or
+                   isinstance(key, str) and (key.endswith("#overrides") or key.endswith("#tool"))
+                   for key in value):
+                raise PackageError("execution deferred: job order contains a CWL document reference or override")
             if value.get("class") == "File":
                 files.append(value)
             if value.get("class") == "Directory":
                 raise PackageError("execution deferred: Directory inputs are outside this adapter's reviewed subset")
             for child in value.values():
-                walk(child)
+                walk(child, seen)
         elif isinstance(value, list):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
             for child in value:
-                walk(child)
+                walk(child, seen)
 
-    walk(job)
+    walk(job, set())
     for item in files:
         path = item.get("path")
         if set(item) - {"class", "path", "basename", "format"} or not isinstance(path, str):
