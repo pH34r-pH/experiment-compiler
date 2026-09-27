@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install the pinned workflow runner
-        run: python -m pip install --disable-pip-version-check "cwltool==3.2.20260720092025"
+        run: python -m pip install --disable-pip-version-check '.[runner]' "cwltool==3.2.20260720092025"
       - name: Pre-pull the digest-pinned CWL tool image
         run: docker pull 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3'
       - name: Build the reviewed plan package
