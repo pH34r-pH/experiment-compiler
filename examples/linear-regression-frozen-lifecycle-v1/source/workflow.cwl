@@ -29,8 +29,16 @@ arguments:
   - position: 13
     valueFrom: $(inputs.acceptance.path)
   - position: 14
-    valueFrom: --expected-result
+    valueFrom: --environment
   - position: 15
+    valueFrom: $(inputs.environment.path)
+  - position: 16
+    valueFrom: --protocol
+  - position: 17
+    valueFrom: $(inputs.protocol.path)
+  - position: 18
+    valueFrom: --expected-result
+  - position: 19
     valueFrom: $(inputs.expectedResult.path)
 inputs:
   reproduce:
@@ -46,6 +54,10 @@ inputs:
   acceptance:
     type: File
   expectedResult:
+    type: File
+  environment:
+    type: File
+  protocol:
     type: File
 requirements:
   DockerRequirement:

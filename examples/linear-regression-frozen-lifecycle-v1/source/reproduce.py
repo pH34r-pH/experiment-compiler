@@ -18,6 +18,8 @@ def main(argv=None):
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--configuration", type=Path, required=True)
     parser.add_argument("--acceptance", type=Path, required=True)
+    parser.add_argument("--environment", type=Path, required=True)
+    parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--expected-result", type=Path, required=True)
     args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -29,7 +31,10 @@ def main(argv=None):
             "data.csv": args.data,
             "experiment-config.json": args.configuration,
             "acceptance.json": args.acceptance,
+            "environment.json": args.environment,
+            "protocol.md": args.protocol,
             "expected-result.json": args.expected_result,
+            "reproduce.py": Path(__file__),
         }
         for name, source in sources.items():
             shutil.copyfile(source, root / name)

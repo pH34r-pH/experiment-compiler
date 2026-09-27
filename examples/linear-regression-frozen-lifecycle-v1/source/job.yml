@@ -19,3 +19,9 @@ acceptance:
 expectedResult:
   class: File
   path: expected-result.json
+environment:
+  class: File
+  path: environment.json
+protocol:
+  class: File
+  path: protocol.md
