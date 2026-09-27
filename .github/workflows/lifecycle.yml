@@ -82,6 +82,7 @@ jobs:
               revision_package="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/plan.zip"
               revision_package_source="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/plan.source"
               revision_attempt="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/attempt.zip"
+              revision_attempt_source="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/attempt.source"
               mkdir -p "$(dirname "$revision_package")"
               python scripts/create_iteration_fixture.py \
                 --source examples/linear-regression-plan-v1 \
@@ -110,8 +111,8 @@ jobs:
                 python -m experiment_compiler.runner_cli run "$revision_package" \
                   --output "$revision_attempt" --expected-sha256 "$REVISION_SHA256" --allow-workflow-execution
               python -m experiment_compiler verify "$revision_attempt" \
-                --recipe "$revision_attempt.source/experiment.json"
-              python -m experiment_compiler catalog "$revision_attempt.source" \
+                --recipe "$revision_attempt_source/experiment.json"
+              python -m experiment_compiler catalog "$revision_attempt_source" \
                 --output "$revision_attempt.catalog.json"
               PACKAGE_PATH="$revision_attempt" CATALOG_PATH="$revision_attempt.catalog.json" \
               FIRST_ATTEMPT_PATH="$output_dir/result.zip" python - <<'PY'
