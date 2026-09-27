@@ -19,6 +19,17 @@ class RunnerBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "explicit opt-in"):
             run_package(Path("does-not-exist.zip"), Path("result.zip"), expected_sha256="0" * 64)
 
+    def test_blocked_muon_plan_is_rejected_before_runner_requirements(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            package = directory / "muon-plan.zip"
+            output = directory / "muon-result.zip"
+            built = compile_package(ROOT / "examples/muon-comparison-plan-v1/experiment.json", package)
+            with self.assertRaisesRegex(PackageError, "unavailable prerequisites"):
+                run_package(package, output, expected_sha256=built["packageSha256"],
+                            allow_workflow_execution=True)
+            self.assertFalse(output.exists())
+
     def test_collection_enforces_aggregate_limit(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

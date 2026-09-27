@@ -1,0 +1,56 @@
+{
+  "buildRecipeVersion": 1,
+  "id": "muon-comparison-plan-v1",
+  "title": "Prospective Muon optimizer comparison candidate",
+  "profile": "compiled-experiment-lifecycle-v1",
+  "manifest": {
+    "schemaVersion": 2,
+    "packageType": "compiled-experiment",
+    "profile": "compiled-experiment-lifecycle-v1",
+    "source": {
+      "repository": "pH34r-pH/experiment-compiler",
+      "commit": "5e784716c24ce50f5a2f7425c672a7d218e15813"
+    },
+    "standards": {
+      "roCrate": "1.3",
+      "processRunCrate": "0.6",
+      "cwl": "1.2"
+    },
+    "evidence": {
+      "status": "prospective-only",
+      "run": "none"
+    }
+  },
+  "members": [
+    {
+      "path": "dependency-closure.json",
+      "source": "dependency-closure.json",
+      "sha256": "d43c51c2f1c721af7bef911b2bb0853914cad41d3990cf39f3f3b467b308e9f1",
+      "size": 1777
+    },
+    {
+      "path": "experiment/README.md",
+      "source": "source/README.md",
+      "sha256": "704ac37878ccd1ffe2d1567b0e537941d9d5b1070bd97a87c78ec754339f4c6e",
+      "size": 1833
+    },
+    {
+      "path": "experiment/protocol.md",
+      "source": "source/protocol.md",
+      "sha256": "a871b5ec08c9aa1b5666b333f5ceed5e14c25c94137d731097d3a72e06c14f8f",
+      "size": 2692
+    },
+    {
+      "path": "experiment/resource-estimates.json",
+      "source": "source/resource-estimates.json",
+      "sha256": "1084bbd30b0059d3a7170761c27c6065c4c94ed5264d28ee9f1dd5065541c7da",
+      "size": 1067
+    },
+    {
+      "path": "ro-crate-metadata.json",
+      "source": "ro-crate-metadata.json",
+      "sha256": "ab4015526cb6a3e170744de4d2fe6d855685031eb8afe3f9ee4f0887a18bfc1c",
+      "size": 4164
+    }
+  ]
+}
