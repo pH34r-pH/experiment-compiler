@@ -36,8 +36,7 @@ def _read_package(data: bytes, expected_sha256: str) -> tuple[dict, dict[str, by
 
 
 def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
-    for required in ("experiment/workflow.cwl", "experiment/job.yml", "experiment/runner.json",
-                     "dependency-closure.json", "ro-crate-metadata.json"):
+    for required in ("dependency-closure.json", "ro-crate-metadata.json"):
         if required not in payload:
             raise PackageError(f"execution admission requires packaged {required}")
     closure = json_value(payload["dependency-closure.json"])
@@ -50,6 +49,9 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
     if closure.get("runtimeNetworkRequired") is not False:
         raise PackageError("execution deferred: local adapter requires a declared no-network protocol")
+    for required in ("experiment/workflow.cwl", "experiment/job.yml", "experiment/runner.json"):
+        if required not in payload:
+            raise PackageError(f"execution deferred: plan has no admitted executable component {required}")
     runner = json_value(payload["experiment/runner.json"])
     if not isinstance(runner, dict) or runner.get("runner") != "cwltool" or not isinstance(runner.get("version"), str):
         raise PackageError("runner.json must pin the cwltool runner and exact version")

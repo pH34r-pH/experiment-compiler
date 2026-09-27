@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "status": "unknown",
+  "summary": "No resource estimate or run authorization exists. The exact baseline, Muon implementation, model/data closure, and backend pilot are unavailable in this packet.",
+  "basis": {
+    "type": "no measurement or analytical bound",
+    "description": "A bounded pilot cannot be sized until the source owner selects the exact treatment and the qualified baseline establishes the workload.",
+    "uncertainty": "unbounded until the missing protocol and backend are specified"
+  },
+  "campaign": {
+    "arms": "unknown",
+    "seedsPerArm": "unknown",
+    "tuningRuns": "unknown",
+    "totalTrainingRuns": "unknown"
+  },
+  "resources": {
+    "cpuCores": "unknown",
+    "acceleratorType": "unknown",
+    "acceleratorCount": "unknown",
+    "vramBytes": "unknown",
+    "ramBytes": "unknown",
+    "scratchBytes": "unknown",
+    "outputAndCheckpointBytes": "unknown",
+    "wallSecondsPerRun": "unknown",
+    "totalWallSeconds": "unknown"
+  },
+  "admission": "blocked while any required capability or budget is unknown"
+}

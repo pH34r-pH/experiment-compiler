@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "experimentId": "muon-comparison-plan-v1",
+  "runtimeNetworkRequired": false,
+  "classifications": {
+    "embedded": [
+      {"item": "prospective protocol", "path": "experiment/protocol.md"},
+      {"item": "resource estimate and admission status", "path": "experiment/resource-estimates.json"}
+    ],
+    "external": [
+      {"item": "public baseline package and replay acceptance", "url": "https://github.com/pH34r-pH/experiment-compiler/issues/18", "availability": "not included in this package"},
+      {"item": "public optimizer diagnostics and evidence status", "url": "https://github.com/pH34r-pH/experiment-compiler/issues/38", "availability": "not included in this package"},
+      {"item": "public prospective optimizer comparison direction", "url": "https://github.com/pH34r-pH/experiment-compiler/issues/59", "availability": "metadata reference only"}
+    ],
+    "publicImmutableReferences": [],
+    "unavailable": [
+      {"item": "qualified exact baseline implementation, inputs, and replay evidence", "dependency": "experiment-compiler#18"},
+      {"item": "reviewed optimizer-semantic implementation and saved diagnostics evidence", "dependency": "experiment-compiler#38"},
+      {"item": "source-owner-selected Muon implementation, version, and parameter-group policy", "availability": "not present in public source closure"},
+      {"item": "licensed model/data/evaluation bytes and frozen splits", "availability": "not included; availability and redistribution status unresolved"},
+      {"item": "backend pilot and complete campaign resource budget", "availability": "unknown"},
+      {"item": "frozen seeds, selection policy, invalidation, stopping, and decision rules", "availability": "not yet reviewed or frozen"}
+    ]
+  }
+}

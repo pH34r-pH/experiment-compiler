@@ -325,16 +325,24 @@ class CompilerTests(unittest.TestCase):
         recipes = discover_recipes(ROOT / "examples")
         self.assertEqual(recipes, [ROOT / "examples/linear-regression-frozen-lifecycle-v1/experiment.json",
                                    ROOT / "examples/linear-regression-plan-v1/experiment.json",
-                                   SELF_CONTAINED / "experiment.json"])
+                                   SELF_CONTAINED / "experiment.json",
+                                   ROOT / "examples/muon-comparison-plan-v1/experiment.json"])
         catalog = describe_catalog(ROOT / "examples")
         self.assertEqual(catalog["schemaVersion"], 1)
         self.assertEqual([item["id"] for item in catalog["experiments"]],
                          ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
-                          "stdlib-linear-regression-v1-compiled-experiment"])
+                          "stdlib-linear-regression-v1-compiled-experiment", "muon-comparison-plan-v1"])
         self.assertIsNone(catalog["experiments"][1]["package"])
         self.assertEqual(catalog["experiments"][1]["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(catalog["experiments"][2]["package"]["sha256"],
                          "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
+        muon = catalog["experiments"][3]
+        self.assertEqual(muon["lifecycle"]["creativeWorkStatus"], "Draft")
+        self.assertEqual(muon["lifecycle"]["attemptCount"], 0)
+        self.assertEqual(muon["lifecycle"]["potentialActionCount"], 1)
+        self.assertFalse(muon["lifecycle"]["processRunCrate"])
+        self.assertTrue(muon["unavailablePrerequisites"])
+        self.assertTrue(all(item["value"] == "unknown" for item in muon["lifecycle"]["resourceMeasurements"]))
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")
