@@ -40,7 +40,10 @@ jobs:
       - name: Run package without secrets; cwltool constrains the task container
         run: |
           set -euo pipefail
-          mkdir -p /dev/shm/experiment-compiler-cwl
+          TMPFS_ROOT=/mnt/experiment-compiler-cwl
+          sudo mkdir -p "$TMPFS_ROOT"
+          sudo mount -t tmpfs -o size=64m,mode=1777 tmpfs "$TMPFS_ROOT"
+          sudo chown "$(id -u):$(id -g)" "$TMPFS_ROOT"
           TOOL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3')"
           for experiment_id in linear-regression-plan-v1 linear-regression-frozen-lifecycle-v1; do
             output_dir="$RUNNER_TEMP/runner-output/$experiment_id"
@@ -49,8 +52,8 @@ jobs:
             EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
             EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; /dev/shm tmp/out directories' \
             EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
-            EXPERIMENT_RUNNER_TMPFS_ROOT=/dev/shm/experiment-compiler-cwl \
-            TMPDIR=/dev/shm/experiment-compiler-cwl \
+            EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
+            TMPDIR="$TMPFS_ROOT" \
               python -m experiment_compiler.runner_cli run "$RUNNER_TEMP/$experiment_id.plan.zip" \
                 --output "$output_dir/result.zip" --expected-sha256 "$PLAN_SHA256" --allow-workflow-execution
             sha256sum -c "$RUNNER_TEMP/$experiment_id.plan.sha256"
