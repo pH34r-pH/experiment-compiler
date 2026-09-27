@@ -8,6 +8,30 @@ arguments:
     valueFrom: --output-dir
   - position: 3
     valueFrom: $(runtime.outdir)
+  - position: 4
+    valueFrom: --implementation
+  - position: 5
+    valueFrom: $(inputs.implementation.path)
+  - position: 6
+    valueFrom: --tests
+  - position: 7
+    valueFrom: $(inputs.tests.path)
+  - position: 8
+    valueFrom: --data
+  - position: 9
+    valueFrom: $(inputs.data.path)
+  - position: 10
+    valueFrom: --configuration
+  - position: 11
+    valueFrom: $(inputs.configuration.path)
+  - position: 12
+    valueFrom: --acceptance
+  - position: 13
+    valueFrom: $(inputs.acceptance.path)
+  - position: 14
+    valueFrom: --expected-result
+  - position: 15
+    valueFrom: $(inputs.expectedResult.path)
 inputs:
   reproduce:
     type: File
