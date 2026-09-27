@@ -99,6 +99,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python }}
+      - name: Install the runner's bounded YAML parser dependency
+        run: python -m pip install --disable-pip-version-check '.[runner]'
       - name: Offline tests including historical checksum and hostile inputs
         run: python -m unittest discover -s tests -v
       - name: Exercise self-contained scientific source
