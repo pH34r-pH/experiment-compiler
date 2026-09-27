@@ -1,0 +1,15 @@
+runPlan:
+  class: File
+  path: run_plan.py
+data:
+  class: File
+  path: data.csv
+configuration:
+  class: File
+  path: experiment-config.json
+acceptance:
+  class: File
+  path: acceptance.json
+implementation:
+  class: File
+  path: run_experiment.py

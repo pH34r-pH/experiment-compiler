@@ -1,0 +1,107 @@
+{
+  "buildRecipeVersion": 1,
+  "id": "linear-regression-plan-v1",
+  "manifest": {
+    "evidence": {},
+    "packageType": "compiled-experiment",
+    "profile": "compiled-experiment-lifecycle-v1",
+    "schemaVersion": 2,
+    "source": {
+      "commit": "a4bebe3fff748268f037e5fa622b51ad40322a91",
+      "repository": "pH34r-pH/experiment-compiler"
+    },
+    "standards": {
+      "cwl": "1.2",
+      "processRunCrate": "0.6",
+      "roCrate": "1.3"
+    }
+  },
+  "members": [
+    {
+      "path": "dependency-closure.json",
+      "sha256": "cb3d517b51108eceea0b623a89b69f8d9eebdfb191e0a2764ae674a60ccb66d1",
+      "size": 693,
+      "source": "dependency-closure.json"
+    },
+    {
+      "path": "experiment/DATA-LICENSE.md",
+      "sha256": "ff2b1e2390be32ad4e9b655ade81c33562255a07135fb9451803f411fdd32906",
+      "size": 301,
+      "source": "source/DATA-LICENSE.md"
+    },
+    {
+      "path": "experiment/README.md",
+      "sha256": "7a8e63e830c4bf40eb98a250c7a4e058504be5e2e0bf262942d7f5c2c93ad247",
+      "size": 993,
+      "source": "source/README.md"
+    },
+    {
+      "path": "experiment/acceptance.json",
+      "sha256": "1d42b10f65478f5caa27966eacd9772e12aa8b4a3d50ebf4249550921249a85d",
+      "size": 146,
+      "source": "source/acceptance.json"
+    },
+    {
+      "path": "experiment/data.csv",
+      "sha256": "58840d311a5d00055846ab5384fd025c46d15c85a542a18f9bf38fc3fdac2c16",
+      "size": 50,
+      "source": "source/data.csv"
+    },
+    {
+      "path": "experiment/environment.json",
+      "sha256": "c1a6abf0b8d705806fd1f5dd8927a3f3ff5928ba1540fa1562508ab8452ab36b",
+      "size": 240,
+      "source": "source/environment.json"
+    },
+    {
+      "path": "experiment/experiment-config.json",
+      "sha256": "f9fbaccb145695ed87e4185f0c5e097ef9a8617035182696b7908a1d46ecd013",
+      "size": 89,
+      "source": "source/experiment-config.json"
+    },
+    {
+      "path": "experiment/job.yml",
+      "sha256": "784abceef063ed9226f938bfdb88dc5eefa88c460cd53ba7d97aa9173b65eb8b",
+      "size": 246,
+      "source": "source/job.yml"
+    },
+    {
+      "path": "experiment/protocol.md",
+      "sha256": "02ba6819221b79db4dc927c65d073d657397df2c4e4f4a1b8e59c950b4ca36d3",
+      "size": 1010,
+      "source": "source/protocol.md"
+    },
+    {
+      "path": "experiment/run_experiment.py",
+      "sha256": "59d70c368ae09f79d9514ea6faf50d550567b9e06fccd6b64dfba1ed02decbda",
+      "size": 6473,
+      "source": "source/run_experiment.py"
+    },
+    {
+      "path": "experiment/run_plan.py",
+      "sha256": "92308fac7f650aa7bf972379b68f60c0f9efd186dc97a28e1a5fecf5128a0f89",
+      "size": 1039,
+      "source": "source/run_plan.py"
+    },
+    {
+      "path": "experiment/runner.json",
+      "sha256": "6dae58f5ef12c1f68d6fde0f5eca035cfdd76dd9d021c158d12530c9543373e1",
+      "size": 239,
+      "source": "source/runner.json"
+    },
+    {
+      "path": "experiment/workflow.cwl",
+      "sha256": "29cde21bd23ae5dc8ae793f859c8326b3c240c1d43ab69c65fd9cb2f4f467a9e",
+      "size": 1006,
+      "source": "source/workflow.cwl"
+    },
+    {
+      "path": "ro-crate-metadata.json",
+      "sha256": "b8cd9ac9958b0fd541003c93f8165c4372a5e7a129e910f33b5e3e6a8f3a94b6",
+      "size": 4538,
+      "source": "ro-crate-metadata.json"
+    }
+  ],
+  "profile": "compiled-experiment-lifecycle-v1",
+  "title": "Prospective linear-regression pipeline fixture"
+}

@@ -1,0 +1,31 @@
+{
+  "acceptancePassed": true,
+  "experimentId": "stdlib-linear-regression-v1",
+  "metrics": {
+    "evalMse": {
+      "denominator": 18446744073709551616,
+      "numerator": 13
+    },
+    "trainMse": {
+      "denominator": 18446744073709551616,
+      "numerator": 5
+    }
+  },
+  "model": "y_hat = weight * x + bias",
+  "parameters": {
+    "bias": {
+      "denominator": 4294967296,
+      "numerator": 4294967295
+    },
+    "weight": {
+      "denominator": 2147483648,
+      "numerator": 4294967295
+    }
+  },
+  "schemaVersion": 1,
+  "training": {
+    "arithmetic": "exact-rational",
+    "learningRate": "1/4",
+    "steps": 32
+  }
+}

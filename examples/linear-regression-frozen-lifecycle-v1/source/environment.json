@@ -1,0 +1,10 @@
+{
+  "accelerator": "none",
+  "dependencies": [],
+  "networkRequired": false,
+  "numericSemantics": "Python fractions.Fraction exact rational arithmetic",
+  "python": ">=3.11,<4",
+  "randomness": "none",
+  "schemaVersion": 1,
+  "standardLibraryOnly": true
+}

@@ -1,0 +1,6 @@
+{
+  "evalMseMaximum": "1/1000000000000000",
+  "targetBias": "1",
+  "targetParameterAbsoluteErrorMaximum": "1/1000000000",
+  "targetWeight": "2"
+}

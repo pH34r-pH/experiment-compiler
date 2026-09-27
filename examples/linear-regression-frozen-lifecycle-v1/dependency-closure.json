@@ -1,0 +1,48 @@
+{
+  "classifications": {
+    "embedded": [
+      {
+        "item": "data.csv",
+        "path": "experiment/data.csv"
+      },
+      {
+        "item": "experiment-config.json",
+        "path": "experiment/experiment-config.json"
+      },
+      {
+        "item": "acceptance.json",
+        "path": "experiment/acceptance.json"
+      },
+      {
+        "item": "expected-result.json",
+        "path": "experiment/expected-result.json"
+      },
+      {
+        "item": "run_experiment.py",
+        "path": "experiment/run_experiment.py"
+      },
+      {
+        "item": "reproduce.py",
+        "path": "experiment/reproduce.py"
+      },
+      {
+        "item": "test_experiment.py",
+        "path": "experiment/test_experiment.py"
+      },
+      {
+        "item": "workflow.cwl",
+        "path": "experiment/workflow.cwl"
+      },
+      {
+        "item": "job.yml",
+        "path": "experiment/job.yml"
+      }
+    ],
+    "external": [],
+    "publicImmutableReferences": [],
+    "unavailable": []
+  },
+  "experimentId": "linear-regression-frozen-lifecycle-v1",
+  "runtimeNetworkRequired": false,
+  "schemaVersion": 1
+}

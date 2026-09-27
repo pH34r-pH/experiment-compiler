@@ -14,6 +14,76 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  runner-smoke:
+    name: Run the reviewed lifecycle fixture in a bounded worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Install the pinned workflow runner
+        run: python -m pip install --disable-pip-version-check "cwltool==3.2.20260720092025"
+      - name: Pre-pull the digest-pinned CWL tool image
+        run: docker pull 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3'
+      - name: Build the reviewed plan package
+        run: |
+          set -euo pipefail
+          for experiment_id in linear-regression-plan-v1 linear-regression-frozen-lifecycle-v1; do
+            python -m experiment_compiler compile "examples/$experiment_id/experiment.json" \
+              --output "$RUNNER_TEMP/$experiment_id.plan.zip"
+            sha256sum "$RUNNER_TEMP/$experiment_id.plan.zip" > "$RUNNER_TEMP/$experiment_id.plan.sha256"
+          done
+      - name: Run package without secrets; cwltool constrains the task container
+        run: |
+          set -euo pipefail
+          mkdir -p /dev/shm/experiment-compiler-cwl
+          TOOL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3')"
+          for experiment_id in linear-regression-plan-v1 linear-regression-frozen-lifecycle-v1; do
+            output_dir="$RUNNER_TEMP/runner-output/$experiment_id"
+            mkdir -p "$output_dir"
+            PLAN_SHA256="$(cut -d ' ' -f 1 "$RUNNER_TEMP/$experiment_id.plan.sha256")"
+            EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
+            EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; /dev/shm tmp/out directories' \
+            EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
+            EXPERIMENT_RUNNER_TMPFS_ROOT=/dev/shm/experiment-compiler-cwl \
+            TMPDIR=/dev/shm/experiment-compiler-cwl \
+              python -m experiment_compiler.runner_cli run "$RUNNER_TEMP/$experiment_id.plan.zip" \
+                --output "$output_dir/result.zip" --expected-sha256 "$PLAN_SHA256" --allow-workflow-execution
+            sha256sum -c "$RUNNER_TEMP/$experiment_id.plan.sha256"
+            python -m experiment_compiler verify "$output_dir/result.zip" --recipe "$output_dir/result.source/experiment.json"
+            python scripts/validate_current_ro_profiles.py "$output_dir/result.source"
+            python -m experiment_compiler catalog "$output_dir/result.source" --output "$output_dir/catalog.json"
+            PACKAGE_PATH="$output_dir/result.zip" CATALOG_PATH="$output_dir/catalog.json" python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(Path(os.environ["PACKAGE_PATH"])) as archive:
+              receipt = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+              details = json.loads(archive.read(receipt))
+              assert details["status"] == "succeeded", details
+              assert details["exitCode"] == 0, details
+              assert details["planPackageSha256"]
+              assert details["outputs"]
+              assert details["workerContext"]["reportedImageId"].startswith("sha256:")
+              assert "NetworkAccess=false" in details["workerContext"]["reportedSandbox"]
+          catalog = json.loads(Path(os.environ["CATALOG_PATH"]).read_text())
+          assert catalog["experiments"][0]["lifecycle"]["attemptCount"] == 1
+          assert catalog["experiments"][0]["lifecycle"]["processRunCrate"] is True
+          print(json.dumps(details, indent=2))
+          PY
+          done
+      - name: Retain final package and catalog source closure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compiled-experiment-pipeline-runs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/runner-output/
+          if-no-files-found: error
+          retention-days: 30
+
   build:
     name: Build and reproduce Compiled Experiments (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
@@ -81,6 +151,7 @@ jobs:
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" verify "$RUNNER_TEMP/installed-poc.zip" --recipe "$GITHUB_WORKSPACE/examples/issue-164/experiment.json"
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" compile "$GITHUB_WORKSPACE/examples/linear-regression-v1/experiment.json" --output "$RUNNER_TEMP/installed-linear.zip"
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" verify "$RUNNER_TEMP/installed-linear.zip" --recipe "$GITHUB_WORKSPACE/examples/linear-regression-v1/experiment.json"
+          "$RUNNER_TEMP/compiler-install/bin/experiment-runner" --help
       - name: Retain compiled package, wheel and scoped receipts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

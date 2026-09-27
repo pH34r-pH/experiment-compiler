@@ -1,0 +1,7 @@
+{
+  "accelerator": "none",
+  "dependencies": ["cwltool==3.2.20260720092025", "Python >=3.11 standard library"],
+  "networkRequired": false,
+  "numericSemantics": "Python fractions.Fraction exact rational arithmetic",
+  "schemaVersion": 1
+}

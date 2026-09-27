@@ -27,6 +27,14 @@ Protocol revisions use new package identities and preserve prior bytes; link the
 
 The local lifecycle check is a narrow contract check, not RO-Crate or Process Run Crate certification. Existing v1 recipes and ZIPs retain their exact contracts and digests.
 
+## Execution handoff prototype
+
+`experiment-runner run` is a separate, opt-in command; compile and verify never execute package contents. It verifies the reviewed plan package digest and lifecycle profile, requires a declared bounded worker, an explicit no-network declaration, pinned cwltool version and CWL CPU/RAM/storage/time maxima that fit within the worker limits, then invokes the packaged CWL workflow. Each invocation creates a new result ZIP and sibling `.source/` directory containing the compiler recipe and all hashed package members, so `verify --recipe result.source/experiment.json` and catalog discovery can independently rebuild the exact package. The result package retains the original plan bytes, a distinct attempt ID, Process Run Crate metadata, CWL provenance files, logs, outputs and a runner receipt. A timeout or failed process still receives a separate failure artifact; the process status is not a scientific decision.
+
+The public CI integration executes only the repository-owned linear-regression fixture. It pre-pulls the digest-pinned CWL tool image and invokes cwltool with pulling disabled, strict CPU/memory limits, explicit no-network access, a bounded `/dev/shm` work area, and a workflow/CI wall-time limit. The workflow-runner host has no experiment-source or deployment credentials. It verifies that the original plan is unchanged, verifies the result package, and derives a catalog entry from the result source closure. The receipt includes the tool image ID and caller-reported runner context; it marks that context as unverified by the adapter. Direct CLI execution on a host is not sandboxed, and digest equality is integrity evidence rather than authorization. This prototype is not a service for arbitrary uploads. General adversarial workflows require a disposable credential-free VM or stronger isolation. CWL temporary/output directory requests are allocations, not hard quotas; the smoke fixture also runs under a bounded tmpfs and the compiler caps package/output bytes.
+
+The retained CI artifact is the completed handoff record. To publish it through normal repository discovery, promote the result package's extracted members, generated `experiment.json`, and package ZIP in a reviewed pull request. The package remains immutable; later protocol edits or iterations produce new IDs and link back with PROV-O `wasRevisionOf`.
+
 Resource field mapping, byte closure classes, private-workspace use, and the publication boundary are documented in [resources-and-closure.md](resources-and-closure.md). CWL v1.2 expresses executable requirements; resource evidence and estimate basis stay with the source-owned experiment/provenance records.
 
 
