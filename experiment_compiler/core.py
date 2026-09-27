@@ -105,21 +105,31 @@ def _size(value: Any) -> bool:
 def validate_header(header: Any) -> str:
     historical = {"schemaVersion", "packageType", "status", "source", "standards", "evidence"}
     compiled = historical | {"profile"}
-    if not isinstance(header, dict) or set(header) not in (historical, compiled):
+    lifecycle = {"schemaVersion", "packageType", "profile", "source", "standards", "evidence"}
+    if not isinstance(header, dict) or set(header) not in (historical, compiled, lifecycle):
         raise PackageError("Manifest header has unexpected or missing fields")
-    if type(header["schemaVersion"]) is not int or header["schemaVersion"] != 1:
-        raise PackageError("Unsupported manifest schema version")
     if set(header) == historical:
+        if type(header["schemaVersion"]) is not int or header["schemaVersion"] != 1:
+            raise PackageError("Unsupported manifest schema version")
         if (header["packageType"] != "experiment-compiler-qualification-candidate" or
                 header["status"] != "qualification-candidate"):
             raise PackageError("Unsupported poc-v1 manifest profile")
         profile = "poc-v1"
-    else:
+    elif set(header) == compiled:
+        if type(header["schemaVersion"]) is not int or header["schemaVersion"] != 1:
+            raise PackageError("Unsupported manifest schema version")
         if (header["profile"] != "compiled-experiment-v1" or
                 header["packageType"] != "compiled-experiment" or
                 header["status"] != "reproducible"):
             raise PackageError("Unsupported compiled experiment manifest profile")
         profile = "compiled-experiment-v1"
+    else:
+        if type(header["schemaVersion"]) is not int or header["schemaVersion"] != 2:
+            raise PackageError("Unsupported lifecycle manifest schema version")
+        if (header["profile"] != "compiled-experiment-lifecycle-v1" or
+                header["packageType"] != "compiled-experiment"):
+            raise PackageError("Unsupported lifecycle Compiled Experiment profile")
+        profile = "compiled-experiment-lifecycle-v1"
     source = header["source"]
     if (not isinstance(source, dict) or set(source) != {"repository", "commit"} or
             not isinstance(source["repository"], str) or not source["repository"] or
@@ -136,7 +146,7 @@ def load_recipe(path: Path) -> dict:
     if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"expectedPackage"}:
         raise PackageError("Recipe has unexpected or missing fields")
     if (type(recipe["buildRecipeVersion"]) is not int or recipe["buildRecipeVersion"] != 1 or
-            recipe["profile"] not in {"poc-v1", "compiled-experiment-v1"}):
+            recipe["profile"] not in {"poc-v1", "compiled-experiment-v1", "compiled-experiment-lifecycle-v1"}):
         raise PackageError("Unsupported recipe version/profile")
     if (not isinstance(recipe["id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", recipe["id"]) or
             not isinstance(recipe["title"], str) or not recipe["title"]):
@@ -226,6 +236,124 @@ def compile_package(recipe_path: Path, output: Path) -> dict:
             "profile": recipe["profile"]}}
 
 
+def validate_lifecycle_crate(crate: Any) -> dict:
+    """Validate the lifecycle facts carried by a v2 RO-Crate graph.
+
+    This is a narrow application-profile check, not RO-Crate conformance
+    certification and not scientific interpretation.
+    """
+    if not isinstance(crate, dict) or not isinstance(crate.get("@graph"), list):
+        raise PackageError("Lifecycle metadata requires an RO-Crate @graph array")
+    graph = crate["@graph"]
+    raw_context = crate.get("@context")
+    if raw_context not in (
+            ["https://w3id.org/ro/crate/1.3/context"],
+            ["https://w3id.org/ro/crate/1.3/context", "https://w3id.org/ro/terms/workflow-run/context"]):
+        raise PackageError("Lifecycle crate must use the RO-Crate 1.3 context, with Workflow Run context only as needed")
+    nodes: dict[str, dict] = {}
+    for node in graph:
+        if not isinstance(node, dict) or not isinstance(node.get("@id"), str):
+            raise PackageError("Every lifecycle graph entity must have a string @id")
+        if node["@id"] in nodes:
+            raise PackageError(f"Duplicate lifecycle graph @id: {node['@id']}")
+        nodes[node["@id"]] = node
+    root = nodes.get("./")
+    if not isinstance(root, dict) or "Dataset" not in _types(root.get("@type")):
+        raise PackageError("Lifecycle RO-Crate requires a root Dataset")
+    descriptor = nodes.get("ro-crate-metadata.json")
+    if (descriptor is None or "CreativeWork" not in _types(descriptor.get("@type")) or
+            not isinstance(descriptor.get("about"), dict) or descriptor["about"].get("@id") != "./"):
+        raise PackageError("Lifecycle crate requires an RO-Crate metadata descriptor about the root Dataset")
+    if not any(ref.get("@id") == "https://w3id.org/ro/crate/1.3" for ref in _as_refs(descriptor.get("conformsTo"))):
+        raise PackageError("Lifecycle metadata descriptor must declare RO-Crate 1.3")
+    if not any(ref.get("@id") == "https://w3id.org/ro/crate/1.3" for ref in _as_refs(root.get("conformsTo"))):
+        raise PackageError("Lifecycle root Dataset must declare RO-Crate 1.3")
+    main = root.get("mainEntity")
+    if not isinstance(main, dict) or not isinstance(main.get("@id"), str):
+        raise PackageError("Lifecycle root Dataset must identify its main protocol entity")
+    protocol = nodes.get(main["@id"])
+    if not isinstance(protocol, dict) or not _types(protocol.get("@type")) & {"CreativeWork", "ScholarlyArticle", "SoftwareSourceCode"}:
+        raise PackageError("Lifecycle mainEntity must be a protocol CreativeWork")
+    maturity = protocol.get("creativeWorkStatus")
+    if not (isinstance(maturity, str) and maturity.strip()) and not (
+            isinstance(maturity, dict) and isinstance(maturity.get("@id"), str)):
+        raise PackageError("Protocol CreativeWork must declare Schema.org creativeWorkStatus")
+
+    run_profile = "https://w3id.org/ro/wfrun/process/0.6"
+    declares_run = any(
+        ref.get("@id") == run_profile
+        for ref in _as_refs(root.get("conformsTo"))
+    )
+    actions = [node for node in graph if isinstance(node, dict) and
+               "CreateAction" in _types(node.get("@type")) and
+               node.get("actionStatus") != "https://schema.org/PotentialActionStatus"]
+    ids = [node.get("@id") for node in actions]
+    if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
+        raise PackageError("Each execution CreateAction must have a unique @id")
+    allowed = {
+        "https://schema.org/ActiveActionStatus",
+        "https://schema.org/CompletedActionStatus",
+        "https://schema.org/FailedActionStatus",
+    }
+    for action in actions:
+        status = action.get("actionStatus")
+        if not isinstance(status, str) or status not in allowed:
+            raise PackageError("Every CreateAction must carry an explicit Schema.org actionStatus")
+        instrument = action.get("instrument")
+        if not isinstance(instrument, dict) or not isinstance(instrument.get("@id"), str):
+            raise PackageError("Every execution CreateAction must identify its instrument")
+        instrument_node = nodes.get(instrument["@id"])
+        if instrument_node is None or not ({"SoftwareApplication", "SoftwareSourceCode"} &
+                                           _types(instrument_node.get("@type"))):
+            raise PackageError("CreateAction instrument must resolve to described executable software")
+    if actions and not declares_run:
+        raise PackageError("Execution actions require Process Run Crate 0.6 provenance")
+    if declares_run and not actions:
+        raise PackageError("Prospective-only crate cannot claim Process Run Crate 0.6 conformance")
+    if declares_run:
+        profile_node = nodes.get(run_profile)
+        if (profile_node is None or profile_node.get("version") != "0.6" or
+                "Profile" not in _types(profile_node.get("@type"))):
+            raise PackageError("Process Run Crate 0.6 conformance requires its described profile entity")
+
+    members = {node.get("@id") for node in graph if isinstance(node, dict) and "File" in _types(node.get("@type"))}
+    for part in _as_refs(root.get("hasPart")):
+        identifier = part.get("@id")
+        if isinstance(identifier, str) and not identifier.startswith(("#", "http://", "https://")):
+            if identifier not in members:
+                raise PackageError(f"RO-Crate root hasPart does not resolve to a described File: {identifier}")
+
+    potential = []
+    for node in graph:
+        if not isinstance(node, dict):
+            continue
+        for ref in _as_refs(node.get("potentialAction")):
+            action = nodes.get(ref.get("@id"))
+            if action is None:
+                raise PackageError("potentialAction references a missing graph node")
+            if action.get("actionStatus") != "https://schema.org/PotentialActionStatus":
+                raise PackageError("Unexecuted potentialAction must use PotentialActionStatus")
+            potential.append(action.get("@id"))
+    return {"creativeWorkStatus": maturity, "attemptCount": len(actions),
+            "processRunCrate": declares_run, "potentialActionCount": len(potential)}
+
+
+def _types(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, list):
+        return {item for item in value if isinstance(item, str)}
+    return set()
+
+
+def _as_refs(value: Any) -> list[dict]:
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
 def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dict | None = None) -> dict:
     """Check complete inventory and hashes. This is not scientific qualification."""
     if len(data) > MAX_TOTAL:
@@ -270,6 +398,11 @@ def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dic
                 if item["path"].endswith((".json", ".jsonld")):
                     if not isinstance(json_value(payload), (dict, list)):
                         raise PackageError("JSON members must have an object or array root")
+            if profile == "compiled-experiment-lifecycle-v1":
+                metadata_path = "ro-crate-metadata.json"
+                if metadata_path not in {item["path"] for item in members}:
+                    raise PackageError(f"Lifecycle profile requires {metadata_path}")
+                lifecycle_projection = validate_lifecycle_crate(json_value(z.read(metadata_path)))
             if recipe and (profile != recipe["profile"] or manifest != manifest_for(recipe)):
                 raise PackageError("Package manifest differs from reviewed recipe")
     except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
@@ -278,4 +411,5 @@ def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dic
             "scientificReproduction": "not-run", "profile": profile,
             "packageSha256": actual, "packageSizeBytes": len(data),
             "memberCount": len(infos), "manifestSha256": sha256(manifest_raw),
-            "source": manifest["source"], "matchedExpectedPackage": bool(expected or expected_sha256)}
+            "source": manifest["source"], "matchedExpectedPackage": bool(expected or expected_sha256),
+            **({"lifecycle": lifecycle_projection} if profile == "compiled-experiment-lifecycle-v1" else {})}

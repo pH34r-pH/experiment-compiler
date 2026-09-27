@@ -53,6 +53,8 @@ function section(title, value) {
       const env = exp.environment || {};
       meta.append(
         metric("Package", bytes(exp.package && exp.package.size)),
+        metric("Protocol", exp.lifecycle && exp.lifecycle.creativeWorkStatus || "published reproduction"),
+        metric("Attempts", exp.lifecycle ? fmt.format(exp.lifecycle.attemptCount) : "reference evidence"),
         metric("Network", env.networkRequired === false ? "none" : String(env.networkRequired)),
         metric("VRAM", bytes(exp.resources && exp.resources.accelerator && exp.resources.accelerator.peakVramBytes)),
         metric("Planning RAM", bytes(exp.resources && exp.resources.ram && exp.resources.ram.planningRamBytes))
@@ -63,10 +65,14 @@ function section(title, value) {
       const result = exp.result || {};
       const details = document.createElement("div");
       details.className = "details";
+      const evidenceText = exp.scientificInterpretation === null
+        ? "No scientific interpretation is recorded in this plan."
+        : "Held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; acceptance " + (result.acceptancePassed ? "passed" : "not passed") + ".";
       details.append(
         section("Scientific question", exp.question),
         section("Method", exp.method),
-        section("Evidence", "Held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; acceptance " + (result.acceptancePassed ? "passed" : "not passed") + "."),
+        section("Evidence", evidenceText),
+        section("Scientific interpretation", exp.scientificInterpretation),
         section("Environment", (env.python || "Python") + "; " + (env.standardLibraryOnly ? "standard library only" : "dependencies declared") + "; accelerator " + (env.accelerator || "not reported") + "."),
         section("Reproduce", exp.reproduction && exp.reproduction.entrypoint ? "Run " + exp.reproduction.entrypoint + " after extraction." : "Entrypoint not declared."),
         section("Provenance", (exp.source && exp.source.repository ? exp.source.repository : "") + "@" + (exp.source && exp.source.commit ? exp.source.commit : ""))
@@ -74,15 +80,18 @@ function section(title, value) {
 
       const actions = document.createElement("div");
       actions.className = "actions";
-      const download = document.createElement("a");
-      download.className = "primary";
-      download.href = "packages/" + exp.package.sha256 + ".zip";
-      download.download = "";
-      download.textContent = "Download Compiled Experiment ↓";
+      if (exp.package && exp.package.sha256) {
+        const download = document.createElement("a");
+        download.className = "primary";
+        download.href = "packages/" + exp.package.sha256 + ".zip";
+        download.download = "";
+        download.textContent = "Download Compiled Experiment ↓";
+        actions.append(download);
+      }
       const source = document.createElement("a");
       source.href = "https://github.com/" + exp.source.repository + "/tree/" + exp.source.commit;
       source.textContent = "Frozen source ↗";
-      actions.append(download, source);
+      actions.append(source);
 
       article.append(head, details, actions);
       host.append(article);

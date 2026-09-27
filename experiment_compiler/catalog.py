@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .core import MAX_FILE, PackageError, bounded_read, json_value, load_recipe
+from .core import (MAX_FILE, PackageError, bounded_read, json_value, load_recipe,
+                   validate_lifecycle_crate)
 
 
 def _member_source(recipe: dict, recipe_path: Path, package_path: str) -> Path:
@@ -49,8 +50,10 @@ def _markdown_section(text: str, title: str) -> str | None:
 def describe_recipe(recipe_path: Path) -> dict:
     """Project a reviewed compiled-experiment-v1 recipe into display metadata."""
     recipe = load_recipe(recipe_path)
+    if recipe["profile"] == "compiled-experiment-lifecycle-v1":
+        return _describe_lifecycle_recipe(recipe, recipe_path)
     if recipe["profile"] != "compiled-experiment-v1":
-        raise PackageError("describe currently requires compiled-experiment-v1")
+        raise PackageError("describe requires a Compiled Experiment profile")
     expected = recipe.get("expectedPackage")
     if expected is None:
         raise PackageError("Publishable compiled-experiment-v1 recipe must pin expectedPackage")
@@ -95,6 +98,31 @@ def describe_recipe(recipe_path: Path) -> dict:
     }
 
 
+def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
+    """Project lifecycle from the source-owned RO-Crate graph, without inference."""
+    metadata = _json_member(recipe, recipe_path, "ro-crate-metadata.json")
+    lifecycle = validate_lifecycle_crate(metadata)
+    graph = metadata["@graph"]
+    root = next(node for node in graph if isinstance(node, dict) and node.get("@id") == "./")
+    main_id = root["mainEntity"]["@id"]
+    protocol = _text_member(recipe, recipe_path, "experiment/protocol.md")
+    readme = _text_member(recipe, recipe_path, "experiment/README.md")
+    return {
+        "schemaVersion": 1,
+        "id": recipe["id"],
+        "title": recipe["title"],
+        "profile": recipe["profile"],
+        "hypothesis": _markdown_section(readme, "Hypothesis"),
+        "question": _markdown_section(protocol, "Question"),
+        "method": _markdown_section(protocol, "Method"),
+        "lifecycle": lifecycle,
+        "scientificInterpretation": None,
+        "source": recipe["manifest"]["source"],
+        "standards": recipe["manifest"]["standards"],
+        "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],
+    }
+
+
 def discover_recipes(root: Path) -> list[Path]:
     """Discover compiled-experiment-v1 recipes by convention, with no registry file."""
     root = root.resolve()
@@ -102,7 +130,7 @@ def discover_recipes(root: Path) -> list[Path]:
     ids: set[str] = set()
     for path in sorted(root.rglob("experiment.json")):
         recipe = load_recipe(path)
-        if recipe["profile"] != "compiled-experiment-v1":
+        if recipe["profile"] not in {"compiled-experiment-v1", "compiled-experiment-lifecycle-v1"}:
             continue
         if recipe["id"] in ids:
             raise PackageError(f"Duplicate compiled experiment id: {recipe['id']}")
