@@ -96,6 +96,10 @@ inputs:
     doc:
       $include: external-description.txt
 """,
+            """cwlVersion: v1.2
+class: CommandLineTool
+"https://w3id.org/cwl/cwl#schemas": ["https://example.invalid/schema.yml"]
+""",
         )
         for workflow_text in reference_documents:
             with self.subTest(workflow=workflow_text.splitlines()[1]), \
@@ -112,6 +116,50 @@ inputs:
                         workflow_bytes = workflow_path.read_bytes()
                         member["sha256"] = sha256_bytes(workflow_bytes)
                         member["size"] = len(workflow_bytes)
+                recipe_path.write_text(json.dumps(recipe, indent=2) + "\n")
+                plan = directory / "plan.zip"
+                built = compile_package(recipe_path, plan)
+                with patch.dict(os.environ, {
+                        "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                        "EXPERIMENT_RUNNER_SANDBOX": "test worker",
+                        "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                            '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                        "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+                        "TMPDIR": str(directory),
+                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                          return_value="3.2.20260720092025"), \
+                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                    with self.assertRaisesRegex(PackageError, "execution deferred:"):
+                        run_package(plan, directory / "result.zip",
+                                    expected_sha256=built["packageSha256"],
+                                    allow_workflow_execution=True)
+                    popen.assert_not_called()
+
+    def test_job_order_references_and_overrides_are_rejected_before_subprocess_launch(self):
+        base_job = (ROOT / "examples/linear-regression-plan-v1/source/job.yml").read_text()
+        job_documents = (
+            '"$import": "https://example.invalid/job.yml"\n' + base_job,
+            base_job.replace("runPlan:\n", "runPlan:\n  $include: https://example.invalid/run-plan.yml\n"),
+            '"cwltool:overrides": []\n' + base_job,
+            '"cwl:tool": "external-tool.cwl"\n' + base_job,
+            '"https://w3id.org/cwl/cwl#overrides": []\n' + base_job,
+            '"https://w3id.org/cwl/cwl#import": "https://example.invalid/job.yml"\n' + base_job,
+            base_job.replace("data:\n", 'data:\n  "https://w3id.org/cwl/cwl#include": "https://example.invalid/data.yml"\n'),
+        )
+        for job_text in job_documents:
+            with self.subTest(job=job_text.splitlines()[0]), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                fixture = directory / "fixture"
+                shutil.copytree(ROOT / "examples/linear-regression-plan-v1", fixture)
+                job_path = fixture / "source/job.yml"
+                job_path.write_text(job_text)
+                recipe_path = fixture / "experiment.json"
+                recipe = json.loads(recipe_path.read_text())
+                for member in recipe["members"]:
+                    if member["source"] == "source/job.yml":
+                        job_bytes = job_path.read_bytes()
+                        member["sha256"] = sha256_bytes(job_bytes)
+                        member["size"] = len(job_bytes)
                 recipe_path.write_text(json.dumps(recipe, indent=2) + "\n")
                 plan = directory / "plan.zip"
                 built = compile_package(recipe_path, plan)
