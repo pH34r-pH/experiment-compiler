@@ -33,7 +33,7 @@ Classify each required runtime item as one of:
 - an explicit host/ABI prerequisite;
 - unavailable, which blocks execution-ready and offline/self-contained claims.
 
-A URL, Git LFS pointer, image tag, or checkpoint digest identifies bytes but does not supply them. Immutable externally retrievable closure and physically embedded offline closure are different qualifications. Bibliographic/specification references are not runtime dependencies. Keep the bounded ZIP limits until the complete selected payload and environment closure have been inventoried; do not relax limits from the tiny example's measurements.
+A URL, Git LFS pointer, image tag, or checkpoint digest identifies bytes but does not supply them. The compiler rejects an exact Git LFS pointer file as a package member. Immutable externally retrievable closure and physically embedded offline closure are different qualifications. Bibliographic/specification references are not runtime dependencies. Keep the bounded ZIP limits until the complete selected payload and environment closure have been inventoried; do not relax limits from the tiny example's measurements.
 
 ## Private workspace and publication boundary
 
