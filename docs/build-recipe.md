@@ -27,6 +27,8 @@ Protocol revisions use new package identities and preserve prior bytes; link the
 
 The local lifecycle check is a narrow contract check, not RO-Crate or Process Run Crate certification. Existing v1 recipes and ZIPs retain their exact contracts and digests.
 
+Resource field mapping, byte closure classes, private-workspace use, and the publication boundary are documented in [resources-and-closure.md](resources-and-closure.md). CWL v1.2 expresses executable requirements; resource evidence and estimate basis stay with the source-owned experiment/provenance records.
+
 
 ## Self-contained reproduction profile
 

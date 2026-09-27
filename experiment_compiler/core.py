@@ -189,6 +189,16 @@ def _source(root: Path, relative: str) -> Path:
     return path
 
 
+def _is_git_lfs_pointer(data: bytes) -> bool:
+    """Identify a Git LFS pointer so its small text is never mistaken for payload bytes."""
+    if not data.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
+        return False
+    lines = data.splitlines()
+    return (len(lines) == 3 and lines[1].startswith(b"oid sha256:") and
+            len(lines[1]) == len(b"oid sha256:") + 64 and
+            lines[2].startswith(b"size ") and lines[2][5:].isdigit())
+
+
 def write_once(path: Path, data: bytes) -> None:
     """Idempotent for identical bytes; never overwrite a different existing file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -212,6 +222,8 @@ def compile_package(recipe_path: Path, output: Path) -> dict:
         data = bounded_read(_source(root, item["source"]), MAX_FILE)
         if len(data) != item["size"] or sha256(data) != item["sha256"]:
             raise PackageError(f"Source integrity mismatch: {item['source']}")
+        if _is_git_lfs_pointer(data):
+            raise PackageError(f"Git LFS pointer is not the referenced payload: {item['source']}")
         if item["path"].endswith((".json", ".jsonld")):
             if not isinstance(json_value(data), (dict, list)):
                 raise PackageError("JSON members must have an object or array root")

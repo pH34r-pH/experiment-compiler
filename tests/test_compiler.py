@@ -20,6 +20,7 @@ from unittest.mock import patch
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
     json_value, load_recipe, safe_path, sha256, unique_paths, verify_bytes)
+from experiment_compiler.resources import bytes_to_mib_minimum, seconds_to_cwl_limit
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/issue-164"
@@ -28,6 +29,34 @@ EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
 
 
 class CompilerTests(unittest.TestCase):
+    def test_cwl_resource_unit_conversions_are_conservative_and_reject_unknown(self):
+        self.assertEqual(bytes_to_mib_minimum(1024 * 1024), 1)
+        self.assertEqual(bytes_to_mib_minimum(1024 * 1024 + 1), 2)
+        self.assertEqual(seconds_to_cwl_limit(30), 30)
+        self.assertEqual(seconds_to_cwl_limit(30.01), 31)
+        for value in (0, -1, True, "unknown"):
+            with self.subTest(value=value), self.assertRaises(PackageError):
+                bytes_to_mib_minimum(value)
+        for value in (0, -1, True, "unknown", float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaises(PackageError):
+                seconds_to_cwl_limit(value)
+
+    def test_git_lfs_pointer_is_not_accepted_as_payload_bytes(self):
+        pointer = (b"version https://git-lfs.github.com/spec/v1\n" +
+                   b"oid sha256:" + b"a" * 64 + b"\nsize 4096\n")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(SELF_CONTAINED, root / "example")
+            recipe = load_recipe(root / "example/experiment.json")
+            item = next(item for item in recipe["members"] if item["path"] == "experiment/data.csv")
+            data = root / "example" / item["source"]
+            data.write_bytes(pointer)
+            item["sha256"] = sha256(pointer)
+            item["size"] = len(pointer)
+            (root / "example/experiment.json").write_bytes(canonical(recipe))
+            with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
+                compile_package(root / "example/experiment.json", root / "pointer.zip")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
