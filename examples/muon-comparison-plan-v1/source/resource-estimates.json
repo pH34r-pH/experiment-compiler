@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "status": "unknown",
-  "summary": "No resource estimate or run authorization exists. The exact baseline, Muon implementation, model/data closure, and backend pilot are unavailable in this packet.",
+  "summary": "No Muon-specific resource estimate or run authorization exists. The #164 replay provides a CPU reference measurement only; it does not measure Muon or the full campaign.",
   "basis": {
     "type": "no measurement or analytical bound",
-    "description": "A bounded pilot cannot be sized until the source owner selects the exact treatment and the qualified baseline establishes the workload.",
+    "description": "A bounded Muon pilot cannot be estimated until the source owner selects the exact treatment and a named backend. Existing #164 CPU replay measurements are contextual evidence, not a Muon resource estimate.",
     "uncertainty": "unbounded until the missing protocol and backend are specified"
   },
   "campaign": {

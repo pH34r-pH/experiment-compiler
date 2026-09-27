@@ -25,32 +25,32 @@
     {
       "path": "dependency-closure.json",
       "source": "dependency-closure.json",
-      "sha256": "d43c51c2f1c721af7bef911b2bb0853914cad41d3990cf39f3f3b467b308e9f1",
-      "size": 1777
+      "sha256": "832d2b14c051334be4aa79b30fc1481b738e491ba16487e1d5d9614af16e0ef9",
+      "size": 1897
     },
     {
       "path": "experiment/README.md",
       "source": "source/README.md",
-      "sha256": "704ac37878ccd1ffe2d1567b0e537941d9d5b1070bd97a87c78ec754339f4c6e",
-      "size": 1833
+      "sha256": "35393cc3fdd8e4a8ca617721712dc28de99c0b7b01db9c52046e70d452fae9a1",
+      "size": 2043
     },
     {
       "path": "experiment/protocol.md",
       "source": "source/protocol.md",
-      "sha256": "a871b5ec08c9aa1b5666b333f5ceed5e14c25c94137d731097d3a72e06c14f8f",
-      "size": 2692
+      "sha256": "0e87dcab5687bb39909c982d0d6ff1f843ca8c239ed105a9ac3f0cd914b8a203",
+      "size": 4393
     },
     {
       "path": "experiment/resource-estimates.json",
       "source": "source/resource-estimates.json",
-      "sha256": "1084bbd30b0059d3a7170761c27c6065c4c94ed5264d28ee9f1dd5065541c7da",
-      "size": 1067
+      "sha256": "94586a5a014b31932f62c3341ae01e92994662d068fca1251f90e73b7288c2cd",
+      "size": 1146
     },
     {
       "path": "ro-crate-metadata.json",
       "source": "ro-crate-metadata.json",
-      "sha256": "ab4015526cb6a3e170744de4d2fe6d855685031eb8afe3f9ee4f0887a18bfc1c",
-      "size": 4164
+      "sha256": "1d14613368adadce2b8068b0fa06f426e4a4a8bb754b5fd41167de37dfc70867",
+      "size": 4234
     }
   ]
 }
