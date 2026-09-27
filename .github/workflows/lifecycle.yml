@@ -80,6 +80,7 @@ jobs:
             if [ "$experiment_id" = "linear-regression-plan-v1" ]; then
               revision_source="$RUNNER_TEMP/linear-regression-plan-v2-source"
               revision_package="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/plan.zip"
+              revision_package_source="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/plan.source"
               revision_attempt="$RUNNER_TEMP/runner-output/linear-regression-plan-v2/attempt.zip"
               mkdir -p "$(dirname "$revision_package")"
               python scripts/create_iteration_fixture.py \
@@ -99,9 +100,8 @@ jobs:
                 --expected-sha256 "$ATTEMPT_SHA256" --attempt-id "$ATTEMPT_ID" \
                 --recipe "$revision_source/experiment.json" --output "$revision_package"
               python -m experiment_compiler verify "$revision_package" \
-                --recipe "$revision_package.source/experiment.json"
+                --recipe "$revision_package_source/experiment.json"
               REVISION_SHA256="$(sha256sum "$revision_package" | cut -d ' ' -f 1)"
-              REVISION_ID="linear-regression-plan-v2"
               EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
               EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
               EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
