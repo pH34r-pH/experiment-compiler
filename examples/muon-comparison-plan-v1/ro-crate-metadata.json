@@ -13,7 +13,7 @@
       "@id": "./",
       "@type": "Dataset",
       "conformsTo": [{"@id": "https://w3id.org/ro/crate/1.3"}],
-      "description": "Blocked prospective Phase 3 optimizer-comparison candidate. No executable method, run, or result is claimed.",
+      "description": "Blocked prospective Phase 3 optimizer-comparison candidate using the existing #164 AdamW result as historical control reference. No executable method, run, or Muon result is claimed.",
       "hasPart": [
         {"@id": "experiment/README.md"},
         {"@id": "experiment/protocol.md"},
@@ -35,7 +35,7 @@
       ],
       "citation": [
         {"@id": "https://github.com/pH34r-pH/experiment-compiler/issues/18"},
-        {"@id": "https://github.com/pH34r-pH/experiment-compiler/issues/38"},
+        {"@id": "https://github.com/pH34r-pH/experiment-compiler/issues/72"},
         {"@id": "https://github.com/pH34r-pH/experiment-compiler/issues/43"},
         {"@id": "https://github.com/pH34r-pH/experiment-compiler/issues/59"}
       ]
@@ -51,12 +51,12 @@
       "@id": "#planned-run",
       "@type": "CreateAction",
       "actionStatus": "https://schema.org/PotentialActionStatus",
-      "name": "Planned optimizer comparison; blocked pending method, baseline, and resource review"
+      "name": "Planned optimizer comparison; blocked pending treatment, input-closure, and resource review"
     },
     {
       "@id": "#cpu-unknown",
       "@type": "PropertyValue",
-      "measurementTechnique": "unknown: no exact baseline or bounded pilot",
+      "measurementTechnique": "unknown: no Muon-specific pilot",
       "propertyID": "CPU core count",
       "value": "unknown"
     },
