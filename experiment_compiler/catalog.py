@@ -107,6 +107,9 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     main_id = root["mainEntity"]["@id"]
     protocol = _text_member(recipe, recipe_path, "experiment/protocol.md")
     readme = _text_member(recipe, recipe_path, "experiment/README.md")
+    closure = None
+    if any(item["path"] == "dependency-closure.json" for item in recipe["members"]):
+        closure = _json_member(recipe, recipe_path, "dependency-closure.json")
     return {
         "schemaVersion": 1,
         "id": recipe["id"],
@@ -116,6 +119,8 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "question": _markdown_section(protocol, "Question"),
         "method": _markdown_section(protocol, "Method"),
         "lifecycle": lifecycle,
+        "contents": None if closure is None else closure.get("classifications"),
+        "unavailablePrerequisites": None if closure is None else closure.get("classifications", {}).get("unavailable"),
         "scientificInterpretation": None,
         "source": recipe["manifest"]["source"],
         "standards": recipe["manifest"]["standards"],

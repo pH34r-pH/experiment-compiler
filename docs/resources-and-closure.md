@@ -20,20 +20,20 @@ CWL core does not define a portable GPU or VRAM request. `cwltool` has a CUDA ex
 
 ## Estimates and measurements
 
-Put executable requests in each CWL `CommandLineTool` or workflow step. Keep measured and estimated values in the source-owned experiment/provenance records and link the evidence. For each operation—build/verify, data preparation, state extraction, training, and analysis/reproduction—record the operation, CPU/thread assumptions, RAM, scratch/input/output bytes, wall time, accelerator/VRAM if applicable, parallelism, arm/seed count, range, basis, environment/configuration, and evidence location. Use CWL limits only for actual enforceable ceilings; an observed peak is not a request, an estimate is not a measurement, and tuning cost is a separate operation.
+Put executable requests in each CWL `CommandLineTool` or workflow step. Represent observations and estimates with Schema.org `PropertyValue` records attached to the RO-Crate root Dataset's `variableMeasured`; use `propertyID`, `value`, `unitText`, `measurementTechnique`, and `valueReference` to state what was measured/estimated, how, in which units, and where its evidence lives. The catalog projects those standard records directly. An unmeasured quantity is explicit text `unknown` with no invented unit or zero value. For each operation—build/verify, data preparation, state extraction, training, and analysis/reproduction—record CPU/thread assumptions, RAM, scratch/input/output bytes, wall time, accelerator/VRAM if applicable, parallelism, arm/seed count, range, basis, environment/configuration, and evidence location. Use CWL limits only for actual enforceable ceilings; an observed peak is not a request, an estimate is not a measurement, and tuning cost is a separate operation.
 
 The small standard-library example records measured peak RSS across its exact CI environment and labels its 32 MiB planning headroom as an estimate. That measurement does not estimate a model-training job. For unmeasured work, leave quantities unknown and make execution admission defer; do not copy a neighboring experiment's numbers.
 
 ## Runtime bytes and package admission
 
-Classify each required runtime item as one of:
+Classify each required runtime item in `dependency-closure.json` as one of:
 
 - embedded bytes in the immutable Compiled Experiment;
 - immutable public bytes available by exact version/revision, digest, size, license/access terms, and retrieval method;
 - an explicit host/ABI prerequisite;
 - unavailable, which blocks execution-ready and offline/self-contained claims.
 
-A URL, Git LFS pointer, image tag, or checkpoint digest identifies bytes but does not supply them. The compiler rejects an exact Git LFS pointer file as a package member. Immutable externally retrievable closure and physically embedded offline closure are different qualifications. Bibliographic/specification references are not runtime dependencies. Keep the bounded ZIP limits until the complete selected payload and environment closure have been inventoried; do not relax limits from the tiny example's measurements.
+A required RO-Crate `File` included in the recipe is embedded. An external `File` is declared external only with `contentUrl`, SHA-256, byte size, and license/access metadata; its bytes still require independent retrieval verification. Missing or incomplete required entities belong in the unavailable category, and the catalog never turns their absence into an execution-ready claim. A URL, Git LFS pointer, image tag, or checkpoint digest identifies bytes but does not supply them. The compiler rejects an exact Git LFS pointer file as a package member. Immutable externally retrievable closure and physically embedded offline closure are different qualifications. Bibliographic/specification references are not runtime dependencies. Keep the bounded ZIP limits until the complete selected payload and environment closure have been inventoried; do not relax limits from the tiny example's measurements.
 
 ## Private workspace and publication boundary
 

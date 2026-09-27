@@ -68,9 +68,18 @@ function section(title, value) {
       const evidenceText = exp.scientificInterpretation === null
         ? "No scientific interpretation is recorded in this plan."
         : "Held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; acceptance " + (result.acceptancePassed ? "passed" : "not passed") + ".";
+      const lifecycle = exp.lifecycle || {};
+      const resourceSummary = (lifecycle.resourceMeasurements || []).map(item =>
+        item.propertyID + ": " + item.value + (item.unitText ? " " + item.unitText : "") + " (" + item.measurementTechnique + ")"
+      ).join("; ");
+      const unresolvedSummary = (exp.unavailablePrerequisites || []).map(item =>
+        typeof item === "string" ? item : (item.item || item.id || JSON.stringify(item))
+      ).join(", ");
       details.append(
         section("Scientific question", exp.question),
         section("Method", exp.method),
+        section("Resource basis", resourceSummary),
+        section("Unresolved prerequisites", unresolvedSummary),
         section("Evidence", evidenceText),
         section("Scientific interpretation", exp.scientificInterpretation),
         section("Environment", (env.python || "Python") + "; " + (env.standardLibraryOnly ? "standard library only" : "dependencies declared") + "; accelerator " + (env.accelerator || "not reported") + "."),
