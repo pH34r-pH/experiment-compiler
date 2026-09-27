@@ -148,7 +148,7 @@ jobs:
               entities = {node["@id"]: node for node in crate["@graph"]}
               root = entities["./"]
               protocol = entities[root["mainEntity"]["@id"]]
-              assert protocol["creativeWorkStatus"] == "Published"
+              assert protocol["creativeWorkStatus"] == "Draft"
               decision = entities["evidence/scientific-decision.md"]
               review = entities["evidence/publication-review.md"]
               parent = entities[root["https://www.w3.org/ns/prov#wasDerivedFrom"]["@id"]]
@@ -165,7 +165,7 @@ jobs:
           catalog = json.loads(Path(os.environ["CATALOG_PATH"]).read_text())
           experiment = catalog["experiments"][0]
           assert experiment["lifecycle"]["attemptCount"] == 1
-          assert experiment["lifecycle"]["creativeWorkStatus"] == "Published"
+          assert experiment["lifecycle"]["creativeWorkStatus"] == "Draft"
           assert experiment["scientificInterpretation"][0]["summary"] == final_interpretation
           assert old_receipt["attemptId"] != second_receipt["attemptId"]
           print(json.dumps({"firstAttemptId": old_receipt["attemptId"],
