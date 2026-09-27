@@ -45,11 +45,30 @@ experiment-compiler revise attempt.zip \
 
 The selected ID must match both the package's runner receipt and an executed Schema.org `CreateAction`; the receipt's embedded plan and output digests are checked against packaged bytes. The command carries the exact prior attempt package into the new crate and links the new protocol and package with PROV-O. The new plan remains prospective: its own attempt count is zero, and it contains no inferred interpretation or authorization. Source-authored changes, including the new recipe ID, protocol, resource estimates, and any future run configuration, remain reviewable in the `.source/` closure. Because the parent package is one ZIP member, this transition currently requires that package to fit the compiler's 16 MiB per-member limit. Repeated iterations remain bounded by the normal package limits; no limit is relaxed to accommodate them.
 
+### Finalizing an attempt for review
+
+After an attempt has been selected, the source owner supplies an interpretation record, a short Schema.org `abstract`, a publication review record, its `reviewBody`, and the reviewer's name:
+
+```sh
+experiment-compiler finalize attempt.zip \
+  --expected-sha256 "$(sha256sum attempt.zip | cut -d ' ' -f 1)" \
+  --attempt-id ATTEMPT_ID \
+  --id experiment-final-v1 --title "Final experiment artifact" \
+  --decision decision.md \
+  --decision-summary "Source-authored interpretation and limitations." \
+  --review publication-review.md \
+  --review-summary "Source-authored review of this exact attempt for release." \
+  --reviewer-name "Reviewer name" \
+  --output final.zip
+```
+
+The final package carries the exact selected attempt ZIP and its complete verified member closure. Its RO-Crate describes the decision as a CreativeWork about the selected executed action, and the review as a Schema.org Review whose `itemReviewed` is the digest-addressed attempt file. PROV-O links both records and the final root to that package. The source-authored summary appears directly in catalog metadata; no conclusion is inferred from the runner's process status. The protocol CreativeWork remains `Draft` while the artifact awaits repository review. The attached review is source-authored evidence, not verified publication authorization; merging the reviewed package to `main` is the public release event. Failed, negative, or inconclusive experiments can all be finalized.
+
 The public CI integration executes two repository-owned linear-regression fixtures through the same adapter: a prospective plan and a frozen known study. It pre-pulls the digest-pinned CWL tool image and invokes cwltool with pulling disabled, strict CPU/memory limits, explicit no-network access, a dedicated 64 MiB tmpfs, and workflow/CI wall-time limits. The workflow-runner host has no experiment-source or deployment credentials. It verifies that each original plan is unchanged, verifies each result package, checks Process Run Crate 0.6's current required contract, and derives catalog entries from the result source closures. The receipt includes the tool image ID and caller-reported runner context; it marks that context as unverified by the adapter. Direct CLI execution on a host is not sandboxed, and digest equality is integrity evidence rather than authorization. This prototype is not a service for arbitrary uploads. General adversarial workflows require a disposable credential-free VM or stronger isolation. CWL temporary/output directory requests are allocations, not hard quotas; the smoke fixture's actual temporary/output storage is also constrained by tmpfs and the compiler caps package/output bytes.
 
 `examples/muon-comparison-plan-v1/` shows how a genuinely unstarted candidate can be represented before it is runnable: public rationale and a proposed question are bundled with source-owned unknowns and explicit missing prerequisites. It contains no CWL method, result, execution record, or numeric resource estimate. The adapter rejects it from its unavailable dependency inventory before checking for an executable workflow. Its status uses Schema.org lifecycle fields; no parallel Phase 3 status vocabulary is added to the artifact.
 
-The retained CI artifact is the completed handoff record. To publish it through normal repository discovery, promote the result package's extracted members, generated `experiment.json`, and package ZIP in a reviewed pull request. The package remains immutable; later protocol edits or iterations produce new IDs and link back with PROV-O `wasRevisionOf`. Scientific decision and publication review remain source-authored records; merge of the reviewed package is the publication event. A private lab may run this same pinned machinery inside its own trust boundary and retain plans, attempts, and unfinished results privately. Public promotion must use an explicitly reviewed shareable closure and a public recipe; the public compiler never fetches private source or credentials.
+The retained finalization CI artifact is the completed handoff record. To publish it through normal repository discovery, promote the final package's extracted members, generated `experiment.json`, and package ZIP in a reviewed pull request. The package remains immutable; later protocol edits or iterations produce new IDs and link back with PROV-O `wasRevisionOf`. Scientific decision and publication review remain source-authored records; merge of the reviewed package is the publication event. A private lab may run this same pinned machinery inside its own trust boundary and retain plans, attempts, and unfinished results privately. Public promotion must use an explicitly reviewed shareable closure and a public recipe; the public compiler never fetches private source or credentials.
 
 Resource field mapping, byte closure classes, private-workspace use, and the publication boundary are documented in [resources-and-closure.md](resources-and-closure.md). CWL v1.2 expresses executable requirements; resource evidence and estimate basis stay with the source-owned experiment/provenance records.
 

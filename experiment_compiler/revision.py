@@ -67,6 +67,21 @@ def _read_parent_attempt(data: bytes, attempt_id: str) -> tuple[dict, dict, byte
             "https://schema.org/CompletedActionStatus",
             "https://schema.org/FailedActionStatus"}:
         raise PackageError("Selected attempt is not an executed CreateAction")
+    receipt_status = receipt.get("status")
+    exit_code = receipt.get("exitCode")
+    timed_out = receipt.get("timedOut")
+    if (receipt_status not in {"succeeded", "failed", "timed-out"} or
+            type(exit_code) is not int or type(timed_out) is not bool):
+        raise PackageError("Runner receipt has invalid process outcome fields")
+    completed = action.get("actionStatus") == "https://schema.org/CompletedActionStatus"
+    failed = action.get("actionStatus") == "https://schema.org/FailedActionStatus"
+    consistent = (
+        (receipt_status == "succeeded" and exit_code == 0 and not timed_out and completed) or
+        (receipt_status == "failed" and exit_code != 0 and not timed_out and failed) or
+        (receipt_status == "timed-out" and exit_code != 0 and timed_out and failed)
+    )
+    if not consistent:
+        raise PackageError("Runner receipt process outcome conflicts with selected CreateAction status")
     action_result_values = action.get("result", [])
     if isinstance(action_result_values, dict):
         action_result_values = [action_result_values]
@@ -187,10 +202,12 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
 
     temporary = Path(tempfile.mkdtemp(prefix="compiled-experiment-revision-"))
     try:
-        recipe, files = _stage_recipe(recipe_path, temporary / "source")
+        recipe, files = _stage_recipe(recipe_path, temporary / "recipe-source")
         parent_identifier = _root_and_protocol(parent_crate)[0].get("identifier")
+        if not isinstance(parent_identifier, str) or not parent_identifier:
+            raise PackageError("Parent experiment has no stable RO-Crate identifier")
         parent_recipe_id = f"{parent_identifier[:60]}-attempt-{attempt_id}"
-        if recipe["id"] == parent_recipe_id:
+        if recipe["id"] in {parent_identifier, parent_recipe_id}:
             raise PackageError("A revision must use a new recipe ID")
         if "expectedPackage" in recipe:
             recipe.pop("expectedPackage")
@@ -240,12 +257,15 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
                       PROV + "wasDerivedFrom": {"@id": parent_member}})
         files["ro-crate-metadata.json"] = canonical(crate)
         files[parent_member] = parent_bytes
+        if "experiment.json" in files:
+            raise PackageError("Revision package member experiment.json conflicts with its source-owned recipe")
 
-        stage = temporary / "source"
+        stage = temporary / "closure"
+        stage.mkdir()
         members = []
         for archive_path, data in sorted(files.items()):
-            source = f"members/{archive_path}"
-            target = stage.joinpath(*source.split("/"))
+            source = archive_path
+            target = stage.joinpath(*safe_path(source).split("/"))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             members.append({"path": archive_path, "source": source,
