@@ -94,6 +94,23 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
 
 
 def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> None:
+    # This MVP intentionally supports one self-contained CommandLineTool. A
+    # Workflow can point `run` at another CWL document; inspecting only the
+    # entrypoint would let that document bypass all requirements below.
+    if not isinstance(document, dict) or document.get("class") != "CommandLineTool":
+        raise PackageError("execution deferred: only a single top-level CWL CommandLineTool is admitted")
+
+    def reject_document_references(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"run", "$import", "$include", "$schemas", "$graph"}:
+                    raise PackageError(f"execution deferred: CWL document reference {key!r} is outside the single-tool subset")
+                reject_document_references(child)
+        elif isinstance(value, list):
+            for child in value:
+                reject_document_references(child)
+
+    reject_document_references(document)
     required_limits = {"cores", "ramMiB", "tmpdirMiB", "outdirMiB", "wallSeconds"}
     if not isinstance(limits, dict) or not required_limits <= set(limits):
         raise PackageError("worker must declare CPU, memory, temporary/output storage and wall-time limits")
