@@ -116,7 +116,9 @@ def finalize_package(parent_package: Path, output: Path, *,
                for node in crate["@graph"] if isinstance(node, dict)):
             raise PackageError("Parent crate already contains a reserved finalization entity")
 
-        protocol["creativeWorkStatus"] = "Published"
+        # A finalization package is reviewable and ready to propose, but becomes
+        # publicly published only when its reviewed package is merged to main.
+        protocol["creativeWorkStatus"] = "Draft"
         root[PROV + "wasDerivedFrom"] = {"@id": parent_member}
         for path in (parent_member, decision_member, review_member):
             _append_part(root, path)
@@ -127,12 +129,16 @@ def finalize_package(parent_package: Path, output: Path, *,
              "contentSize": len(parent_bytes)},
             {"@id": decision_member, "@type": ["File", "CreativeWork"],
              "name": "Scientific decision and interpretation", "encodingFormat": "text/markdown",
-             "abstract": decision_summary, "about": {"@id": selected_id},
+             "abstract": decision_summary,
+             "description": "Author-supplied summary; consult the attached source-authored record.",
+             "about": {"@id": selected_id},
              PROV + "wasDerivedFrom": {"@id": parent_member}},
             {"@id": reviewer_id, "@type": "Person", "name": reviewer_name},
             {"@id": review_member, "@type": ["File", "Review"],
              "name": "Publication review record", "encodingFormat": "text/markdown",
-             "reviewBody": review_summary, "author": {"@id": reviewer_id},
+             "reviewBody": review_summary,
+             "description": "Source-authored review note; inclusion does not establish publication approval.",
+             "author": {"@id": reviewer_id},
              "itemReviewed": {"@id": parent_member}, "about": {"@id": selected_id},
              PROV + "wasDerivedFrom": {"@id": parent_member}},
         ])

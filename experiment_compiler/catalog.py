@@ -7,11 +7,12 @@ publishers do not maintain duplicate metadata.
 from __future__ import annotations
 
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from .core import (MAX_FILE, PackageError, _types, bounded_read, json_value, load_recipe,
-                   validate_lifecycle_crate)
+from .core import (MAX_FILE, PackageError, _types, bounded_read, compile_package,
+                   json_value, load_recipe, validate_lifecycle_crate)
 
 
 def _member_source(recipe: dict, recipe_path: Path, package_path: str) -> Path:
@@ -100,6 +101,13 @@ def describe_recipe(recipe_path: Path) -> dict:
 
 def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     """Project lifecycle from the source-owned RO-Crate graph, without inference."""
+    expected = recipe.get("expectedPackage")
+    if expected is not None:
+        # Verify every source member and the deterministic package identity before
+        # projecting metadata. This prevents a changed .source file from silently
+        # changing catalog output while the pinned ZIP remains unchanged.
+        with tempfile.TemporaryDirectory(prefix="compiled-experiment-catalog-") as temporary:
+            compile_package(recipe_path, Path(temporary) / "verified.zip")
     metadata = _json_member(recipe, recipe_path, "ro-crate-metadata.json")
     lifecycle = validate_lifecycle_crate(metadata)
     graph = metadata["@graph"]
@@ -113,7 +121,9 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     entities = {node["@id"]: node for node in graph if isinstance(node, dict) and isinstance(node.get("@id"), str)}
     interpretations = []
     for node in graph:
-        if not isinstance(node, dict) or "CreativeWork" not in _types(node.get("@type")):
+        if (not isinstance(node, dict) or "File" not in _types(node.get("@type")) or
+                "CreativeWork" not in _types(node.get("@type")) or
+                node.get("name") != "Scientific decision and interpretation"):
             continue
         summary = node.get("abstract")
         about = node.get("about")
@@ -121,7 +131,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
                      if isinstance(item, dict)]
         attempts = [identifier for identifier in about_ids
                     if identifier in entities and "CreateAction" in _types(entities[identifier].get("@type"))]
-        if isinstance(summary, str) and summary.strip() and attempts:
+        if isinstance(summary, str) and summary.strip() and len(attempts) == 1:
             interpretations.append({"record": node["@id"], "summary": summary,
                                     "aboutAttempt": attempts[0]})
     return {

@@ -200,7 +200,7 @@ class RevisionTests(unittest.TestCase):
             self.assertEqual(result["parentPackageSha256"], attempt_sha)
             recipe_path = final.with_name("final.source") / "experiment.json"
             verified = verify_bytes(final.read_bytes(), recipe=load_recipe(recipe_path))
-            self.assertEqual(verified["lifecycle"]["creativeWorkStatus"], "Published")
+            self.assertEqual(verified["lifecycle"]["creativeWorkStatus"], "Draft")
             self.assertEqual(verified["lifecycle"]["attemptCount"], 1)
             profile_check = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/validate_current_ro_profiles.py"),
@@ -222,6 +222,68 @@ class RevisionTests(unittest.TestCase):
             interpretation = catalog["experiments"][0]["scientificInterpretation"]
             self.assertEqual(interpretation[0]["summary"],
                              "Operational success is recorded; the scientific finding remains inconclusive.")
+
+    def test_catalog_rejects_tampered_finalization_source_closure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            decision = directory / "decision.md"
+            decision.write_text("## Interpretation\nThe fixture finding is inconclusive.\n")
+            review = directory / "review.md"
+            review.write_text("## Review\nSynthetic evidence is shareable.\n")
+            final = directory / "final.zip"
+            finalize_package(
+                attempt, final, expected_sha256=sha256(attempt.read_bytes()), attempt_id=attempt_id,
+                experiment_id="linear-regression-final-v1", title="Final pipeline fixture",
+                decision_path=decision, decision_summary="The fixture finding is inconclusive.",
+                review_path=review, review_summary="Synthetic evidence is shareable.",
+                reviewer_name="Fixture reviewer")
+            decision_source = final.with_name("final.source") / "evidence/scientific-decision.md"
+            decision_source.write_text("Changed after packaging.\n")
+            with self.assertRaisesRegex(PackageError, "Source integrity mismatch"):
+                describe_catalog(final.with_name("final.source"))
+
+    def test_finalization_rejects_receipt_action_outcome_conflict(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            with zipfile.ZipFile(attempt) as archive:
+                files = {name: archive.read(name) for name in archive.namelist()}
+            receipt_name = next(name for name in files if name.endswith("/runner-receipt.json"))
+            receipt = json.loads(files[receipt_name])
+            receipt["status"] = "failed"
+            receipt["exitCode"] = 17
+            receipt["timedOut"] = False
+            files[receipt_name] = json.dumps(receipt).encode()
+            malformed = directory / "conflicting-attempt.zip"
+            with zipfile.ZipFile(malformed, "w") as archive:
+                for name, content in files.items():
+                    archive.writestr(name, content)
+            with self.assertRaisesRegex(PackageError, "conflicts with selected CreateAction"):
+                _read_parent_attempt(malformed.read_bytes(), attempt_id)
+
+    def test_attempt_selection_accepts_consistent_failed_and_timed_out_runs(self):
+        for status, exit_code, timed_out in (("failed", 17, False), ("timed-out", 124, True)):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                attempt, _, _, attempt_id = self._attempt(directory)
+                with zipfile.ZipFile(attempt) as archive:
+                    files = {name: archive.read(name) for name in archive.namelist()}
+                receipt_name = next(name for name in files if name.endswith("/runner-receipt.json"))
+                receipt = json.loads(files[receipt_name])
+                receipt.update({"status": status, "exitCode": exit_code, "timedOut": timed_out})
+                files[receipt_name] = json.dumps(receipt).encode()
+                crate = json.loads(files["ro-crate-metadata.json"])
+                action = next(node for node in crate["@graph"]
+                              if node.get("@id") == f"#attempt-{attempt_id}")
+                action["actionStatus"] = "https://schema.org/FailedActionStatus"
+                files["ro-crate-metadata.json"] = json.dumps(crate).encode()
+                consistent = directory / "consistent-attempt.zip"
+                with zipfile.ZipFile(consistent, "w") as archive:
+                    for name, content in files.items():
+                        archive.writestr(name, content)
+                _, selected_receipt, _ = _read_parent_attempt(consistent.read_bytes(), attempt_id)
+                self.assertEqual(selected_receipt["status"], status)
 
     def test_finalization_rejects_missing_identity_without_writing(self):
         with tempfile.TemporaryDirectory() as temporary:

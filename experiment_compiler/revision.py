@@ -67,6 +67,21 @@ def _read_parent_attempt(data: bytes, attempt_id: str) -> tuple[dict, dict, byte
             "https://schema.org/CompletedActionStatus",
             "https://schema.org/FailedActionStatus"}:
         raise PackageError("Selected attempt is not an executed CreateAction")
+    receipt_status = receipt.get("status")
+    exit_code = receipt.get("exitCode")
+    timed_out = receipt.get("timedOut")
+    if (receipt_status not in {"succeeded", "failed", "timed-out"} or
+            type(exit_code) is not int or type(timed_out) is not bool):
+        raise PackageError("Runner receipt has invalid process outcome fields")
+    completed = action.get("actionStatus") == "https://schema.org/CompletedActionStatus"
+    failed = action.get("actionStatus") == "https://schema.org/FailedActionStatus"
+    consistent = (
+        (receipt_status == "succeeded" and exit_code == 0 and not timed_out and completed) or
+        (receipt_status == "failed" and exit_code != 0 and not timed_out and failed) or
+        (receipt_status == "timed-out" and exit_code != 0 and timed_out and failed)
+    )
+    if not consistent:
+        raise PackageError("Runner receipt process outcome conflicts with selected CreateAction status")
     action_result_values = action.get("result", [])
     if isinstance(action_result_values, dict):
         action_result_values = [action_result_values]
