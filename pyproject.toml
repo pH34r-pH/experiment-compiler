@@ -18,8 +18,12 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 
+[project.optional-dependencies]
+runner = ["PyYAML==6.0.2"]
+
 [project.scripts]
 experiment-compiler = "experiment_compiler.__main__:main"
+experiment-runner = "experiment_compiler.runner_cli:main"
 
 [project.urls]
 Repository = "https://github.com/pH34r-pH/experiment-compiler"

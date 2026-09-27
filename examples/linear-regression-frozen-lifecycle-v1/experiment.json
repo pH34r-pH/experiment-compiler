@@ -1,0 +1,121 @@
+{
+  "buildRecipeVersion": 1,
+  "id": "linear-regression-frozen-lifecycle-v1",
+  "manifest": {
+    "evidence": {
+      "referencePackageSha256": "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544"
+    },
+    "packageType": "compiled-experiment",
+    "profile": "compiled-experiment-lifecycle-v1",
+    "schemaVersion": 2,
+    "source": {
+      "commit": "a4bebe3fff748268f037e5fa622b51ad40322a91",
+      "repository": "pH34r-pH/experiment-compiler"
+    },
+    "standards": {
+      "cwl": "1.2",
+      "processRunCrate": "0.6",
+      "roCrate": "1.3"
+    }
+  },
+  "members": [
+    {
+      "path": "experiment/README.md",
+      "sha256": "5e9a8e9b0873e2cfe58b731a72d9e6fa795703763be728e50ba117adf17591fd",
+      "size": 565,
+      "source": "source/README.md"
+    },
+    {
+      "path": "experiment/DATA-LICENSE.md",
+      "sha256": "ff2b1e2390be32ad4e9b655ade81c33562255a07135fb9451803f411fdd32906",
+      "size": 301,
+      "source": "source/DATA-LICENSE.md"
+    },
+    {
+      "path": "experiment/acceptance.json",
+      "sha256": "1d42b10f65478f5caa27966eacd9772e12aa8b4a3d50ebf4249550921249a85d",
+      "size": 146,
+      "source": "source/acceptance.json"
+    },
+    {
+      "path": "experiment/data.csv",
+      "sha256": "58840d311a5d00055846ab5384fd025c46d15c85a542a18f9bf38fc3fdac2c16",
+      "size": 50,
+      "source": "source/data.csv"
+    },
+    {
+      "path": "experiment/environment.json",
+      "sha256": "87444108a17d4fc4d51687e4004c98fb7475c746637e31973187718393771664",
+      "size": 257,
+      "source": "source/environment.json"
+    },
+    {
+      "path": "experiment/expected-result.json",
+      "sha256": "edba58ae1f7c630b7ba05c3bc884c481aa19209475fe2d19cb21f9616d66fb78",
+      "size": 631,
+      "source": "source/expected-result.json"
+    },
+    {
+      "path": "experiment/experiment-config.json",
+      "sha256": "f9fbaccb145695ed87e4185f0c5e097ef9a8617035182696b7908a1d46ecd013",
+      "size": 89,
+      "source": "source/experiment-config.json"
+    },
+    {
+      "path": "experiment/protocol.md",
+      "sha256": "e633be4df19f926f918ece3f1196fac1130f60f8dde0352087e9716632267628",
+      "size": 1643,
+      "source": "source/protocol.md"
+    },
+    {
+      "path": "experiment/reproduce.py",
+      "sha256": "4e8ceed253de7f3dd5a5f29fdbf967cebdc35eaee7c94f48923feed88ad27977",
+      "size": 2448,
+      "source": "source/reproduce.py"
+    },
+    {
+      "path": "experiment/run_experiment.py",
+      "sha256": "59d70c368ae09f79d9514ea6faf50d550567b9e06fccd6b64dfba1ed02decbda",
+      "size": 6473,
+      "source": "source/run_experiment.py"
+    },
+    {
+      "path": "experiment/test_experiment.py",
+      "sha256": "4f0b0fb03b1b0d6dcafadcf12e70a7a91fc232a641d277e71af6ea776764343f",
+      "size": 1867,
+      "source": "source/test_experiment.py"
+    },
+    {
+      "path": "experiment/runner.json",
+      "sha256": "cb14ce96f3fb5551ab116feceea5d966801280fa4cfae2058761bfc0c3fb7bb9",
+      "size": 239,
+      "source": "source/runner.json"
+    },
+    {
+      "path": "experiment/workflow.cwl",
+      "sha256": "7e78afd0c6267349f559f7d3bb53b55a0c10c96412b18dac339930a1bb2c054d",
+      "size": 1851,
+      "source": "source/workflow.cwl"
+    },
+    {
+      "path": "experiment/job.yml",
+      "sha256": "3f4f46751e3dda9070ceb7c51dfce5d294b11a5ac6b8f0136aa17dc3e251a39c",
+      "size": 452,
+      "source": "source/job.yml"
+    },
+    {
+      "path": "dependency-closure.json",
+      "sha256": "be70d85233d5fc53e07c25c69831c2034644b0af731b32c00625801f7df152e0",
+      "size": 1115,
+      "source": "dependency-closure.json"
+    },
+    {
+      "path": "ro-crate-metadata.json",
+      "sha256": "688e415b1e498240699a9a2d043c165042dbbac21b942ae254a3579b068d3d27",
+      "size": 5008,
+      "source": "ro-crate-metadata.json"
+    }
+  ],
+  "profile": "compiled-experiment-lifecycle-v1",
+  "title": "Frozen linear-regression lifecycle fixture"
+}

@@ -78,7 +78,7 @@ See [the recipe contract](docs/build-recipe.md), [origins](ORIGINS.md) and [cont
 
 ## One build lifecycle
 
-The `Experiment Compiler lifecycle` GitHub Actions workflow tests and rebuilds the POC on pull requests, pushes to `main`, and manual dispatch. Manual rebuilds need no copied IDs or credentials. CI checks the known historical checksum, builds twice, verifies the inventory, tests the installed wheel, and uploads the ZIP, receipts and Python wheel. A passing run qualifies those packaging checks only.
+The `Experiment Compiler lifecycle` GitHub Actions workflow tests and rebuilds packages on pull requests, pushes to `main`, and manual dispatch. It also executes one fixed, reviewed, credential-free lifecycle fixture inside a network-disabled, resource-bounded worker; records a separate immutable result package; and verifies that the result appears in the derived catalog. That fixture exercises the plan → attempt → result-package → catalog handoff, not an open service for arbitrary submitted workflows and not scientific review. CI retains the output package and its catalog source closure as an artifact.
 
 The public compiler is now the reviewed source used by the Fleet/Portfolio publication path for the active self-contained Compiled Experiment. Fleet pins an exact public compiler revision, rebuilds and verifies the package, reproduces it from the extracted ZIP, and derives Portfolio display metadata from these authoritative artifacts rather than maintaining a second catalog by hand. The historical #164 POC remains available as a compatibility artifact.
 

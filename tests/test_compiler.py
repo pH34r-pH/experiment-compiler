@@ -321,14 +321,19 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(descriptor["reproduction"]["entrypoint"], "experiment/reproduce.py")
         self.assertEqual(descriptor["contents"]["unavailable"], [])
 
-    def test_catalog_discovery_excludes_historical_poc_without_registry(self):
+    def test_catalog_discovers_plan_and_published_package_without_registry(self):
         recipes = discover_recipes(ROOT / "examples")
-        self.assertEqual(recipes, [SELF_CONTAINED / "experiment.json"])
+        self.assertEqual(recipes, [ROOT / "examples/linear-regression-frozen-lifecycle-v1/experiment.json",
+                                   ROOT / "examples/linear-regression-plan-v1/experiment.json",
+                                   SELF_CONTAINED / "experiment.json"])
         catalog = describe_catalog(ROOT / "examples")
         self.assertEqual(catalog["schemaVersion"], 1)
         self.assertEqual([item["id"] for item in catalog["experiments"]],
-                         ["stdlib-linear-regression-v1-compiled-experiment"])
-        self.assertEqual(catalog["experiments"][0]["package"]["sha256"],
+                         ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+                          "stdlib-linear-regression-v1-compiled-experiment"])
+        self.assertIsNone(catalog["experiments"][1]["package"])
+        self.assertEqual(catalog["experiments"][1]["lifecycle"]["creativeWorkStatus"], "Draft")
+        self.assertEqual(catalog["experiments"][2]["package"]["sha256"],
                          "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
 
     def test_source_tampering_fails_before_output(self):

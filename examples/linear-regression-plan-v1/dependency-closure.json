@@ -1,0 +1,18 @@
+{
+  "classifications": {
+    "embedded": [
+      {"item": "training and evaluation data", "path": "experiment/data.csv"},
+      {"item": "training configuration", "path": "experiment/experiment-config.json"},
+      {"item": "acceptance rule", "path": "experiment/acceptance.json"},
+      {"item": "scientific implementation", "path": "experiment/run_experiment.py"},
+      {"item": "CWL workflow", "path": "experiment/workflow.cwl"},
+      {"item": "CWL job inputs", "path": "experiment/job.yml"}
+    ],
+    "external": [],
+    "publicImmutableReferences": [],
+    "unavailable": []
+  },
+  "experimentId": "linear-regression-plan-v1",
+  "runtimeNetworkRequired": false,
+  "schemaVersion": 1
+}

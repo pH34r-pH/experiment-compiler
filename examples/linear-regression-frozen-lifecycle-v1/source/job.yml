@@ -1,0 +1,27 @@
+reproduce:
+  class: File
+  path: reproduce.py
+implementation:
+  class: File
+  path: run_experiment.py
+tests:
+  class: File
+  path: test_experiment.py
+data:
+  class: File
+  path: data.csv
+configuration:
+  class: File
+  path: experiment-config.json
+acceptance:
+  class: File
+  path: acceptance.json
+expectedResult:
+  class: File
+  path: expected-result.json
+environment:
+  class: File
+  path: environment.json
+protocol:
+  class: File
+  path: protocol.md

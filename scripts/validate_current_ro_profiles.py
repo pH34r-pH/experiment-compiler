@@ -84,7 +84,8 @@ def main(argv=None) -> int:
             fail("root entity missing required property: " + key)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", root_entity["datePublished"]):
         fail("datePublished must be an ISO 8601 date")
-    if one_id(root_entity.get("conformsTo")) != PROCESS:
+    root_profiles = set(refs(root_entity.get("conformsTo", [])))
+    if PROCESS not in root_profiles:
         fail("root entity must declare Process Run Crate 0.6")
     license_id = one_id(root_entity["license"])
     if license_id not in entities:

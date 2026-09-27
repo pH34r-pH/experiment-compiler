@@ -1,0 +1,209 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context"
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "conformsTo": [
+        {
+          "@id": "https://w3id.org/ro/crate/1.3"
+        }
+      ],
+      "description": "Lifecycle plan for rerunning the existing self-contained linear-regression reproduction through a digest-pinned CWL workflow.",
+      "hasPart": [
+        {
+          "@id": "experiment/README.md"
+        },
+        {
+          "@id": "experiment/DATA-LICENSE.md"
+        },
+        {
+          "@id": "experiment/acceptance.json"
+        },
+        {
+          "@id": "experiment/data.csv"
+        },
+        {
+          "@id": "experiment/environment.json"
+        },
+        {
+          "@id": "experiment/expected-result.json"
+        },
+        {
+          "@id": "experiment/experiment-config.json"
+        },
+        {
+          "@id": "experiment/protocol.md"
+        },
+        {
+          "@id": "experiment/reproduce.py"
+        },
+        {
+          "@id": "experiment/run_experiment.py"
+        },
+        {
+          "@id": "experiment/test_experiment.py"
+        },
+        {
+          "@id": "experiment/runner.json"
+        },
+        {
+          "@id": "experiment/workflow.cwl"
+        },
+        {
+          "@id": "experiment/job.yml"
+        },
+        {
+          "@id": "dependency-closure.json"
+        }
+      ],
+      "identifier": "linear-regression-frozen-lifecycle-v1",
+      "license": {
+        "@id": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "mainEntity": {
+        "@id": "experiment/protocol.md"
+      },
+      "name": "Frozen linear-regression lifecycle fixture",
+      "variableMeasured": [
+        {
+          "@id": "#ram-unknown"
+        },
+        {
+          "@id": "#wall-unknown"
+        }
+      ]
+    },
+    {
+      "@id": "experiment/protocol.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "creativeWorkStatus": "Published",
+      "name": "Frozen linear-regression reproduction protocol",
+      "potentialAction": {
+        "@id": "#planned-run"
+      }
+    },
+    {
+      "@id": "#planned-run",
+      "@type": "CreateAction",
+      "actionStatus": "https://schema.org/PotentialActionStatus",
+      "instrument": {
+        "@id": "experiment/workflow.cwl"
+      },
+      "name": "Rerun the frozen reproduction through CWL"
+    },
+    {
+      "@id": "experiment/workflow.cwl",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "CWL v1.2 execution workflow",
+      "programmingLanguage": "Common Workflow Language"
+    },
+    {
+      "@id": "experiment/reproduce.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "Frozen source-owned reproduction entrypoint",
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/run_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/test_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/data.csv",
+      "@type": "File",
+      "encodingFormat": "text/csv"
+    },
+    {
+      "@id": "experiment/expected-result.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "dependency-closure.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "#ram-unknown",
+      "@type": "PropertyValue",
+      "measurementTechnique": "not measured through the lifecycle runner",
+      "propertyID": "peak process memory",
+      "value": "unknown"
+    },
+    {
+      "@id": "#wall-unknown",
+      "@type": "PropertyValue",
+      "measurementTechnique": "not measured through the lifecycle runner",
+      "propertyID": "wall-clock duration",
+      "value": "unknown"
+    },
+    {
+      "@id": "experiment/README.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown"
+    },
+    {
+      "@id": "experiment/DATA-LICENSE.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown"
+    },
+    {
+      "@id": "experiment/acceptance.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/environment.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/experiment-config.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/runner.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/job.yml",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    }
+  ]
+}
