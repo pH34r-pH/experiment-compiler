@@ -291,6 +291,37 @@ def validate_lifecycle_crate(crate: Any) -> dict:
             isinstance(maturity, dict) and isinstance(maturity.get("@id"), str)):
         raise PackageError("Protocol CreativeWork must declare Schema.org creativeWorkStatus")
 
+    resource_measurements = []
+    for value in _as_refs(root.get("variableMeasured")):
+        measurement = nodes.get(value.get("@id")) if isinstance(value.get("@id"), str) else value
+        if (not isinstance(measurement, dict) or "PropertyValue" not in _types(measurement.get("@type")) or
+                not isinstance(measurement.get("propertyID"), str) or not measurement["propertyID"].strip() or
+                not isinstance(measurement.get("measurementTechnique"), str) or
+                not measurement["measurementTechnique"].strip() or "value" not in measurement):
+            raise PackageError("Root Dataset variableMeasured must reference documented Schema.org PropertyValue records")
+        amount = measurement["value"]
+        if isinstance(amount, bool) or not isinstance(amount, (str, int, float)):
+            raise PackageError("Resource PropertyValue must use a number or explicit text such as unknown")
+        technique = measurement["measurementTechnique"].strip().casefold()
+        if isinstance(amount, str) and amount.strip().casefold() == "unknown":
+            if "unitText" in measurement:
+                raise PackageError("Unknown resource PropertyValue must not invent a unit or zero quantity")
+        else:
+            if not (isinstance(measurement.get("unitText"), str) and measurement["unitText"].strip()):
+                raise PackageError("Numeric resource PropertyValue must declare Schema.org unitText")
+            if amount == 0 and any(term in technique for term in ("unknown", "unmeasured", "not measured")):
+                raise PackageError("Unknown resource PropertyValue must not be encoded as zero")
+            evidence = measurement.get("valueReference")
+            if not ((isinstance(evidence, str) and evidence.strip()) or
+                    (isinstance(evidence, dict) and isinstance(evidence.get("@id"), str))):
+                raise PackageError("Numeric resource PropertyValue must link its evidence or estimate basis")
+        resource_measurements.append({
+            "propertyID": measurement["propertyID"], "value": amount,
+            "unitText": measurement.get("unitText"),
+            "measurementTechnique": measurement["measurementTechnique"],
+            "evidence": measurement.get("valueReference"),
+        })
+
     run_profile = "https://w3id.org/ro/wfrun/process/0.6"
     declares_run = any(
         ref.get("@id") == run_profile
@@ -347,7 +378,8 @@ def validate_lifecycle_crate(crate: Any) -> dict:
                 raise PackageError("Unexecuted potentialAction must use PotentialActionStatus")
             potential.append(action.get("@id"))
     return {"creativeWorkStatus": maturity, "attemptCount": len(actions),
-            "processRunCrate": declares_run, "potentialActionCount": len(potential)}
+            "processRunCrate": declares_run, "potentialActionCount": len(potential),
+            "resourceMeasurements": resource_measurements}
 
 
 def _types(value: Any) -> set[str]:

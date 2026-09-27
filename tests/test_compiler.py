@@ -132,8 +132,8 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(checked["profile"], "compiled-experiment-v1")
         self.assertEqual(checked["memberCount"], 18)
 
-    def lifecycle_fixture(self, *, action_status=None, process_run=False):
-        root = self.root / "lifecycle"
+    def lifecycle_fixture(self, *, action_status=None, process_run=False, directory="lifecycle"):
+        root = self.root / directory
         root.mkdir()
         files = {
             "README.md": b"# Prospective example\n\n## Hypothesis\nA testable hypothesis.\n",
@@ -150,10 +150,17 @@ class CompilerTests(unittest.TestCase):
              "conformsTo": [{"@id": "https://w3id.org/ro/crate/1.3"}],
              "mainEntity": {"@id": "experiment/protocol.md"},
              "hasPart": [{"@id": "experiment/README.md"}, {"@id": "experiment/protocol.md"},
-                         {"@id": "experiment/runner.py"}]},
+                         {"@id": "experiment/runner.py"}, {"@id": "dependency-closure.json"}],
+             "variableMeasured": [{"@id": "#ram"}, {"@id": "#gpu"}]},
+            {"@id": "dependency-closure.json", "@type": "File", "encodingFormat": "application/json"},
             {"@id": "experiment/protocol.md", "@type": ["File", "CreativeWork"], "name": "Prospective protocol",
              "creativeWorkStatus": "Draft", "potentialAction": {"@id": "#planned-run"}},
             action,
+            {"@id": "#ram", "@type": "PropertyValue", "propertyID": "CWL ResourceRequirement.ramMin",
+             "value": 32, "unitText": "MiB", "measurementTechnique": "conservative headroom; measured peak RSS plus margin",
+             "valueReference": {"@id": "https://example.org/receipt#ram"}},
+            {"@id": "#gpu", "@type": "PropertyValue", "propertyID": "accelerator VRAM",
+             "value": "unknown", "measurementTechnique": "no approved training pilot"},
             {"@id": "experiment/README.md", "@type": "File", "encodingFormat": "text/markdown"},
             {"@id": "experiment/runner.py", "@type": ["File", "SoftwareSourceCode"],
              "programmingLanguage": "Python"},
@@ -170,6 +177,9 @@ class CompilerTests(unittest.TestCase):
             context.append("https://w3id.org/ro/terms/workflow-run/context")
         files["ro-crate-metadata.json"] = canonical({"@context": context,
             "@graph": graph})
+        files["dependency-closure.json"] = canonical({"classifications": {
+            "embedded": [{"item": "runner", "path": "experiment/runner.py"}],
+            "external": [], "unavailable": [{"item": "frozen checkpoint weights", "id": "missing/checkpoint.bin"}]}})
         (root / "experiment").mkdir()
         members = []
         for name, content, path in (
@@ -177,6 +187,7 @@ class CompilerTests(unittest.TestCase):
             ("experiment/protocol.md", files["protocol.md"], "experiment/protocol.md"),
             ("experiment/runner.py", files["runner.py"], "experiment/runner.py"),
             ("ro-crate-metadata.json", files["ro-crate-metadata.json"], "ro-crate-metadata.json"),
+            ("dependency-closure.json", files["dependency-closure.json"], "dependency-closure.json"),
         ):
             if path != "ro-crate-metadata.json":
                 (root / path).write_bytes(content)
@@ -201,11 +212,49 @@ class CompilerTests(unittest.TestCase):
         result = compile_package(recipe_path, output)
         self.assertEqual(result["profile"], "compiled-experiment-lifecycle-v1")
         self.assertEqual(result["lifecycle"], {"creativeWorkStatus": "Draft", "attemptCount": 0,
-                         "processRunCrate": False, "potentialActionCount": 1})
+                         "processRunCrate": False, "potentialActionCount": 1,
+                         "resourceMeasurements": [
+                             {"propertyID": "CWL ResourceRequirement.ramMin", "value": 32, "unitText": "MiB",
+                              "measurementTechnique": "conservative headroom; measured peak RSS plus margin",
+                              "evidence": {"@id": "https://example.org/receipt#ram"}},
+                             {"propertyID": "accelerator VRAM", "value": "unknown", "unitText": None,
+                              "measurementTechnique": "no approved training pilot", "evidence": None}]})
         self.assertEqual(result["scope"], "package-integrity-only")
         self.assertEqual(result["scientificReproduction"], "not-run")
         self.assertIsNone(describe_recipe(recipe_path)["scientificInterpretation"])
         self.assertEqual(describe_catalog(recipe_path.parent)["experiments"][0]["lifecycle"]["attemptCount"], 0)
+
+    def test_lifecycle_catalog_shows_external_prerequisite_only_with_digest_size_and_license(self):
+        recipe_path, recipe, graph = self.lifecycle_fixture()
+        closure_path = recipe_path.parent / "dependency-closure.json"
+        closure = {"classifications": {"embedded": [], "external": [{
+            "item": "frozen checkpoint", "id": "https://data.example.org/frozen.npz",
+            "contentUrl": "https://data.example.org/frozen.npz", "sha256": "a" * 64,
+            "contentSize": 4096, "license": "https://creativecommons.org/licenses/by/4.0/"}], "unavailable": []}}
+        closure_path.write_bytes(canonical(closure))
+        recipe["members"][4]["sha256"] = sha256(closure_path.read_bytes())
+        recipe["members"][4]["size"] = closure_path.stat().st_size
+        recipe_path.write_bytes(canonical(recipe))
+        record = describe_catalog(recipe_path.parent)["experiments"][0]
+        self.assertEqual(record["contents"]["external"][0]["id"], "https://data.example.org/frozen.npz")
+        self.assertEqual(record["unavailablePrerequisites"], [])
+
+    def test_lifecycle_rejects_unknown_resource_encoded_as_zero_or_with_unit(self):
+        for index, measurement in enumerate((
+                {"@id": "#x", "@type": "PropertyValue", "propertyID": "RAM", "value": 0,
+                 "unitText": "MiB", "measurementTechnique": "unknown"},
+                {"@id": "#x", "@type": "PropertyValue", "propertyID": "VRAM", "value": "unknown",
+                 "unitText": "MiB", "measurementTechnique": "not measured"})):
+            recipe_path, recipe, graph = self.lifecycle_fixture(directory=f"lifecycle-invalid-resource-{index}")
+            graph[1]["variableMeasured"] = [{"@id": "#x"}]
+            graph.append(measurement)
+            metadata = recipe_path.parent / "ro-crate-metadata.json"
+            metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context"], "@graph": graph}))
+            recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+            recipe["members"][3]["size"] = metadata.stat().st_size
+            recipe_path.write_bytes(canonical(recipe))
+            with self.subTest(value=measurement["value"]), self.assertRaises(PackageError):
+                compile_package(recipe_path, self.root / f"invalid-resource-{measurement['propertyID']}.zip")
 
     def test_lifecycle_execution_requires_explicit_action_status_and_run_profile(self):
         recipe_path, recipe, graph = self.lifecycle_fixture(
