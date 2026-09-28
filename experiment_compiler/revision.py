@@ -12,9 +12,10 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .assembly import compile_source_closure
 from .core import (MANIFEST, MAX_FILE, MAX_TOTAL, PackageError, bounded_read,
-                   canonical, compile_package, json_value, load_recipe, safe_path,
-                   sha256, validate_lifecycle_crate, verify_bytes, write_once)
+                   canonical, json_value, load_recipe, safe_path, sha256,
+                   validate_lifecycle_crate, verify_bytes)
 
 
 PROV = "https://www.w3.org/ns/prov#"
@@ -260,36 +261,15 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
         if "experiment.json" in files:
             raise PackageError("Revision package member experiment.json conflicts with its source-owned recipe")
 
-        stage = temporary / "closure"
-        stage.mkdir()
-        members = []
-        for archive_path, data in sorted(files.items()):
-            source = archive_path
-            target = stage.joinpath(*safe_path(source).split("/"))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-            members.append({"path": archive_path, "source": source,
-                            "sha256": sha256(data), "size": len(data)})
-        revised_recipe = {key: value for key, value in recipe.items()
-                          if key not in {"members", "expectedPackage"}}
-        revised_recipe["members"] = members
-        recipe_path_in_stage = stage / "experiment.json"
-        recipe_path_in_stage.write_bytes(canonical(revised_recipe))
+        revised_recipe = {
+            key: value for key, value in recipe.items()
+            if key not in {"members", "expectedPackage"}
+        }
         if new_protocol.get("@id") not in files:
             raise PackageError("Revised protocol must resolve to a packaged member")
-        temporary_package = temporary / "revised.zip"
-        result = compile_package(recipe_path_in_stage, temporary_package)
-        revised_recipe["expectedPackage"] = {"sha256": result["packageSha256"],
-                                              "size": result["packageSizeBytes"]}
-        recipe_path_in_stage.write_bytes(canonical(revised_recipe))
-        # Prepare both deliverables before exposing either; remove the source
-        # closure if the immutable package cannot be created.
-        shutil.copytree(stage, source_directory)
-        try:
-            write_once(output, temporary_package.read_bytes())
-        except (OSError, PackageError):
-            shutil.rmtree(source_directory, ignore_errors=True)
-            raise
+        result = compile_source_closure(
+            temporary, output, source_directory, files, revised_recipe, "revised.zip"
+        )
         return {**result, "parentPackageSha256": expected_sha256,
                 "selectedAttemptId": attempt_id,
                 "revisionProtocolSha256": sha256(files[new_protocol["@id"]]),
