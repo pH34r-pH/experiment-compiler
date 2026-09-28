@@ -367,22 +367,40 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
                 return_code = process.returncode if process.returncode else 124
     except subprocess.SubprocessError as exc:
         raise PackageError(f"CWL runner could not start: {exc}") from exc
-    output_files: dict[str, bytes] = {}
-    if attempt_out.exists():
-        _collect_tree(attempt_out, output_files, MAX_TOTAL)
-    provenance_files: dict[str, bytes] = {}
-    if provenance.exists():
-        _collect_tree(provenance, provenance_files, MAX_TOTAL)
+    collection_errors: list[str] = []
+    output_files = _collect_execution_tree(attempt_out, "output", collection_errors)
+    provenance_files = _collect_execution_tree(provenance, "provenance", collection_errors)
     if not output_files and return_code == 0:
-        raise PackageError("CWL runner succeeded without producing any declared result files")
+        collection_errors.append("CWL runner succeeded without producing any admitted result files")
     return {
         "returnCode": return_code,
         "timedOut": timed_out,
-        "stdout": bounded_read(stdout_path, 4 * 1024 * 1024),
-        "stderr": bounded_read(stderr_path, 4 * 1024 * 1024),
+        "stdout": _read_execution_log(stdout_path, "stdout", collection_errors),
+        "stderr": _read_execution_log(stderr_path, "stderr", collection_errors),
         "outputs": output_files,
         "provenance": provenance_files,
+        "collectionErrors": collection_errors,
     }
+
+
+def _collect_execution_tree(root: Path, label: str, errors: list[str]) -> dict[str, bytes]:
+    collected: dict[str, bytes] = {}
+    if not root.exists():
+        return collected
+    try:
+        _collect_tree(root, collected, MAX_TOTAL)
+    except PackageError as exc:
+        collected.clear()
+        errors.append(f"{label} collection rejected: {exc}")
+    return collected
+
+
+def _read_execution_log(path: Path, label: str, errors: list[str]) -> bytes:
+    try:
+        return bounded_read(path, 4 * 1024 * 1024)
+    except PackageError as exc:
+        errors.append(f"{label} rejected: {exc}")
+        return b""
 
 
 def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_sha256: str,
@@ -435,9 +453,10 @@ def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_
         },
         "status": (
             "timed-out" if execution["timedOut"]
-            else "succeeded" if execution["returnCode"] == 0
-            else "failed"
+            else "failed" if execution["returnCode"] != 0 or execution["collectionErrors"]
+            else "succeeded"
         ),
+        "collectionErrors": execution["collectionErrors"],
         "exitCode": execution["returnCode"],
         "timedOut": execution["timedOut"],
         "startedAt": created.isoformat(),
@@ -510,7 +529,7 @@ def _augment_result_crate(augmented: dict[str, bytes], expected_sha256: str, run
         "name": f"CWL attempt {run_id}",
         "actionStatus": (
             "https://schema.org/CompletedActionStatus"
-            if execution["returnCode"] == 0 and not execution["timedOut"]
+            if execution["returnCode"] == 0 and not execution["timedOut"] and not execution["collectionErrors"]
             else "https://schema.org/FailedActionStatus"
         ),
         "instrument": {"@id": "experiment/workflow.cwl"},
@@ -554,7 +573,10 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
     }
     recipe_path.write_bytes(canonical(recipe))
     shutil.copytree(stage, source_directory)
-    result["executionStatus"] = "failed" if execution["returnCode"] or execution["timedOut"] else "succeeded"
+    result["executionStatus"] = (
+        "failed" if execution["returnCode"] or execution["timedOut"] or execution["collectionErrors"]
+        else "succeeded"
+    )
     if result["executionStatus"] == "failed":
         result["exitCode"] = execution["returnCode"]
         result["timedOut"] = execution["timedOut"]

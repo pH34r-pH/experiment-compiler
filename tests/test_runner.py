@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import _admit_workflow, _collect_tree, _require_bounded_tmpfs, run_package
+from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree,
+                                        _require_bounded_tmpfs, run_package)
 from experiment_compiler.runner import sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -234,6 +235,17 @@ class: CommandLineTool
             self.assertEqual(outcome["executionStatus"], "succeeded")
             verified = verify_bytes(result.read_bytes())
             self.assertEqual(verified["profile"], "compiled-experiment-lifecycle-v1")
+
+    def test_execution_collection_rejection_is_recorded_without_admitting_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.txt"
+            target.write_text("data")
+            (root / "rejected-link.txt").symlink_to(target)
+            errors = []
+            collected = _collect_execution_tree(root, "output", errors)
+            self.assertEqual(collected, {})
+            self.assertTrue(any("symlink" in error for error in errors))
 
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
