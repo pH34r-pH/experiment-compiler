@@ -179,6 +179,62 @@ class: CommandLineTool
                                     allow_workflow_execution=True)
                     popen.assert_not_called()
 
+    def test_podman_mode_selects_podman_in_the_pinned_cwltool_runner(self):
+        class CompletedProcess:
+            pid = 102
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        def fake_popen(command, **kwargs):
+            self.assertIn("--podman", command)
+            self.assertIn("--disable-pull", command)
+            self.assertNotIn("--no-container", command)
+            outdir = Path(command[command.index("--outdir") + 1])
+            provdir = Path(command[command.index("--provenance") + 1])
+            outdir.mkdir(parents=True)
+            (outdir / "result.txt").write_text("fixture result\\n")
+            provdir.mkdir(parents=True)
+            (provdir / "workflow-run.json").write_text('{"fixture":"provenance"}\\n')
+            return CompletedProcess()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            fixture = directory / "fixture"
+            shutil.copytree(ROOT / "examples/linear-regression-plan-v1", fixture)
+            runner_path = fixture / "source/runner.json"
+            runner = json.loads(runner_path.read_text())
+            runner["executionMode"] = "cwltool-podman"
+            runner_path.write_text(json.dumps(runner, indent=2) + "\\n")
+            recipe_path = fixture / "experiment.json"
+            recipe = json.loads(recipe_path.read_text())
+            for member in recipe["members"]:
+                if member["source"] == "source/runner.json":
+                    runner_bytes = runner_path.read_bytes()
+                    member["sha256"] = sha256_bytes(runner_bytes)
+                    member["size"] = len(runner_bytes)
+            recipe_path.write_text(json.dumps(recipe, indent=2) + "\\n")
+            plan = directory / "plan.zip"
+            built = compile_package(recipe_path, plan)
+            result = directory / "result.zip"
+            limits = '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}'
+            with patch.dict(os.environ, {
+                    "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                    "EXPERIMENT_RUNNER_SANDBOX": "rootless Podman fixture",
+                    "EXPERIMENT_RUNNER_RESOURCE_LIMITS": limits,
+                    "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+                    "TMPDIR": str(directory),
+            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \\
+                    patch("experiment_compiler.runner.importlib.metadata.version",
+                          return_value="3.2.20260720092025"), \\
+                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
+                outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
+                                      allow_workflow_execution=True)
+            self.assertEqual(outcome["executionStatus"], "succeeded")
+            verified = verify_bytes(result.read_bytes())
+            self.assertEqual(verified["profile"], "compiled-experiment-lifecycle-v1")
+
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
             pid = 101
