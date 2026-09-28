@@ -210,6 +210,8 @@ class: CommandLineTool
 
         def fake_popen(command, **kwargs):
             self.assertIn("--podman", command)
+            python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
+            self.assertIn(python_lib, kwargs["env"]["LD_LIBRARY_PATH"].split(":"))
             self.assertIn("--disable-pull", command)
             self.assertNotIn("--no-container", command)
             outdir = Path(command[command.index("--outdir") + 1])

@@ -344,6 +344,12 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
         "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
+    inherited_ld_library_path = os.environ.get("LD_LIBRARY_PATH")
+    process_environment["LD_LIBRARY_PATH"] = (
+        f"{python_lib}:{inherited_ld_library_path}"
+        if inherited_ld_library_path else python_lib
+    )
     try:
         with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
             process = subprocess.Popen(
