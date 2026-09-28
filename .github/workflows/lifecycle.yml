@@ -276,8 +276,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - name: Install the bounded mutation toolchain
-        run: python -m pip install --disable-pip-version-check '.[mutation]'
+      - name: Install test dependencies and bounded mutation toolchain
+        run: python -m pip install --disable-pip-version-check '.[runner,mutation]'
       - name: Confirm the repository test suite under pytest
         run: python -m pytest -q tests
       - name: Mutate deterministic resource conversions
