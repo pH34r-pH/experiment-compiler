@@ -577,10 +577,6 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
     }
     recipe_path.write_bytes(canonical(recipe))
     result = compile_package(recipe_path, output)
-    recipe["expectedPackage"] = {
-        "sha256": result["packageSha256"], "size": result["packageSizeBytes"],
-    }
-    recipe_path.write_bytes(canonical(recipe))
     shutil.copytree(stage, source_directory)
     result["executionStatus"] = (
         "failed" if execution["returnCode"] or execution["timedOut"] or execution["collectionErrors"]
