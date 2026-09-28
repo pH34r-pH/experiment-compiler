@@ -1,93 +1,96 @@
 # Experiment Compiler
 
-Turn reviewed research inputs into a portable Compiled Experiment that another person or agent can inspect, verify and use as the starting point for reproduction.
+[![Lifecycle](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml/badge.svg)](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml)
+[![License](https://img.shields.io/github/license/pH34r-pH/experiment-compiler)](LICENSE)
 
-The compiler packages files and standards metadata. It does not define the science, execute training, invent missing methods, or require a hosted service.
+**Compile reviewed research inputs into portable, inspectable, integrity-verifiable experiment artifacts.**
 
-## Build the first POC
+Experiment Compiler packages explicit source bytes, standards metadata, dependency/resource closure, and provenance into versioned Compiled Experiments. It verifies those artifacts without inventing scientific semantics and provides a deliberately bounded execution handoff for reviewed lifecycle packages.
 
-Python 3.11 or later with zlib is sufficient. From a checkout, no installation or network access is needed:
+It does **not** define the science, fill in a missing method, infer a conclusion, or require a hosted service.
 
-```sh
-python -m experiment_compiler compile examples/issue-164/experiment.json \
-  --receipt dist/build-receipt.json
-python -m experiment_compiler verify dist/issue-164-experiment-package.zip \
-  --recipe examples/issue-164/experiment.json
-python -m unittest discover -s tests -v
-```
+## Quick start
 
-The result is the same initial POC already published through Portfolio:
-
-```text
-File:    dist/issue-164-experiment-package.zip
-Bytes:   15296
-SHA-256: 45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341
-```
-
-The eight reviewed source files are committed under `examples/issue-164/inputs/`. The compiler generates the manifest and ZIP from those files; it does not download or copy a prebuilt ZIP. The expected digest is a historical compatibility assertion and is checked before writing the result.
-
-For an installed command, use a virtual environment and `python -m pip install .`, then run `experiment-compiler compile examples/issue-164/experiment.json`. Installing build tooling can use the network; compiling and verifying do not. No PyPI publication is implied by the local package name.
-
-## What the first package contains
-
-The ZIP contains Croissant TaskProblem/TaskSolution JSON-LD, RO-Crate/Process Run Crate metadata, the normative AdamW update contract, a semantic audit, a standards gap register, validation instructions and a contract-receipt runner. A generated manifest binds the eight members and preserves the historical source and evidence hashes.
-
-This first POC proves **package-build compatibility and integrity**, not a self-contained scientific reproduction. Some data, implementation, tests, environment and evidence are references to the original research repository rather than embedded files. The included receipt runner expects tests that are not in this ZIP. The compiler verifies JSON syntax and byte integrity, not full standards conformance. Read [the scope and limitations](docs/poc-scope.md) before handing this POC to an agent.
-
-A useful agent instruction is: “Inspect the package and its gap register. Verify the digest and inventory. Identify included files versus external prerequisites, and report what is still needed before attempting an independent reproduction. Do not substitute missing scientific semantics.”
-
-## Reproduce a self-contained Compiled Experiment
-
-The second example is intentionally tiny so the complete scientific closure can live inside one package. It trains a one-dimensional linear model on embedded synthetic CC0 data using exact rational arithmetic and evaluates a held-out split.
-
-Build it:
+Python 3.11+ is sufficient for the core compiler/verifier.
 
 ```sh
 python -m experiment_compiler compile examples/linear-regression-v1/experiment.json
-python -m experiment_compiler verify dist/stdlib-linear-regression-v1-compiled-experiment.zip \
+
+python -m experiment_compiler verify \
+  dist/stdlib-linear-regression-v1-compiled-experiment.zip \
   --recipe examples/linear-regression-v1/experiment.json
+
+python -m unittest discover -s tests -v
 ```
 
-The frozen package identity is:
+The self-contained linear-regression fixture embeds the implementation, tests, synthetic data, environment/configuration, protocol, acceptance criteria, reference result, resource evidence, Croissant metadata, and RO-Crate / Process Run Crate provenance.
+
+For the historical #164 compatibility package and its narrower claim scope, see [docs/poc-scope.md](docs/poc-scope.md).
+
+## What “compiled” means
 
 ```text
-File:    dist/stdlib-linear-regression-v1-compiled-experiment.zip
-Bytes:   14010
-SHA-256: 251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544
+reviewed source -> versioned recipe -> deterministic package
+                                      |
+                                      +--> manifest
+                                      +--> provenance
+                                      +--> dependency/resource closure
+                                      |
+                                      v
+                                  verify bytes
+                                      |
+                              optional bounded run
+                                      |
+                                      v
+                           reviewed result artifact
 ```
 
-Then extract the ZIP and, from its `experiment/` directory, run:
+The compiler is intentionally conservative about claim strength:
 
-```sh
-python reproduce.py --output-dir reproduction
-```
+- **compile** establishes the package was built from the declared inputs under the selected profile;
+- **verify** establishes byte/inventory consistency and, with an external pin, package identity;
+- **run** records a bounded execution attempt;
+- **finalize** carries source-authored interpretation/review;
+- **publication** occurs through normal reviewed repository promotion.
 
-The package contains the training implementation, conformance tests, train/eval data and license, environment and training configuration, protocol, acceptance criteria, reference result bytes, a public-CI reproduction receipt, resource measurements, Croissant 1.1 dataset metadata, and RO-Crate 1.3 / Process Run Crate 0.6 provenance. `dependency-closure.json` classifies every required item as embedded or an immutable public standards/source reference; its unavailable set is empty.
+None of those steps alone proves that a scientific conclusion is correct.
 
-The reference public CI matrix observed peak process RSS between about 18.9 and 20.7 MiB on Ubuntu 24.04 across Python 3.11/3.13/3.14. The package records 32 MiB as conservative planning headroom. It is CPU-only and requires 0 bytes of VRAM.
+## Profiles
 
-This example is a bounded reproducibility demonstration, not evidence that an arbitrary ML experiment becomes reproducible merely by putting files in a ZIP. The scientific claim is deliberately simple enough that the dependency closure is inspectable.
+- `poc-v1` — historical package compatibility.
+- `compiled-experiment-v1` — self-contained reproducibility package.
+- `compiled-experiment-lifecycle-v1` — prospective plans, attempts, revisions, results, and interpretation using existing standards.
 
-## How it is structured
+Historical artifacts remain immutable; new semantics require a new versioned identity.
 
-`experiment.json` is a small local build recipe: an ID, the `poc-v1` compatibility profile, source/evidence metadata and a list of explicitly selected files with hashes, sizes and archive paths. Scientific meaning stays in the research documents and existing standards. There is no #164-specific logic in the compiler.
+Read the [Wiki](https://github.com/pH34r-pH/experiment-compiler/wiki) and [build recipe contract](docs/build-recipe.md) for the full lifecycle.
 
-The `poc-v1` and `compiled-experiment-v1` envelopes are preserved for compatibility. The new `compiled-experiment-lifecycle-v1` profile represents prospective plans and actual attempts through an RO-Crate graph: Schema.org `creativeWorkStatus` marks protocol maturity, planned actions use `PotentialActionStatus`, and actual runs use explicit `CreateAction.actionStatus` with Process Run Crate provenance. Scientific interpretation stays in the source-owned result/decision document and is never inferred from process exit. See the [build recipe and lifecycle contract](docs/build-recipe.md). These are application profiles over [RO-Crate](https://www.researchobject.org/ro-crate/), [Workflow Run Crate / Process Run Crate](https://www.researchobject.org/workflow-run-crate/), [Schema.org](https://schema.org/), and [MLCommons Croissant](https://github.com/mlcommons/croissant), not new universal research-object standards.
+## Standards and closure
 
-See [the recipe contract](docs/build-recipe.md), [origins](ORIGINS.md) and [contributing](CONTRIBUTING.md).
+The project reuses Croissant, RO-Crate, Process Run Crate, Schema.org, PROV-O, and CWL rather than inventing a parallel ontology where an existing standard fits.
 
-## One build lifecycle
+Required runtime inputs are explicitly classified as embedded, immutable public, host/ABI prerequisites, or unavailable. Unknown required resources remain unknown and block admission instead of silently becoming zero/default.
 
-The `Experiment Compiler lifecycle` GitHub Actions workflow tests and rebuilds packages on pull requests, pushes to `main`, and manual dispatch. It executes two fixed, reviewed, credential-free lifecycle fixtures inside network-disabled, resource-bounded workers: a prospective tiny plan and a frozen known study. Each creates a separate immutable result package and catalog entry using the same adapter. This exercises the plan → attempt → result-package → catalog handoff, not an open service for arbitrary submitted workflows and not scientific review. CI retains the output packages and source closures as artifacts.
+See [resources and closure](docs/resources-and-closure.md).
 
-The [Muon comparison candidate](examples/muon-comparison-plan-v1/experiment.json) is a Phase 3 blocked plan only. It records its public rationale, unresolved prerequisites, and unknown resource quantities without claiming an executable method, result, or Process Run. Unknown required capabilities block runner admission.
+## Public compiler, private research
 
-The public compiler is now the reviewed source used by the Fleet/Portfolio publication path for the active self-contained Compiled Experiment. Fleet pins an exact public compiler revision, rebuilds and verifies the package, reproduces it from the extracted ZIP, and derives Portfolio display metadata from these authoritative artifacts rather than maintaining a second catalog by hand. The historical #164 POC remains available as a compatibility artifact.
+A private lab can invoke an exact pinned public compiler revision inside its own trust boundary. Public promotion builds a new artifact from an explicitly reviewed shareable closure; the public compiler never needs private-repository credentials.
 
-Public catalog discovery is convention-based: `experiment-compiler catalog examples` scans for `**/experiment.json`, selects `compiled-experiment-v1` recipes, and derives each entry from its existing artifacts. Adding another real Compiled Experiment does not require editing a registry, site catalog, or experiment-specific publisher constant; the historical `poc-v1` fixture is excluded automatically.
+This keeps packaging mechanics public and auditable without turning unfinished/private research inputs into public artifacts.
 
-This repository itself still needs no private DSL checkout, GitHub App key, Azure identity, GPU, PyTorch, or Fleet access. The derived project site is built from the same authoritative metadata projection; GitHub Pages/custom-domain activation is an operational deployment step rather than a separate content source.
+## Repository map
 
-## License
+- `experiment_compiler/` — compiler, verifier, lifecycle, runner, and catalog implementation.
+- `examples/` — compatibility, reproducibility, and lifecycle examples.
+- `tests/` — executable contracts.
+- `docs/` — authoritative package/standards/closure documentation.
+- `docs/wiki/` — canonical source for the GitHub Wiki.
+- `site/` — derived project/catalog presentation.
+- `scripts/` — fixture and standards validation helpers.
+
+## Contributing, security, citation
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for sensitive reports, and cite research use with [CITATION.cff](CITATION.cff).
 
 Apache-2.0. Copyright 2026 Tyler J.H.G. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
