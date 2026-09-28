@@ -35,7 +35,7 @@ def _read_package(data: bytes, expected_sha256: str) -> tuple[dict, dict[str, by
     return manifest, payload
 
 
-def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
+def _dependency_closure(payload: dict[str, bytes]) -> dict:
     for required in ("dependency-closure.json", "ro-crate-metadata.json"):
         if required not in payload:
             raise PackageError(f"execution admission requires packaged {required}")
@@ -49,14 +49,17 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
     if closure.get("runtimeNetworkRequired") is not False:
         raise PackageError("execution deferred: local adapter requires a declared no-network protocol")
+    return closure
+
+
+def _runner_config(payload: dict[str, bytes]) -> dict:
     for required in ("experiment/workflow.cwl", "experiment/job.yml", "experiment/runner.json"):
         if required not in payload:
             raise PackageError(f"execution deferred: plan has no admitted executable component {required}")
     runner = json_value(payload["experiment/runner.json"])
     if not isinstance(runner, dict) or runner.get("runner") != "cwltool" or not isinstance(runner.get("version"), str):
         raise PackageError("runner.json must pin the cwltool runner and exact version")
-    execution_mode = runner.get("executionMode")
-    if execution_mode not in {"cwltool-docker", "cwltool-podman"}:
+    if runner.get("executionMode") not in {"cwltool-docker", "cwltool-podman"}:
         raise PackageError("unsupported execution mode; this adapter requires cwltool Docker or Podman execution")
     timeout_seconds = runner.get("maxWallSeconds")
     if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 86400:
@@ -67,6 +70,10 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         raise PackageError("pinned cwltool is not installed in this runner environment") from exc
     if installed != runner["version"]:
         raise PackageError(f"cwltool version mismatch: package requires {runner['version']}, installed {installed}")
+    return runner
+
+
+def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, str, set[str]]:
     workflow = payload["experiment/workflow.cwl"]
     if len(workflow) > 1024 * 1024:
         raise PackageError("CWL workflow exceeds the execution admission size limit")
@@ -91,6 +98,13 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
     _admit_job(job_document, payload, input_ids)
+    return limits, tmpfs_root, input_ids
+
+
+def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
+    closure = _dependency_closure(payload)
+    runner = _runner_config(payload)
+    limits, tmpfs_root, _ = _worker_admission(payload, runner)
     return closure, runner, limits, tmpfs_root
 
 
