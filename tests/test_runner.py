@@ -212,6 +212,7 @@ class: CommandLineTool
             self.assertIn("--podman", command)
             python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
             self.assertIn(python_lib, kwargs["env"]["LD_LIBRARY_PATH"].split(":"))
+            self.assertEqual(kwargs["env"]["XDG_DATA_HOME"], "/tmp/podman-data")
             self.assertIn("--disable-pull", command)
             self.assertNotIn("--no-container", command)
             outdir = Path(command[command.index("--outdir") + 1])
@@ -248,6 +249,7 @@ class: CommandLineTool
                     "EXPERIMENT_RUNNER_RESOURCE_LIMITS": limits,
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                     "TMPDIR": str(directory),
+                    "XDG_DATA_HOME": "/tmp/podman-data",
             }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                     patch("experiment_compiler.runner.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
