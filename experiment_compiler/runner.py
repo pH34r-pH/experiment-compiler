@@ -642,8 +642,8 @@ def _require_bounded_tmpfs(temporary: Path, root: Path, limit_mib: int) -> None:
     if not resolved_temporary.is_relative_to(resolved_root):
         raise PackageError("execution deferred: runner temporary directory is outside the declared tmpfs")
     capacity = shutil.disk_usage(resolved_root).total
-    if capacity > limit_mib * 1024 * 1024:
-        raise PackageError("execution deferred: temporary filesystem capacity exceeds the declared worker limit")
+    if capacity < limit_mib * 1024 * 1024:
+        raise PackageError("execution deferred: temporary filesystem capacity is below the declared worker limit")
 
 
 def _refs(value: Any) -> list[dict]:
