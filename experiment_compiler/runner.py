@@ -55,8 +55,9 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
     runner = json_value(payload["experiment/runner.json"])
     if not isinstance(runner, dict) or runner.get("runner") != "cwltool" or not isinstance(runner.get("version"), str):
         raise PackageError("runner.json must pin the cwltool runner and exact version")
-    if runner.get("executionMode") != "cwltool-docker":
-        raise PackageError("unsupported execution mode; this adapter requires cwltool Docker execution")
+    execution_mode = runner.get("executionMode")
+    if execution_mode not in {"cwltool-docker", "cwltool-podman"}:
+        raise PackageError("unsupported execution mode; this adapter requires cwltool Docker or Podman execution")
     timeout_seconds = runner.get("maxWallSeconds")
     if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 86400:
         raise PackageError("runner.json must declare maxWallSeconds between 1 and 86400")
@@ -318,8 +319,9 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
             _materialize(work, payload)
             attempt_out = Path(temporary) / "outputs"
             provenance = Path(temporary) / "cwlprov"
+            runtime_args = ["--podman"] if runner["executionMode"] == "cwltool-podman" else []
             command = [
-                sys.executable, "-m", "cwltool", "--disable-pull", "--strict-memory-limit", "--strict-cpu-limit",
+                sys.executable, "-m", "cwltool", *runtime_args, "--disable-pull", "--strict-memory-limit", "--strict-cpu-limit",
                 "--disable-host-provenance", "--disable-user-provenance",
                 "--basedir", str(work / "experiment"),
                 "--tmpdir-prefix", str(Path(temporary) / "cwl-tmp-"),
@@ -393,7 +395,9 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                 "jobSha256": sha256_bytes(payload["experiment/job.yml"]),
                 "runner": {"name": "cwltool", "version": runner["version"], "python": platform.python_version(),
                            "workerImageBase": runner.get("workerImageBase")},
-                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses DockerExecutor",
+                "executionMode": ("cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"
+                                  if runner["executionMode"] == "cwltool-podman" else
+                                  "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime"),
                 "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
                 "workerContext": {
                     "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
