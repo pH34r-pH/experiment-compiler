@@ -60,6 +60,26 @@ class RunnerBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(PackageError, "outside the declared tmpfs"):
                     _require_bounded_tmpfs(path, root, 64)
 
+    def test_tmpfs_admission_accepts_backing_capacity_at_or_above_declared_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "attempt"
+            path.mkdir()
+            for total in (64, 512):
+                with patch("experiment_compiler.runner.shutil.disk_usage", return_value=type(
+                        "DiskUsage", (), {"total": total * 1024 * 1024})()):
+                    _require_bounded_tmpfs(path, root, 64)
+
+    def test_tmpfs_admission_rejects_backing_capacity_below_declared_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "attempt"
+            path.mkdir()
+            with patch("experiment_compiler.runner.shutil.disk_usage", return_value=type(
+                    "DiskUsage", (), {"total": 63 * 1024 * 1024})()):
+                with self.assertRaisesRegex(PackageError, "below the declared worker limit"):
+                    _require_bounded_tmpfs(path, root, 64)
+
     def test_workflow_admission_allows_literal_arguments_and_rejects_other_expressions(self):
         import yaml
 
