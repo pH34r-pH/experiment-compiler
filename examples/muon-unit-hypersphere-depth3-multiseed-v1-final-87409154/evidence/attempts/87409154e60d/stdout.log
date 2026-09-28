@@ -1,0 +1,10 @@
+{
+    "result": {
+        "location": "file:///dev/shm/compiled-experiment-run-8ade3kgc/outputs/pilot-result.json",
+        "basename": "pilot-result.json",
+        "class": "File",
+        "checksum": "sha1$21bf6462d5ab456789ad10768c78f503ad204447",
+        "size": 405169,
+        "path": "/dev/shm/compiled-experiment-run-8ade3kgc/outputs/pilot-result.json"
+    }
+}

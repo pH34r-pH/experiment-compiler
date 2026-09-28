@@ -1,0 +1,24 @@
+runner:
+  class: File
+  path: runner.py
+issue123:
+  class: File
+  path: input/data/issue_123_results.json
+issue163:
+  class: File
+  path: input/data/issue_163_results.json
+issue164:
+  class: File
+  path: input/data/issue_164_results.json
+spectral:
+  class: File
+  path: input/data/spectral.pt
+byte:
+  class: File
+  path: input/data/byte.pt
+preregistration:
+  class: File
+  path: input/evidence/preregistration.json
+sourceZip:
+  class: File
+  path: dls-source.zip

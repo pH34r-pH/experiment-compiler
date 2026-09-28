@@ -1,0 +1,69 @@
+[1;30mINFO[0m /opt/actions-runner/_work/_tool/Python/3.13.15/x64/lib/python3.13/site-packages/cwltool/__main__.py 3.2.20260720092025
+[1;30mINFO[0m [cwltool] /opt/actions-runner/_work/_tool/Python/3.13.15/x64/lib/python3.13/site-packages/cwltool/__main__.py --podman --disable-pull --strict-memory-limit --strict-cpu-limit --disable-host-provenance --disable-user-provenance --basedir /dev/shm/compiled-experiment-run-8ade3kgc/package/experiment --tmpdir-prefix /dev/shm/compiled-experiment-run-8ade3kgc/cwl-tmp- --tmp-outdir-prefix /dev/shm/compiled-experiment-run-8ade3kgc/cwl-out- --outdir /dev/shm/compiled-experiment-run-8ade3kgc/outputs --provenance /dev/shm/compiled-experiment-run-8ade3kgc/cwlprov /dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/workflow.cwl /dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/job.yml
+[1;30mINFO[0m Resolved '/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/workflow.cwl' to 'file:///dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/workflow.cwl'
+time="2026-09-28T19:24:52Z" level=warning msg="The cgroupv2 manager is set to systemd but there is no systemd user session available"
+time="2026-09-28T19:24:52Z" level=warning msg="For using systemd, you may need to log in using a user session"
+time="2026-09-28T19:24:52Z" level=warning msg="Alternatively, you can enable lingering with: `loginctl enable-linger 1001` (possibly as root)"
+time="2026-09-28T19:24:52Z" level=warning msg="Falling back to --cgroup-manager=cgroupfs"
+time="2026-09-28T19:24:52Z" level=warning msg="The cgroupv2 manager is set to systemd but there is no systemd user session available"
+time="2026-09-28T19:24:52Z" level=warning msg="For using systemd, you may need to log in using a user session"
+time="2026-09-28T19:24:52Z" level=warning msg="Alternatively, you can enable lingering with: `loginctl enable-linger 1001` (possibly as root)"
+time="2026-09-28T19:24:52Z" level=warning msg="Falling back to --cgroup-manager=cgroupfs"
+[1;30mINFO[0m [job muon-seed17-pilot] /dev/shm/compiled-experiment-run-8ade3kgc/cwl-out-okitnbra$ podman \
+    run \
+    -i \
+    --userns=keep-id \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/cwl-out-okitnbra,target=/APIWAY \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/cwl-tmp-x7i5hvm9,target=/tmp \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/data/byte.pt,target=/var/lib/cwl/stg34ffaa08-3283-4d1b-882a-16c22a878cd9/byte.pt,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/data/issue_123_results.json,target=/var/lib/cwl/stg8279571e-b258-4dec-9adb-0c6ab8a8ebaa/issue_123_results.json,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/data/issue_163_results.json,target=/var/lib/cwl/stg9fce5529-9152-403c-b236-c065aa907262/issue_163_results.json,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/data/issue_164_results.json,target=/var/lib/cwl/stgb551c4f2-3aef-4360-89f8-85065c5dec00/issue_164_results.json,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/evidence/preregistration.json,target=/var/lib/cwl/stg5d4baf72-6978-4595-860d-dd08865a31c2/preregistration.json,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/runner.py,target=/var/lib/cwl/stg788a4711-c52d-4541-bd8d-f185e8741a43/runner.py,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/dls-source.zip,target=/var/lib/cwl/stg622cc520-652a-46fb-a284-0e89641f254e/dls-source.zip,readonly \
+    --mount=type=bind,source=/dev/shm/compiled-experiment-run-8ade3kgc/package/experiment/input/data/spectral.pt,target=/var/lib/cwl/stgb05d9d5b-5b4e-48f6-9e3a-54fcee80ace6/spectral.pt,readonly \
+    --workdir=/APIWAY \
+    --read-only=true \
+    --net=none \
+    --user=1001:1001 \
+    --rm \
+    --cidfile=/dev/shm/compiled-experiment-run-8ade3kgc/cwl-tmp-_n1eiwkf/20260928192452-971944.cid \
+    --env=TMPDIR=/tmp \
+    --env=HOME=/APIWAY \
+    --memory=1280m \
+    --cpus=1 \
+    docker.io/pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407 \
+    python3 \
+    /var/lib/cwl/stg788a4711-c52d-4541-bd8d-f185e8741a43/runner.py \
+    --byte-checkpoint \
+    /var/lib/cwl/stg34ffaa08-3283-4d1b-882a-16c22a878cd9/byte.pt \
+    --issue-123-results \
+    /var/lib/cwl/stg8279571e-b258-4dec-9adb-0c6ab8a8ebaa/issue_123_results.json \
+    --issue-163-results \
+    /var/lib/cwl/stg9fce5529-9152-403c-b236-c065aa907262/issue_163_results.json \
+    --issue-164-results \
+    /var/lib/cwl/stgb551c4f2-3aef-4360-89f8-85065c5dec00/issue_164_results.json \
+    --preregistration \
+    /var/lib/cwl/stg5d4baf72-6978-4595-860d-dd08865a31c2/preregistration.json \
+    --source-zip \
+    /var/lib/cwl/stg622cc520-652a-46fb-a284-0e89641f254e/dls-source.zip \
+    --spectral-checkpoint \
+    /var/lib/cwl/stgb05d9d5b-5b4e-48f6-9e3a-54fcee80ace6/spectral.pt \
+    --output \
+    pilot-result.json
+time="2026-09-28T19:24:53Z" level=warning msg="The cgroupv2 manager is set to systemd but there is no systemd user session available"
+time="2026-09-28T19:24:53Z" level=warning msg="For using systemd, you may need to log in using a user session"
+time="2026-09-28T19:24:53Z" level=warning msg="Alternatively, you can enable lingering with: `loginctl enable-linger 1001` (possibly as root)"
+time="2026-09-28T19:24:53Z" level=warning msg="Falling back to --cgroup-manager=cgroupfs"
+time="2026-09-28T19:24:53Z" level=warning msg="The cgroupv2 manager is set to systemd but there is no systemd user session available"
+time="2026-09-28T19:24:53Z" level=warning msg="For using systemd, you may need to log in using a user session"
+time="2026-09-28T19:24:53Z" level=warning msg="Alternatively, you can enable lingering with: `loginctl enable-linger 1001` (possibly as root)"
+time="2026-09-28T19:24:53Z" level=warning msg="Falling back to --cgroup-manager=cgroupfs"
+[1;30mINFO[0m [job muon-seed17-pilot] Max memory used: 166MiB
+[1;30mINFO[0m [job muon-seed17-pilot] completed success
+/opt/actions-runner/_work/_tool/Python/3.13.15/x64/lib/python3.13/site-packages/rdflib/plugins/serializers/nt.py:39: UserWarning: NTSerializer always uses UTF-8 encoding. Given encoding was: None
+  warnings.warn(
+[1;30mINFO[0m Final process status is success
+[1;30mINFO[0m [provenance] Finalizing Research Object
+[1;30mINFO[0m [provenance] Research Object saved to /dev/shm/compiled-experiment-run-8ade3kgc/cwlprov

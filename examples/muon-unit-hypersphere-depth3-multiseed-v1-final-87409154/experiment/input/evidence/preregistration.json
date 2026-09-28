@@ -1,0 +1,400 @@
+{
+  "advance_policy": {
+    "advance_issue_165_only_if": "classification is HYPERSPHERICAL EFFECT or RETAINED-RADIUS EFFECT",
+    "geometry_specific_continuation": "only classifications HYPERSPHERICAL EFFECT or RETAINED-RADIUS EFFECT",
+    "hyperspherical_effect": "unit_hypersphere - shared_generic has simultaneous upper <= -0.01, every seed <= -0.01, unit_hypersphere - independent_flat simultaneous upper <= +0.01, and resource gates pass; retained-radius gate does not take precedence",
+    "invalid_instrumentation": "any source, transmitter, causal, target-poisoning, initialization, finite-value, recurrence, accounting, preregistration, or deterministic-publication gate fails before interpretation",
+    "no_topology_benefit": "no recurrent topology meets a frozen efficacy or parameter-efficiency rule, including when independent flat is materially superior",
+    "retained_radius_effect": "retained_radius - unit_hypersphere has simultaneous upper <= -0.01, every seed <= -0.01, retained_radius - independent_flat simultaneous upper <= +0.01, and resource gates pass",
+    "shared_depth_effect_only": "neither geometry family qualifies and shared_generic either materially/seed-consistently improves over independent_flat or is noninferior with simultaneous upper <= +0.01 while reducing trainable parameters by at least 40%",
+    "stop_policy": "NO TOPOLOGY BENEFIT, SHARED-DEPTH EFFECT ONLY, or INVALID INSTRUMENTATION stops #165; do not invent another radius parameterization",
+    "tie_precedence": [
+      "RETAINED-RADIUS EFFECT",
+      "HYPERSPHERICAL EFFECT",
+      "SHARED-DEPTH EFFECT ONLY",
+      "NO TOPOLOGY BENEFIT"
+    ]
+  },
+  "allowed_stability_operations": [
+    "epsilon-guarded vector norms",
+    "deterministic first-axis direction at zero/near-zero radius",
+    "unit projection only in unit-hypersphere condition",
+    "explicit log/exp radius decomposition and sphere log/exp map only in retained-radius condition",
+    "the inherited AdamW gradient clipping at norm 1.0"
+  ],
+  "condition_matrix": {
+    "independent_flat_depth3": {
+      "effective_depth": 3,
+      "explicit_radius": false,
+      "independent_blocks": 3,
+      "shared_recurrence": false,
+      "shell_coordinate": false,
+      "source": "ordinary independently-parameterized flat stack",
+      "state_geometry": "cartesian"
+    },
+    "phase_attention_depth1_anchor": {
+      "effective_depth": 1,
+      "explicit_radius": false,
+      "independent_blocks": 1,
+      "shared_recurrence": false,
+      "shell_coordinate": false,
+      "source": "exact issue-163 spectral_phase_attention_only replay",
+      "state_geometry": "cartesian"
+    },
+    "retained_radius_depth3": {
+      "effective_depth": 3,
+      "explicit_radius": true,
+      "independent_blocks": 1,
+      "shared_recurrence": true,
+      "shell_coordinate": false,
+      "source": "explicit x=exp(rho)*u retained-radius hypothesis",
+      "state_geometry": "R-times-unit-hypersphere product state"
+    },
+    "shared_generic_depth3": {
+      "effective_depth": 3,
+      "explicit_radius": false,
+      "independent_blocks": 1,
+      "shared_recurrence": true,
+      "shell_coordinate": false,
+      "source": "Universal-Transformer-style generic shared depth control",
+      "state_geometry": "cartesian"
+    },
+    "unit_hypersphere_depth3": {
+      "effective_depth": 3,
+      "explicit_radius": false,
+      "independent_blocks": 1,
+      "shared_recurrence": true,
+      "shell_coordinate": false,
+      "source": "minimal nGPT/Hyper-SET-inspired unit-direction control",
+      "state_geometry": "unit-hypersphere"
+    }
+  },
+  "data_and_budget": {
+    "checkpoint_steps": [
+      0,
+      8,
+      16,
+      32,
+      64,
+      96,
+      128
+    ],
+    "downstream_seeds": [
+      17,
+      31,
+      47
+    ],
+    "objective": "causal next-byte cross-entropy; validation NLL per original UTF-8 byte",
+    "official_test": "sealed and not accessed",
+    "optimizer": "exact #162/#163 AdamW: lr=0.001, weight_decay=0.01, gradient_clip_norm=1.0",
+    "source_membership": "exact #123/#162/#163 calibration/evaluation source-document membership and byte segments",
+    "updates": 128
+  },
+  "diagnostics": {
+    "every_recurrent_depth": [
+      "mean pairwise token cosine similarity",
+      "effective rank from singular-value entropy",
+      "token-state variance",
+      "radius variance and mean",
+      "state RMS"
+    ],
+    "every_transition": [
+      "relative state change",
+      "signed and absolute log-radius displacement",
+      "angular/geodesic displacement",
+      "radius collapse/explosion and explosion ratio",
+      "unit-norm error where applicable"
+    ],
+    "gradients": [
+      "state gradient RMS by recurrent depth",
+      "radial gradient RMS by recurrent depth",
+      "tangential gradient RMS by recurrent depth",
+      "parameter pre-clip norm and update norm"
+    ],
+    "resources": [
+      "trainable parameters and parameter bytes",
+      "unique operator copies and effective reuse",
+      "dense FLOPs",
+      "explicit phase/unit/radius scalar operations",
+      "processed bytes",
+      "throughput",
+      "peak process RSS",
+      "recurrent materialization estimate"
+    ]
+  },
+  "effective_depth": 3,
+  "excluded_hypotheses": [
+    "spectral composition or #165",
+    "continuous depth, Neural ODEs, or DEQs",
+    "adaptive computation or dynamic shell counts",
+    "token-conditioned shell routing",
+    "shell-width growth or literal surface-area-scaled widths",
+    "Mixture of Shapes routing or #170-#173 model selection",
+    "new learned representation adapters",
+    "phase-attention redesign",
+    "transmitter or receiver retuning"
+  ],
+  "implementation_sha256": {
+    "scripts/publish_retained_radius_topology.py": "3a75def7876e71494a3511e0a2593ef1017186536e90aebc0ee6089d245492ac",
+    "scripts/run_retained_radius_topology.py": "64206105a21925ab11b1ff2f3faf1b23be5815ffbd64e9d24674099b66edf88f",
+    "src/domain_scaling_lab/retained_radius_topology.py": "77d3595b941db005946d8a09964c89ca9562db23ba64f065a675fb4aaa3718fc",
+    "tests/test_retained_radius_topology.py": "92fa5ae4a87a6b6474e1726e3f76cba63a4dd310db41545cc7699879d38763ac"
+  },
+  "inherited_config": {
+    "angular_norm_epsilon": 1e-06,
+    "bootstrap_samples": 65536,
+    "bootstrap_seed": 12365536,
+    "canonical_width": 128,
+    "checkpoint_steps": [
+      0,
+      8,
+      16,
+      32,
+      64,
+      96,
+      128
+    ],
+    "dimension": 32,
+    "downstream_seeds": [
+      17,
+      31,
+      47
+    ],
+    "equivalence_nll_margin": 0.005,
+    "expected_calibration_bytes": 1792,
+    "expected_calibration_documents": 8,
+    "expected_evaluation_bytes": 1677,
+    "expected_evaluation_documents": 8,
+    "gradient_clip_norm": 1.0,
+    "heads": 4,
+    "layers": 1,
+    "learning_rate": 0.001,
+    "log_radius_epsilon": 1e-06,
+    "material_nll_threshold": 0.01,
+    "max_polar_elementwise_overhead_fraction": 0.01,
+    "profile": "qualifying",
+    "rms_epsilon": 1e-08,
+    "schema_version": "log-polar-no-composition-config/v1",
+    "transmitter_seed": 7,
+    "updates": 128,
+    "weight_decay": 0.01,
+    "window_length": 4
+  },
+  "issue": 164,
+  "issue_163_evidence_commit": "8254eabd3f4fb7549eceb4fc66f11fb70138a92f",
+  "issue_163_result_sha256": "4ca90c2e6e248362c84c80773cac117f0f058ddd07e34251231e055e96db5b97",
+  "minimal_block_sha256": "b0f24e5c196bda116120fd085eee60f37e0eaf6f3b146f45b253f0c79a5c21ec",
+  "official_test_accessed": false,
+  "parameter_matching_rationale": "The shared generic, unit-hypersphere, and retained-radius models contain exactly one frozen #163 operator plus the same byte head. The independent flat condition requires three independently trainable copies to isolate ordinary depth. The exact #163 depth-1 anchor is the practical same-parameter flat control; width reduction or another adapter would violate the frozen block.",
+  "prior_art_boundary": {
+    "not_novel": [
+      "unit-hypersphere normalization/state",
+      "shared recurrent Transformer depth",
+      "Universal-Transformer-style recurrence",
+      "tangential updates"
+    ],
+    "specific_tested_hypothesis": "whether an explicit retained rho in x=exp(rho)*u adds predictive capability beyond the strongest unit-hypersphere shared-depth control"
+  },
+  "qualifying_language_results_observed_before_freeze": false,
+  "resource_policy": {
+    "dense_flop_rule": "exact equality across all four effective-depth-three primary arms",
+    "geometric_operations": "report phase normalization, unit projection, log/exp, and geodesic operations separately from dense FLOPs",
+    "maximum_geometric_overhead_fraction": 0.01,
+    "parameter_efficiency_minimum_reduction_fraction": 0.4,
+    "parameter_rule": "shared/unit/retained exact equality; independent flat reports its required three operator copies",
+    "processed_bytes": "exact equality across all trained cells",
+    "shared_efficiency_joint_criterion": "shared_generic - independent_flat simultaneous upper <= +0.01 and at least 40% trainable-parameter reduction"
+  },
+  "schema_version": "retained-radius-topology-preregistration/v1",
+  "shell_coordinate_decision": {
+    "included": false,
+    "reason": "the frozen positional signal plus evolving recurrent state already breaks depth/token symmetry; adding a coordinate would introduce avoidable capacity and a fifth primary arm"
+  },
+  "stabilization_policy": {
+    "geometry_epsilon": 1e-06,
+    "near_zero_policy": "radius <= epsilon uses rho=log(epsilon), deterministic first-axis direction, and zero reconstruction when inactive",
+    "post_freeze_changes_allowed": "instrumentation defects only; no topology, threshold, source, capacity, budget, normalization, or projection changes",
+    "reconstruction_tolerance": 2e-05,
+    "sphere_map": "shortest-path log map and exponential map with epsilon-guarded tangent norm",
+    "unit_projection": "epsilon-guarded L2 projection before step one and after every recurrent step only in unit_hypersphere"
+  },
+  "statistical_conditions": [
+    "phase_attention_depth1_anchor",
+    "independent_flat_depth3",
+    "shared_generic_depth3",
+    "unit_hypersphere_depth3",
+    "retained_radius_depth3"
+  ],
+  "statistics": {
+    "bootstrap_samples": 65536,
+    "bootstrap_seed": 12365536,
+    "contrasts": {
+      "fixed_parameter_recurrence_effect": [
+        {
+          "coefficient": 1.0,
+          "condition": "shared_generic_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "phase_attention_depth1_anchor"
+        }
+      ],
+      "hyperspherical_effect": [
+        {
+          "coefficient": 1.0,
+          "condition": "unit_hypersphere_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "shared_generic_depth3"
+        }
+      ],
+      "independent_depth_effect": [
+        {
+          "coefficient": 1.0,
+          "condition": "independent_flat_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "phase_attention_depth1_anchor"
+        }
+      ],
+      "retained_radius_benefit": [
+        {
+          "coefficient": 1.0,
+          "condition": "retained_radius_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "unit_hypersphere_depth3"
+        }
+      ],
+      "retained_vs_generic": [
+        {
+          "coefficient": 1.0,
+          "condition": "retained_radius_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "shared_generic_depth3"
+        }
+      ],
+      "retained_vs_independent": [
+        {
+          "coefficient": 1.0,
+          "condition": "retained_radius_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "independent_flat_depth3"
+        }
+      ],
+      "sharing_effect": [
+        {
+          "coefficient": 1.0,
+          "condition": "shared_generic_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "independent_flat_depth3"
+        }
+      ],
+      "unit_vs_independent": [
+        {
+          "coefficient": 1.0,
+          "condition": "unit_hypersphere_depth3"
+        },
+        {
+          "coefficient": -1.0,
+          "condition": "independent_flat_depth3"
+        }
+      ]
+    },
+    "decision_family_size": 16,
+    "equivalence_nats_per_original_byte": 0.005,
+    "familywise_alpha": 0.05,
+    "materiality_nats_per_original_byte": 0.01,
+    "outcomes": [
+      "final",
+      "aulc"
+    ],
+    "resampling": "paired source-document block bootstrap with fixed seeds averaged within source and the exact #123/#162/#163 integer draw schedule",
+    "sign": "negative means the first named arm has lower/better NLL"
+  },
+  "topology_config": {
+    "condition_matrix": {
+      "independent_flat_depth3": {
+        "effective_depth": 3,
+        "explicit_radius": false,
+        "independent_blocks": 3,
+        "shared_recurrence": false,
+        "shell_coordinate": false,
+        "source": "ordinary independently-parameterized flat stack",
+        "state_geometry": "cartesian"
+      },
+      "phase_attention_depth1_anchor": {
+        "effective_depth": 1,
+        "explicit_radius": false,
+        "independent_blocks": 1,
+        "shared_recurrence": false,
+        "shell_coordinate": false,
+        "source": "exact issue-163 spectral_phase_attention_only replay",
+        "state_geometry": "cartesian"
+      },
+      "retained_radius_depth3": {
+        "effective_depth": 3,
+        "explicit_radius": true,
+        "independent_blocks": 1,
+        "shared_recurrence": true,
+        "shell_coordinate": false,
+        "source": "explicit x=exp(rho)*u retained-radius hypothesis",
+        "state_geometry": "R-times-unit-hypersphere product state"
+      },
+      "shared_generic_depth3": {
+        "effective_depth": 3,
+        "explicit_radius": false,
+        "independent_blocks": 1,
+        "shared_recurrence": true,
+        "shell_coordinate": false,
+        "source": "Universal-Transformer-style generic shared depth control",
+        "state_geometry": "cartesian"
+      },
+      "unit_hypersphere_depth3": {
+        "effective_depth": 3,
+        "explicit_radius": false,
+        "independent_blocks": 1,
+        "shared_recurrence": true,
+        "shell_coordinate": false,
+        "source": "minimal nGPT/Hyper-SET-inspired unit-direction control",
+        "state_geometry": "unit-hypersphere"
+      }
+    },
+    "effective_depth": 3,
+    "heads": 4,
+    "inherited_minimal_block_condition": "spectral_phase_attention_only",
+    "inherited_minimal_block_sha256": "b0f24e5c196bda116120fd085eee60f37e0eaf6f3b146f45b253f0c79a5c21ec",
+    "input": "exact #162 [rho,cos(theta),sin(theta),zero-pad] tensor",
+    "ordinary_paths": [
+      "Cartesian V",
+      "Cartesian output projection",
+      "Cartesian residuals",
+      "LayerNorm",
+      "FFN",
+      "byte head"
+    ],
+    "phase_attention": "radial dot plus normalized real-Hermitian angular Q/K score",
+    "schema_version": "retained-radius-topology-config/v1",
+    "shell_coordinate": false,
+    "source_issue": 164,
+    "spectral_composition": false,
+    "trainable_adapter_parameters": 0,
+    "width": 128
+  },
+  "topology_config_sha256": "b10b4eb5a1fe645c75fd47ccba56b62c7960608e7db0987afdbeced8903bb583",
+  "trained_conditions": [
+    "independent_flat_depth3",
+    "shared_generic_depth3",
+    "unit_hypersphere_depth3",
+    "retained_radius_depth3"
+  ]
+}

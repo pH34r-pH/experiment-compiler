@@ -1,0 +1,23 @@
+{
+  "lifecycle": {
+    "attemptCount": 1,
+    "creativeWorkStatus": "Draft",
+    "potentialActionCount": 1,
+    "processRunCrate": true,
+    "resourceMeasurements": []
+  },
+  "manifestSha256": "3f1a3da15c344e329cd57e28372b912e5194da87c2ff0e578946d8d75d128b7d",
+  "matchedExpectedPackage": true,
+  "memberCount": 57,
+  "packageSha256": "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4",
+  "packageSizeBytes": 13523022,
+  "profile": "compiled-experiment-lifecycle-v1",
+  "schemaVersion": 1,
+  "scientificReproduction": "not-run",
+  "scope": "package-integrity-only",
+  "source": {
+    "commit": "82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6",
+    "repository": "pH34r-pH/domain-scaling-lab"
+  },
+  "status": "integrity-verified"
+}

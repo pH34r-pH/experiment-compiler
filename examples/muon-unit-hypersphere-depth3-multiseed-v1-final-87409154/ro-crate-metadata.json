@@ -1,0 +1,670 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    "https://w3id.org/ro/terms/workflow-run/context"
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "citation": [
+        {
+          "@id": "https://github.com/pH34r-pH/domain-scaling-lab/commit/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6"
+        }
+      ],
+      "conformsTo": [
+        {
+          "@id": "https://w3id.org/ro/crate/1.3"
+        },
+        {
+          "@id": "https://w3id.org/ro/wfrun/process/0.6"
+        }
+      ],
+      "creativeWorkStatus": "Draft",
+      "datePublished": "2026-09-28",
+      "description": "Private Draft three-seed Muon optimizer comparison against frozen #164 AdamW controls for unit_hypersphere_depth3; no topology rerun or results are included.",
+      "hasPart": [
+        {
+          "@id": "experiment/README.md"
+        },
+        {
+          "@id": "experiment/protocol.md"
+        },
+        {
+          "@id": "experiment/resource-estimates.json"
+        },
+        {
+          "@id": "experiment/source-metadata.json"
+        },
+        {
+          "@id": "experiment/workflow.cwl"
+        },
+        {
+          "@id": "experiment/job.yml"
+        },
+        {
+          "@id": "experiment/runner.json"
+        },
+        {
+          "@id": "experiment/runner.py"
+        },
+        {
+          "@id": "experiment/dls-source.zip"
+        },
+        {
+          "@id": "dependency-closure.json"
+        },
+        {
+          "@id": "experiment/input/data/issue_123_results.json"
+        },
+        {
+          "@id": "experiment/input/data/issue_163_results.json"
+        },
+        {
+          "@id": "experiment/input/data/issue_164_results.json"
+        },
+        {
+          "@id": "experiment/input/data/spectral.pt"
+        },
+        {
+          "@id": "experiment/input/data/byte.pt"
+        },
+        {
+          "@id": "experiment/input/evidence/preregistration.json"
+        },
+        {
+          "@id": "experiment/input/evidence/issue_164_trace.jsonl"
+        },
+        {
+          "@id": "experiment/input/evidence/issue_164_summary.json"
+        },
+        {
+          "@id": "experiment/input/evidence/issue_164_receipt.json"
+        },
+        {
+          "@id": "experiment/input/evidence/issue_164_reproduction.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/pilot-result.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/bag-info.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/bagit.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/00/00e33dda0f20b50900c564251988d70293d20c66"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/12/12dfe2401843769bcf7a545707f81c72785afd61"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/13/13e524a43fcf8d7573b825b1599652bc4c4aef49"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/21/21bf6462d5ab456789ad10768c78f503ad204447"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/30/30dd378205da48b0b0b792352b1a97b2f6fbbdda"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/71/71677149957622658bbd614424bb198d3587803f"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/b0/b0bf94393519344b05db284b42cfcf4752c4b10f"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/ca/ca3a55ca68dcc48abd54c40ca3c6a369d2e561b7"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/eb/ebd6c3499b7d27a3e34f41722011b2047e529488"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/manifest-sha1.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/logs/engine.768e56a8-2c1a-47ba-abd0-eab64237a420.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/manifest.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.jsonld"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.nt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.provn"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.ttl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.xml"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/snapshot/workflow.cwl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha1.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha256.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha512.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/packed.cwl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-job.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-output.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/plan-package.zip"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/stdout.log"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/stderr.log"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/runner-receipt.json"
+        },
+        {
+          "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip"
+        },
+        {
+          "@id": "evidence/scientific-decision.md"
+        },
+        {
+          "@id": "evidence/publication-review.md"
+        }
+      ],
+      "https://www.w3.org/ns/prov#wasDerivedFrom": {
+        "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip"
+      },
+      "identifier": "muon-unit-hypersphere-depth3-multiseed-v1",
+      "mainEntity": {
+        "@id": "experiment/protocol.md"
+      },
+      "name": "Muon unit-hypersphere depth-three multi-seed qualifying comparison",
+      "prov:wasDerivedFrom": {
+        "@id": "https://github.com/pH34r-pH/domain-scaling-lab/commit/82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6"
+      }
+    },
+    {
+      "@id": "experiment/protocol.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "creativeWorkStatus": "Draft",
+      "name": "Muon multi-seed qualifying protocol",
+      "potentialAction": {
+        "@id": "#planned-run"
+      }
+    },
+    {
+      "@id": "#planned-run",
+      "@type": "CreateAction",
+      "actionStatus": "https://schema.org/PotentialActionStatus",
+      "name": "Seeds 17/31/47 Muon qualifying comparison; run request not authorized"
+    },
+    {
+      "@id": "experiment/workflow.cwl",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "Offline Muon multi-seed comparison tool",
+      "programmingLanguage": "Common Workflow Language"
+    },
+    {
+      "@id": "experiment/runner.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "Fail-fast Muon multi-seed comparison runner",
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/README.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown"
+    },
+    {
+      "@id": "experiment/resource-estimates.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/source-metadata.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "dependency-closure.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/job.yml",
+      "@type": "File",
+      "encodingFormat": "text/plain"
+    },
+    {
+      "@id": "experiment/runner.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/dls-source.zip",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "experiment/input/data/issue_123_results.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/data/issue_163_results.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/data/issue_164_results.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/data/spectral.pt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "experiment/input/data/byte.pt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "experiment/input/evidence/preregistration.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/evidence/issue_164_trace.jsonl",
+      "@type": "File",
+      "encodingFormat": "text/plain"
+    },
+    {
+      "@id": "experiment/input/evidence/issue_164_summary.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/evidence/issue_164_receipt.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/input/evidence/issue_164_reproduction.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/pilot-result.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/bag-info.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/bagit.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/00/00e33dda0f20b50900c564251988d70293d20c66",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/12/12dfe2401843769bcf7a545707f81c72785afd61",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/13/13e524a43fcf8d7573b825b1599652bc4c4aef49",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/21/21bf6462d5ab456789ad10768c78f503ad204447",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/30/30dd378205da48b0b0b792352b1a97b2f6fbbdda",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/71/71677149957622658bbd614424bb198d3587803f",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/b0/b0bf94393519344b05db284b42cfcf4752c4b10f",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/ca/ca3a55ca68dcc48abd54c40ca3c6a369d2e561b7",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/data/eb/ebd6c3499b7d27a3e34f41722011b2047e529488",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/manifest-sha1.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/logs/engine.768e56a8-2c1a-47ba-abd0-eab64237a420.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/manifest.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.jsonld",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.nt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.provn",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.ttl",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.xml",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/snapshot/workflow.cwl",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha1.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha256.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha512.txt",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/packed.cwl",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-job.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-output.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/plan-package.zip",
+      "@type": "File",
+      "encodingFormat": "application/zip"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/stdout.log",
+      "@type": "File",
+      "encodingFormat": "text/plain"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/stderr.log",
+      "@type": "File",
+      "encodingFormat": "text/plain"
+    },
+    {
+      "@id": "evidence/attempts/87409154e60d/runner-receipt.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "https://w3id.org/ro/wfrun/process/0.6",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "version": "0.6"
+    },
+    {
+      "@id": "#attempt-87409154e60d",
+      "@type": "CreateAction",
+      "actionStatus": "https://schema.org/CompletedActionStatus",
+      "endTime": "2026-09-28T19:28:12.526937+00:00",
+      "instrument": {
+        "@id": "experiment/workflow.cwl"
+      },
+      "name": "CWL attempt 87409154e60d",
+      "object": {
+        "@id": "experiment/protocol.md"
+      },
+      "result": [
+        {
+          "@id": "evidence/attempts/87409154e60d/pilot-result.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/bag-info.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/bagit.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/00/00e33dda0f20b50900c564251988d70293d20c66"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/12/12dfe2401843769bcf7a545707f81c72785afd61"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/13/13e524a43fcf8d7573b825b1599652bc4c4aef49"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/21/21bf6462d5ab456789ad10768c78f503ad204447"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/30/30dd378205da48b0b0b792352b1a97b2f6fbbdda"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/71/71677149957622658bbd614424bb198d3587803f"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/b0/b0bf94393519344b05db284b42cfcf4752c4b10f"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/ca/ca3a55ca68dcc48abd54c40ca3c6a369d2e561b7"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/data/eb/ebd6c3499b7d27a3e34f41722011b2047e529488"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/manifest-sha1.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/logs/engine.768e56a8-2c1a-47ba-abd0-eab64237a420.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/manifest.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.jsonld"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.nt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.provn"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.ttl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.xml"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/snapshot/workflow.cwl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha1.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha256.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/tagmanifest-sha512.txt"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/packed.cwl"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-job.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/workflow-run/workflow/primary-output.json"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/plan-package.zip"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/stdout.log"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/stderr.log"
+        },
+        {
+          "@id": "evidence/attempts/87409154e60d/runner-receipt.json"
+        }
+      ],
+      "startTime": "2026-09-28T19:24:50.026921+00:00"
+    },
+    {
+      "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip",
+      "@type": "File",
+      "contentSize": 6781273,
+      "encodingFormat": "application/zip",
+      "name": "Exact selected attempt package",
+      "sha256": "0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89"
+    },
+    {
+      "@id": "evidence/scientific-decision.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "about": {
+        "@id": "#attempt-87409154e60d"
+      },
+      "abstract": "Mixed result: AULC favors historical AdamW while final NLL favors Muon; no overall winner or cost claim.",
+      "description": "Author-supplied summary; consult the attached source-authored record.",
+      "encodingFormat": "text/markdown",
+      "https://www.w3.org/ns/prov#wasDerivedFrom": {
+        "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip"
+      },
+      "name": "Scientific decision and interpretation"
+    },
+    {
+      "@id": "#publication-reviewer",
+      "@type": "Person",
+      "name": "Tyler Harbin-Giuntoli"
+    },
+    {
+      "@id": "evidence/publication-review.md",
+      "@type": [
+        "File",
+        "Review"
+      ],
+      "about": {
+        "@id": "#attempt-87409154e60d"
+      },
+      "author": {
+        "@id": "#publication-reviewer"
+      },
+      "description": "Source-authored review note; inclusion does not establish publication approval.",
+      "encodingFormat": "text/markdown",
+      "https://www.w3.org/ns/prov#wasDerivedFrom": {
+        "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip"
+      },
+      "itemReviewed": {
+        "@id": "evidence/finalization/0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89/parent-attempt-package.zip"
+      },
+      "name": "Publication review record",
+      "reviewBody": "Source-owner reviewed exact attempt and authorized the allowlisted Apache-2.0 experiment closure for public pipeline validation."
+    }
+  ]
+}

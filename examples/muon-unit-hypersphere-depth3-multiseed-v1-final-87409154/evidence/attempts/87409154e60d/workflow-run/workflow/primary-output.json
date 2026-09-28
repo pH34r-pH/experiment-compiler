@@ -1,0 +1,13 @@
+{
+    "result": {
+        "location": "../data/21/21bf6462d5ab456789ad10768c78f503ad204447",
+        "basename": "pilot-result.json",
+        "nameroot": "pilot-result",
+        "nameext": ".json",
+        "class": "File",
+        "checksum": "sha1$21bf6462d5ab456789ad10768c78f503ad204447",
+        "size": 405169,
+        "http://commonwl.org/cwltool#generation": 0,
+        "@id": "urn:uuid:b492d929-e528-4950-836b-0b4e5426623b"
+    }
+}
