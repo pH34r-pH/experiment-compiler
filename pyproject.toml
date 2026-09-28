@@ -26,7 +26,7 @@ mutation = [
   "pytest>=8,<10",
 ]
 testgen = [
-  "hypothesis>=6,<7",
+  "hypothesis[cli]>=6,<7",
   "pynguin==0.47.0",
   "pytest>=8,<10",
 ]
