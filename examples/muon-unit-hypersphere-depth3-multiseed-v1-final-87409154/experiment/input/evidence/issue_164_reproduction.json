@@ -1,0 +1,18 @@
+{
+  "full_qualifying_rerun": {
+    "disposition_match": true,
+    "performed": true,
+    "preregistration_match": true,
+    "primary_result_file_sha256": "909f08d00cd5048ba2a18305513d14fdf51f51cae10fe26bce4905206a789def",
+    "reproduction_result_file_sha256": "eaafbef55da51586d492c665da776e8c776df974583fca15c27bf69e0991b06d",
+    "scientific_payload_match": true,
+    "trace_match": true
+  },
+  "issue": 164,
+  "schema_version": "retained-radius-topology-reproduction/v1",
+  "scientific_payload_sha256": "8c12c7da403366d29bf74aaca14844d538907a7c941cb804bacc1b133feecfc1",
+  "synthetic_controls_passed": true,
+  "test_accessed": false,
+  "trace_count": 840,
+  "trace_sha256": "4f166d296ffd70f00adb1df8e5aff481cc957940f9bddafa5b83ef082261b1c3"
+}

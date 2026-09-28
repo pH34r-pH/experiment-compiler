@@ -36,6 +36,7 @@ jobs:
           mkdir -p quality-audit
           ruff check . \
             --select C901,PLR0912,PLR0913,PLR0915 \
+            --extend-exclude examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154 \
             --config "lint.mccabe.max-complexity=15" \
             --config "lint.pylint.max-args=7" \
             --output-format concise > quality-audit/ruff-structural.txt 2>&1
@@ -51,6 +52,7 @@ jobs:
           lizard . -C 15 -L 75 -a 7 -w \
             -x "./.git/*" -x "./.venv/*" -x "./node_modules/*" \
             -x "./artifacts/*" -x "./dist/*" -x "./build/*" \
+            -x "./examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/*" \
             > quality-audit/lizard.txt 2>&1
           status=$?
           cat quality-audit/lizard.txt
@@ -62,8 +64,9 @@ jobs:
             echo '~~~'
             find . -type f \
               \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' -o -name '*.tsx' -o -name '*.rs' -o -name '*.sh' \) \
-              -not -path './.git/*' -not -path './.venv/*' -not -path './node_modules/*' \
-              -not -path './artifacts/*' -not -path './dist/*' -not -path './build/*' \
+            -not -path './.git/*' -not -path './.venv/*' -not -path './node_modules/*' \
+            -not -path './artifacts/*' -not -path './dist/*' -not -path './build/*' \
+            -not -path './examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/*' \
               -print0 | xargs -0 -r wc -l | sort -nr | head -41
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -77,7 +80,7 @@ jobs:
             --min-lines 8 \
             --min-tokens 60 \
             --format python,javascript,typescript,rust \
-            --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json" \
+            --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**" \
             --reporters console,json \
             --output quality-audit/jscpd \
             > quality-audit/jscpd-console.txt 2>&1
@@ -102,17 +105,19 @@ jobs:
             set +e
             ruff check . \
               --select C901,PLR0912,PLR0913,PLR0915 \
+              --extend-exclude examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154 \
               --config "lint.mccabe.max-complexity=15" \
               --config "lint.pylint.max-args=7" \
               --output-format concise > "$GITHUB_WORKSPACE/quality-audit/base/ruff.txt" 2>&1
             lizard . -C 15 -L 75 -a 7 -w \
               -x "./.git/*" -x "./.venv/*" -x "./node_modules/*" \
               -x "./artifacts/*" -x "./dist/*" -x "./build/*" \
+              -x "./examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/*" \
               > "$GITHUB_WORKSPACE/quality-audit/base/lizard.txt" 2>&1
             npx --yes jscpd@5.0.12 . \
               --min-lines 8 --min-tokens 60 \
               --format python,javascript,typescript,rust \
-              --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json" \
+              --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**" \
               --reporters console \
               > "$GITHUB_WORKSPACE/quality-audit/base/jscpd.txt" 2>&1
             true

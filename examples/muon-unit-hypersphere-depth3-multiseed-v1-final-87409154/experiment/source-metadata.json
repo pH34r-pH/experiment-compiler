@@ -1,0 +1,99 @@
+{
+  "embeddedPythonSource": [
+    {
+      "path": "src/domain_scaling_lab/__init__.py",
+      "sha256": "050fa1d3548c22dc7c846f4242740cf7b7bd0c11617f31fd1e7be55b0033dae2",
+      "size": 943
+    },
+    {
+      "path": "src/domain_scaling_lab/data.py",
+      "sha256": "3fb19b21bb5e252338f47e7b796685e39b14d457a18a5f651dc8ac8f4793fb68",
+      "size": 5948
+    },
+    {
+      "path": "src/domain_scaling_lab/experiments.py",
+      "sha256": "aad89390e1409bbe32090543807115103b224fd31a9e6dd0f2662a28ddf8049f",
+      "size": 3941
+    },
+    {
+      "path": "src/domain_scaling_lab/model.py",
+      "sha256": "a4e5927b3f88f4c923f561258a4c75daff9b19c00c896f67776616f4fc6cbf13",
+      "size": 3822
+    },
+    {
+      "path": "src/domain_scaling_lab/training.py",
+      "sha256": "99324c55ba328d41583bc8862fd070dbe0247053b0f3b4066a324e723309f6ef",
+      "size": 1888
+    },
+    {
+      "path": "src/domain_scaling_lab/retained_radius_topology.py",
+      "sha256": "77d3595b941db005946d8a09964c89ca9562db23ba64f065a675fb4aaa3718fc",
+      "size": 59205
+    },
+    {
+      "path": "src/domain_scaling_lab/log_polar_no_composition.py",
+      "sha256": "acb8078d43d56aae1b5136d48537cef0974251322d7dffbe330935777082345e",
+      "size": 50452
+    },
+    {
+      "path": "src/domain_scaling_lab/oracle_no_composition.py",
+      "sha256": "d8bbc84fbb1844636384efb74fd9e6728a7ca20e309f7402f8f50524b30213cc",
+      "size": 92982
+    },
+    {
+      "path": "src/domain_scaling_lab/oracle_no_composition_stats.py",
+      "sha256": "239fff3945b713ba2fcc8bab910f9f222b9abfbb725dea339272fdb9466bca92",
+      "size": 29376
+    },
+    {
+      "path": "src/domain_scaling_lab/phase_operation_ablations.py",
+      "sha256": "afc9581847948e9f047a309ff8d1b3cb6ba6b3edf52019be49be3c4ca2ca7fab",
+      "size": 65028
+    },
+    {
+      "path": "src/domain_scaling_lab/receivers.py",
+      "sha256": "2d1bb9ace42c5571c8d565f94c6427d61def782f11ce5764922c25c2c9fc3eda",
+      "size": 43444
+    },
+    {
+      "path": "src/domain_scaling_lab/representation_conditions.py",
+      "sha256": "8403245641ad6a1372f1526e43f845d81e4b4c22ddd5f13b62930c2db9033921",
+      "size": 20236
+    },
+    {
+      "path": "src/domain_scaling_lab/spectral.py",
+      "sha256": "da88c1a1145e545197ea7f3171cda5e9987912c9419d867149dac4ee120f4562",
+      "size": 76323
+    },
+    {
+      "path": "src/domain_scaling_lab/advanced.py",
+      "sha256": "6b936cfd1395dff7a746bb6f591b4f1badee192740861de5d36dbc2c217b7ddc",
+      "size": 11526
+    },
+    {
+      "path": "scripts/run_retained_radius_topology.py",
+      "sha256": "64206105a21925ab11b1ff2f3faf1b23be5815ffbd64e9d24674099b66edf88f",
+      "size": 24503
+    },
+    {
+      "path": "scripts/publish_retained_radius_topology.py",
+      "sha256": "3a75def7876e71494a3511e0a2593ef1017186536e90aebc0ee6089d245492ac",
+      "size": 23533
+    },
+    {
+      "path": "tests/test_retained_radius_topology.py",
+      "sha256": "92fa5ae4a87a6b6474e1726e3f76cba63a4dd310db41545cc7699879d38763ac",
+      "size": 10695
+    }
+  ],
+  "note": "Files are byte-for-byte source at the pinned #164 commit; source is embedded privately in this package.",
+  "repository": "pH34r-pH/domain-scaling-lab",
+  "runnerScript": "scripts/run_retained_radius_topology.py",
+  "schemaVersion": 1,
+  "sourceArchive": {
+    "path": "dls-source.zip",
+    "sha256": "eab904df49ef5f85ef11f12dac065dfa4cad52220d9d8257096513481d5c660f",
+    "size": 133236
+  },
+  "sourceCommit": "82a96cbc5d3da5bd5dfe76e3b1b877be996e5df6"
+}

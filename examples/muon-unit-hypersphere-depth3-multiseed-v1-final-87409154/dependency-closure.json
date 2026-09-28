@@ -1,0 +1,70 @@
+{
+  "classifications": {
+    "embedded": [
+      {
+        "item": "Frozen #123 segment source and split evidence",
+        "path": "experiment/input/data/issue_123_results.json"
+      },
+      {
+        "item": "Frozen #163 anchor result",
+        "path": "experiment/input/data/issue_163_results.json"
+      },
+      {
+        "item": "Historical #164 AdamW results used as reference; no new AdamW arm",
+        "path": "experiment/input/data/issue_164_results.json"
+      },
+      {
+        "item": "Frozen spectral frontend checkpoint",
+        "path": "experiment/input/data/spectral.pt"
+      },
+      {
+        "item": "Frozen byte frontend checkpoint",
+        "path": "experiment/input/data/byte.pt"
+      },
+      {
+        "item": "Exact #164 preregistration",
+        "path": "experiment/input/evidence/preregistration.json"
+      },
+      {
+        "item": "Exact #164 historical trace file",
+        "path": "experiment/input/evidence/issue_164_trace.jsonl"
+      },
+      {
+        "item": "Exact #164 summary",
+        "path": "experiment/input/evidence/issue_164_summary.json"
+      },
+      {
+        "item": "Exact #164 receipt",
+        "path": "experiment/input/evidence/issue_164_receipt.json"
+      },
+      {
+        "item": "Exact #164 reproduction manifest",
+        "path": "experiment/input/evidence/issue_164_reproduction.json"
+      },
+      {
+        "item": "Exact #164 source module import closure and runner",
+        "path": "experiment/dls-source.zip"
+      },
+      {
+        "item": "Muon runtime self-check and three-seed qualifying runner",
+        "path": "experiment/runner.py"
+      },
+      {
+        "item": "CWL workflow, job order, and runtime pin",
+        "path": "experiment/workflow.cwl"
+      }
+    ],
+    "external": [],
+    "publicImmutableReferences": [
+      {
+        "availability": "immutable public image reference; image bytes are pulled before offline tool execution",
+        "item": "Digest-pinned PyTorch runtime image",
+        "url": "docker://pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407"
+      }
+    ],
+    "unavailable": []
+  },
+  "experimentId": "muon-unit-hypersphere-depth3-multiseed-v1",
+  "runtimeNetworkRequired": false,
+  "schemaVersion": 1
+}

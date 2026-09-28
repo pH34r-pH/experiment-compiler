@@ -1,0 +1,9 @@
+{
+  "runner": "cwltool",
+  "version": "3.2.20260720092025",
+  "executionMode": "cwltool-podman",
+  "workerImageBase": "docker.io/pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407",
+  "maxWallSeconds": 3600,
+  "networkAccess": false,
+  "runtimeDependencyPolicy": "no pip installs; offline Python/Torch/NumPy/Muon self-check before any training"
+}

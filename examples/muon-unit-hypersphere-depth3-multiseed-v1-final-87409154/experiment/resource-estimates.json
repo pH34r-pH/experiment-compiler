@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "status": "provisional-estimate",
+  "purpose": "three-seed qualifying Muon optimizer comparison on frozen unit_hypersphere_depth3; no fresh AdamW control",
+  "basis": {
+    "historicalEvidence": "#164 replay of 12 trained cells completed in approximately 8m54.61s with observed peak RSS 949692 KiB; this is historical context only and not a Muon measurement",
+    "analyticalBound": "3 seeds × 128 updates with 7 evaluation checkpoints; CPU-only; no hyperparameter sweep",
+    "uncertainty": "moderate: r16 qualified one seed at ~57 s cell wall time and ~650 MB peak process RSS; allow headroom for three sequential cells"
+  },
+  "runtimeImage": {
+    "reference": "pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407",
+    "python": "3.12 (image metadata)",
+    "torch": "2.13.0+cu130 (runtime self-check required)",
+    "device": "CPU-only",
+    "compressedPullSize": "2.83 GB (Docker Hub reported; approximate)",
+    "pullAndImageDiskSeparateFromCWLTmpfs": true
+  },
+  "requestedLimits": {
+    "cpuCores": 1,
+    "ramBytes": 1342177280,
+    "scratchBytes": 536870912,
+    "outputBytes": 134217728,
+    "wallSeconds": 3600
+  },
+  "embeddedClosure": {
+    "sourceAndInputsBytesApprox": 13500000,
+    "largestInputBytes": 7476039,
+    "sourceArchiveBytes": 127000
+  },
+  "campaign": {
+    "arms": 1,
+    "seeds": [
+      17,
+      31,
+      47
+    ],
+    "freshAdamWControlRuns": 0,
+    "trainingRuns": 3,
+    "hyperparameterTuningRuns": 0
+  },
+  "admission": "Reuse the qualified 1-vCPU/1280-MiB container bound and 512-MiB tmpfs scratch. Seeds run sequentially, so memory should not scale by three; the one-hour wall bound provides substantial headroom over the qualified seed-17 runtime."
+}

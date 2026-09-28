@@ -1,0 +1,136 @@
+{
+  "attemptId": "87409154e60d",
+  "availableClosure": {
+    "embedded": [
+      {
+        "item": "Frozen #123 segment source and split evidence",
+        "path": "experiment/input/data/issue_123_results.json"
+      },
+      {
+        "item": "Frozen #163 anchor result",
+        "path": "experiment/input/data/issue_163_results.json"
+      },
+      {
+        "item": "Historical #164 AdamW results used as reference; no new AdamW arm",
+        "path": "experiment/input/data/issue_164_results.json"
+      },
+      {
+        "item": "Frozen spectral frontend checkpoint",
+        "path": "experiment/input/data/spectral.pt"
+      },
+      {
+        "item": "Frozen byte frontend checkpoint",
+        "path": "experiment/input/data/byte.pt"
+      },
+      {
+        "item": "Exact #164 preregistration",
+        "path": "experiment/input/evidence/preregistration.json"
+      },
+      {
+        "item": "Exact #164 historical trace file",
+        "path": "experiment/input/evidence/issue_164_trace.jsonl"
+      },
+      {
+        "item": "Exact #164 summary",
+        "path": "experiment/input/evidence/issue_164_summary.json"
+      },
+      {
+        "item": "Exact #164 receipt",
+        "path": "experiment/input/evidence/issue_164_receipt.json"
+      },
+      {
+        "item": "Exact #164 reproduction manifest",
+        "path": "experiment/input/evidence/issue_164_reproduction.json"
+      },
+      {
+        "item": "Exact #164 source module import closure and runner",
+        "path": "experiment/dls-source.zip"
+      },
+      {
+        "item": "Muon runtime self-check and three-seed qualifying runner",
+        "path": "experiment/runner.py"
+      },
+      {
+        "item": "CWL workflow, job order, and runtime pin",
+        "path": "experiment/workflow.cwl"
+      }
+    ],
+    "external": [],
+    "publicImmutableReferences": [
+      {
+        "availability": "immutable public image reference; image bytes are pulled before offline tool execution",
+        "item": "Digest-pinned PyTorch runtime image",
+        "url": "docker://pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407"
+      }
+    ],
+    "unavailable": []
+  },
+  "collectionErrors": [],
+  "endedAt": "2026-09-28T19:28:12.526937+00:00",
+  "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+  "exitCode": 0,
+  "jobSha256": "9341859a3d25281c4851687862684c65c43263bd9d8c36c8670d419cb8d0c3e3",
+  "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
+  "outputs": [
+    {
+      "@id": "evidence/attempts/87409154e60d/pilot-result.json",
+      "contentSize": 405169,
+      "sha256": "f0f50040638411905a6501b968feb6c939d9d5a7d460d017374fad27479be137"
+    }
+  ],
+  "planPackageArchive": {
+    "@id": "evidence/attempts/87409154e60d/plan-package.zip",
+    "contentSize": 2235457,
+    "sha256": "fec4f9d2270a40deebe580e376dfbf23ddb799059b4b67cadef211fa4d9c833a"
+  },
+  "planPackageSha256": "fec4f9d2270a40deebe580e376dfbf23ddb799059b4b67cadef211fa4d9c833a",
+  "resourceMeasurements": {
+    "peakProcessMemory": "unknown; not measured by this adapter"
+  },
+  "runner": {
+    "name": "cwltool",
+    "python": "3.13.15",
+    "version": "3.2.20260720092025",
+    "workerImageBase": "docker.io/pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407"
+  },
+  "schemaVersion": 1,
+  "startedAt": "2026-09-28T19:24:50.026921+00:00",
+  "status": "succeeded",
+  "timedOut": false,
+  "wallSeconds": 202.50100929699693,
+  "workerContext": {
+    "attestation": "caller-reported; not independently verified by the adapter",
+    "reportedImageId": "3f84073b96298532482772073d00a19f94c9cde20bb5321a8452cdb0ab05e020",
+    "reportedSandbox": "cwltool PodmanExecutor; CWL NetworkAccess=false (--net=none); strict CPU/RAM; configured bounded filesystem"
+  },
+  "workflowRunCrateFiles": [
+    "bag-info.txt",
+    "bagit.txt",
+    "data/00/00e33dda0f20b50900c564251988d70293d20c66",
+    "data/12/12dfe2401843769bcf7a545707f81c72785afd61",
+    "data/13/13e524a43fcf8d7573b825b1599652bc4c4aef49",
+    "data/21/21bf6462d5ab456789ad10768c78f503ad204447",
+    "data/30/30dd378205da48b0b0b792352b1a97b2f6fbbdda",
+    "data/71/71677149957622658bbd614424bb198d3587803f",
+    "data/b0/b0bf94393519344b05db284b42cfcf4752c4b10f",
+    "data/ca/ca3a55ca68dcc48abd54c40ca3c6a369d2e561b7",
+    "data/eb/ebd6c3499b7d27a3e34f41722011b2047e529488",
+    "manifest-sha1.txt",
+    "metadata/logs/engine.768e56a8-2c1a-47ba-abd0-eab64237a420.txt",
+    "metadata/manifest.json",
+    "metadata/provenance/primary.cwlprov.json",
+    "metadata/provenance/primary.cwlprov.jsonld",
+    "metadata/provenance/primary.cwlprov.nt",
+    "metadata/provenance/primary.cwlprov.provn",
+    "metadata/provenance/primary.cwlprov.ttl",
+    "metadata/provenance/primary.cwlprov.xml",
+    "snapshot/workflow.cwl",
+    "tagmanifest-sha1.txt",
+    "tagmanifest-sha256.txt",
+    "tagmanifest-sha512.txt",
+    "workflow/packed.cwl",
+    "workflow/primary-job.json",
+    "workflow/primary-output.json"
+  ],
+  "workflowSha256": "004865a351a3764bdcd40960c138eba57af11477925858d653fd548fea40887a"
+}

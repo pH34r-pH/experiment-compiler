@@ -1,0 +1,55 @@
+{
+  "advance_issue_165": true,
+  "classification": "HYPERSPHERICAL EFFECT",
+  "exact_file_count_excluding_receipt": 8,
+  "instrumentation_passed": true,
+  "inventory": [
+    {
+      "bytes": 1958585,
+      "path": "issue_164_results.json",
+      "sha256": "909f08d00cd5048ba2a18305513d14fdf51f51cae10fe26bce4905206a789def"
+    },
+    {
+      "bytes": 392789,
+      "path": "issue_164_trace.jsonl",
+      "sha256": "19121baca6d4b403995bfb6aac011366df76a396b9b3f54388a5de6880ddab03"
+    },
+    {
+      "bytes": 45285,
+      "path": "issue_164_summary.json",
+      "sha256": "71f2b4d3df6b435595f4c2cac9397ea1b398d529078d8e2dda6b6cbe2e8fc9ee"
+    },
+    {
+      "bytes": 4530,
+      "path": "issue_164_memo.md",
+      "sha256": "7f56ff8db40da52bedc95c2193e7e0f26423add0f3c122a316982c491638c8c0"
+    },
+    {
+      "bytes": 93106,
+      "path": "issue_164_learning_curves.svg",
+      "sha256": "d07e87fe520bfac648220acf16407af48e86094e237ed837dedd9ba3f689925a"
+    },
+    {
+      "bytes": 44910,
+      "path": "issue_164_contrasts.svg",
+      "sha256": "49b99f9253275166ae24331929a32b2d570f1d17385e27eadace362acda10805"
+    },
+    {
+      "bytes": 79251,
+      "path": "issue_164_depth_diagnostics.svg",
+      "sha256": "9778dfe5a2784d890267cc8006d9b1b16b94febdc98f5543076c372951c30154"
+    },
+    {
+      "bytes": 747,
+      "path": "issue_164_reproduction.json",
+      "sha256": "0e7d70afc370b188c2cc7aa42156a90bee3da65a32c486f7b338a6dce0704bd6"
+    }
+  ],
+  "issue": 164,
+  "schema_version": "retained-radius-topology-receipt/v1",
+  "scientific_payload_sha256": "8c12c7da403366d29bf74aaca14844d538907a7c941cb804bacc1b133feecfc1",
+  "status": "complete",
+  "test_accessed": false,
+  "trace_count": 840,
+  "trace_sha256": "4f166d296ffd70f00adb1df8e5aff481cc957940f9bddafa5b83ef082261b1c3"
+}
