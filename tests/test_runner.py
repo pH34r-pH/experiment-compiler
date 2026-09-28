@@ -194,9 +194,9 @@ class: CommandLineTool
             outdir = Path(command[command.index("--outdir") + 1])
             provdir = Path(command[command.index("--provenance") + 1])
             outdir.mkdir(parents=True)
-            (outdir / "result.txt").write_text("fixture result\\n")
+            (outdir / "result.txt").write_text("fixture result\n")
             provdir.mkdir(parents=True)
-            (provdir / "workflow-run.json").write_text('{"fixture":"provenance"}\\n')
+            (provdir / "workflow-run.json").write_text('{"fixture":"provenance"}\n')
             return CompletedProcess()
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -206,7 +206,7 @@ class: CommandLineTool
             runner_path = fixture / "source/runner.json"
             runner = json.loads(runner_path.read_text())
             runner["executionMode"] = "cwltool-podman"
-            runner_path.write_text(json.dumps(runner, indent=2) + "\\n")
+            runner_path.write_text(json.dumps(runner, indent=2) + "\n")
             recipe_path = fixture / "experiment.json"
             recipe = json.loads(recipe_path.read_text())
             for member in recipe["members"]:
@@ -214,7 +214,7 @@ class: CommandLineTool
                     runner_bytes = runner_path.read_bytes()
                     member["sha256"] = sha256_bytes(runner_bytes)
                     member["size"] = len(runner_bytes)
-            recipe_path.write_text(json.dumps(recipe, indent=2) + "\\n")
+            recipe_path.write_text(json.dumps(recipe, indent=2) + "\n")
             plan = directory / "plan.zip"
             built = compile_package(recipe_path, plan)
             result = directory / "result.zip"
