@@ -235,6 +235,50 @@ class: CommandLineTool
             verified = verify_bytes(result.read_bytes())
             self.assertEqual(verified["profile"], "compiled-experiment-lifecycle-v1")
 
+    def test_output_collection_failure_is_retained_as_a_failed_attempt(self):
+        class CompletedProcess:
+            pid = 103
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        def fake_popen(command, **kwargs):
+            outdir = Path(command[command.index("--outdir") + 1])
+            outdir.mkdir(parents=True)
+            target = outdir / "target.txt"
+            target.write_text("data")
+            (outdir / "rejected-link.txt").symlink_to(target)
+            return CompletedProcess()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            plan = directory / "plan.zip"
+            built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
+            result = directory / "result.zip"
+            with patch.dict(os.environ, {
+                    "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                    "EXPERIMENT_RUNNER_SANDBOX": "test worker",
+                    "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                        '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                    "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+                    "TMPDIR": str(directory),
+            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
+                    patch("experiment_compiler.runner.importlib.metadata.version",
+                          return_value="3.2.20260720092025"), \
+                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
+                outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
+                                      allow_workflow_execution=True)
+
+            self.assertEqual(outcome["executionStatus"], "failed")
+            with __import__("zipfile").ZipFile(result) as archive:
+                receipt_name = next(name for name in archive.namelist()
+                                    if name.endswith("/runner-receipt.json"))
+                receipt = json_value(archive.read(receipt_name))
+            self.assertEqual(receipt["status"], "failed")
+            self.assertTrue(any("symlink" in error for error in receipt["collectionErrors"]))
+            self.assertEqual(receipt["outputs"], [])
+
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
             pid = 101
