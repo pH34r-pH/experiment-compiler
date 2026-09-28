@@ -387,7 +387,10 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
 
 def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_sha256: str,
                       closure: dict, runner: dict, execution: dict,
-                      created: datetime, ended: datetime, elapsed: float) -> tuple[dict[str, bytes], str, list[str]]:
+                      timing: dict) -> tuple[dict[str, bytes], str, list[str]]:
+    created = timing["created"]
+    ended = timing["ended"]
+    elapsed = timing["elapsed"]
     run_id = hashlib.sha256((expected_sha256 + created.isoformat()).encode()).hexdigest()[:12]
     evidence_root = f"evidence/attempts/{run_id}"
     augmented = dict(payload)
@@ -576,9 +579,9 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
         execution = _execute_cwl(temporary, payload, runner, limits, tmpfs_root)
         ended = datetime.now(timezone.utc)
         elapsed = time.monotonic() - started
+        timing = {"created": created, "ended": ended, "elapsed": elapsed}
         augmented, run_id, attempt_members = _attempt_evidence(
-            payload, package_bytes, expected_sha256, closure, runner,
-            execution, created, ended, elapsed,
+            payload, package_bytes, expected_sha256, closure, runner, execution, timing,
         )
         experiment_id, title = _augment_result_crate(
             augmented, expected_sha256, run_id, attempt_members, created, ended, execution,
