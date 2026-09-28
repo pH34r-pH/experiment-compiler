@@ -257,6 +257,10 @@ class: CommandLineTool
                 outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
                                       allow_workflow_execution=True)
             self.assertEqual(outcome["executionStatus"], "succeeded")
+            retained_recipe = load_recipe(
+                result.with_name(result.stem + ".source") / "experiment.json"
+            )
+            verify_bytes(result.read_bytes(), recipe=retained_recipe)
             verified = verify_bytes(result.read_bytes())
             self.assertEqual(verified["profile"], "compiled-experiment-lifecycle-v1")
 
