@@ -30,15 +30,24 @@ EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
 
 class CompilerTests(unittest.TestCase):
     def test_cwl_resource_unit_conversions_are_conservative_and_reject_unknown(self):
+        # The smallest valid positive budgets are part of the admission boundary.
+        self.assertEqual(bytes_to_mib_minimum(1), 1)
+        self.assertEqual(seconds_to_cwl_limit(1), 1)
         self.assertEqual(bytes_to_mib_minimum(1024 * 1024), 1)
         self.assertEqual(bytes_to_mib_minimum(1024 * 1024 + 1), 2)
         self.assertEqual(seconds_to_cwl_limit(30), 30)
         self.assertEqual(seconds_to_cwl_limit(30.01), 31)
+
+        # PackageError text is surfaced directly by the CLI, so preserve the
+        # diagnostic category without pinning the entire sentence verbatim.
         for value in (0, -1, True, "unknown"):
-            with self.subTest(value=value), self.assertRaises(PackageError):
+            with self.subTest(value=value), self.assertRaisesRegex(PackageError, "positive integer"):
                 bytes_to_mib_minimum(value)
-        for value in (0, -1, True, "unknown", float("inf"), float("nan")):
-            with self.subTest(value=value), self.assertRaises(PackageError):
+        for value in (True, "unknown"):
+            with self.subTest(value=value), self.assertRaisesRegex(PackageError, "must be numeric"):
+                seconds_to_cwl_limit(value)
+        for value in (0, -1, float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaisesRegex(PackageError, "finite and positive"):
                 seconds_to_cwl_limit(value)
 
     def test_git_lfs_pointer_is_not_accepted_as_payload_bytes(self):

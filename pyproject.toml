@@ -20,6 +20,16 @@ classifiers = [
 
 [project.optional-dependencies]
 runner = ["PyYAML==6.0.2"]
+mutation = [
+  "irradiate==0.4.3",
+  "jsonschema>=4.25,<5",
+  "pytest>=8,<10",
+]
+testgen = [
+  "hypothesis[cli]>=6,<7",
+  "pynguin==0.47.0",
+  "pytest>=8,<10",
+]
 
 [project.scripts]
 experiment-compiler = "experiment_compiler.__main__:main"
@@ -31,3 +41,9 @@ Issues = "https://github.com/pH34r-pH/experiment-compiler/issues"
 
 [tool.setuptools.packages.find]
 include = ["experiment_compiler*"]
+
+
+[tool.irradiate]
+paths_to_mutate = "experiment_compiler"
+tests_dir = "tests"
+pytest_add_cli_args = ["-q"]
