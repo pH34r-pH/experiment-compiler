@@ -225,9 +225,9 @@ class: CommandLineTool
                     "EXPERIMENT_RUNNER_RESOURCE_LIMITS": limits,
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                     "TMPDIR": str(directory),
-            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \\
+            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                     patch("experiment_compiler.runner.importlib.metadata.version",
-                          return_value="3.2.20260720092025"), \\
+                          return_value="3.2.20260720092025"), \
                     patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
                 outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
                                       allow_workflow_execution=True)
