@@ -350,6 +350,9 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
         f"{python_lib}:{inherited_ld_library_path}"
         if inherited_ld_library_path else python_lib
     )
+    inherited_xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if inherited_xdg_data_home:
+        process_environment["XDG_DATA_HOME"] = inherited_xdg_data_home
     try:
         with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
             process = subprocess.Popen(
