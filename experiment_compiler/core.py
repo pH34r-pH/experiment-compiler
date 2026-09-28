@@ -267,7 +267,7 @@ def _lifecycle_graph(crate: Any) -> tuple[list, dict[str, dict]]:
     return graph, nodes
 
 
-def _lifecycle_root_protocol(nodes: dict[str, dict]) -> tuple[dict, Any]:
+def _lifecycle_root(nodes: dict[str, dict]) -> dict:
     root = nodes.get("./")
     if not isinstance(root, dict) or "Dataset" not in _types(root.get("@type")):
         raise PackageError("Lifecycle RO-Crate requires a root Dataset")
@@ -279,6 +279,10 @@ def _lifecycle_root_protocol(nodes: dict[str, dict]) -> tuple[dict, Any]:
         raise PackageError("Lifecycle metadata descriptor must declare RO-Crate 1.3")
     if not any(ref.get("@id") == "https://w3id.org/ro/crate/1.3" for ref in _as_refs(root.get("conformsTo"))):
         raise PackageError("Lifecycle root Dataset must declare RO-Crate 1.3")
+    return root
+
+
+def _lifecycle_protocol(root: dict, nodes: dict[str, dict]) -> Any:
     main = root.get("mainEntity")
     if not isinstance(main, dict) or not isinstance(main.get("@id"), str):
         raise PackageError("Lifecycle root Dataset must identify its main protocol entity")
@@ -290,47 +294,54 @@ def _lifecycle_root_protocol(nodes: dict[str, dict]) -> tuple[dict, Any]:
     if not (isinstance(maturity, str) and maturity.strip()) and not (
             isinstance(maturity, dict) and isinstance(maturity.get("@id"), str)):
         raise PackageError("Protocol CreativeWork must declare Schema.org creativeWorkStatus")
-    return root, maturity
+    return maturity
+
+
+def _measurement_node(value: dict, nodes: dict[str, dict]) -> dict:
+    measurement = nodes.get(value.get("@id")) if isinstance(value.get("@id"), str) else value
+    if (not isinstance(measurement, dict) or "PropertyValue" not in _types(measurement.get("@type")) or
+            not isinstance(measurement.get("propertyID"), str) or not measurement["propertyID"].strip() or
+            not isinstance(measurement.get("measurementTechnique"), str) or
+            not measurement["measurementTechnique"].strip() or "value" not in measurement):
+        raise PackageError("Root Dataset variableMeasured must reference documented Schema.org PropertyValue records")
+    return measurement
+
+
+def _measurement_evidence(measurement: dict) -> None:
+    amount = measurement["value"]
+    if isinstance(amount, bool) or not isinstance(amount, (str, int, float)):
+        raise PackageError("Resource PropertyValue must use a number or explicit text such as unknown")
+    technique = measurement["measurementTechnique"].strip().casefold()
+    if isinstance(amount, str) and amount.strip().casefold() == "unknown":
+        if "unitText" in measurement:
+            raise PackageError("Unknown resource PropertyValue must not invent a unit or zero quantity")
+        return
+    if not (isinstance(measurement.get("unitText"), str) and measurement["unitText"].strip()):
+        raise PackageError("Numeric resource PropertyValue must declare Schema.org unitText")
+    if amount == 0 and any(term in technique for term in ("unknown", "unmeasured", "not measured")):
+        raise PackageError("Unknown resource PropertyValue must not be encoded as zero")
+    evidence = measurement.get("valueReference")
+    if not ((isinstance(evidence, str) and evidence.strip()) or
+            (isinstance(evidence, dict) and isinstance(evidence.get("@id"), str))):
+        raise PackageError("Numeric resource PropertyValue must link its evidence or estimate basis")
 
 
 def _resource_measurements(root: dict, nodes: dict[str, dict]) -> list[dict]:
-    resource_measurements = []
+    result = []
     for value in _as_refs(root.get("variableMeasured")):
-        measurement = nodes.get(value.get("@id")) if isinstance(value.get("@id"), str) else value
-        if (not isinstance(measurement, dict) or "PropertyValue" not in _types(measurement.get("@type")) or
-                not isinstance(measurement.get("propertyID"), str) or not measurement["propertyID"].strip() or
-                not isinstance(measurement.get("measurementTechnique"), str) or
-                not measurement["measurementTechnique"].strip() or "value" not in measurement):
-            raise PackageError("Root Dataset variableMeasured must reference documented Schema.org PropertyValue records")
-        amount = measurement["value"]
-        if isinstance(amount, bool) or not isinstance(amount, (str, int, float)):
-            raise PackageError("Resource PropertyValue must use a number or explicit text such as unknown")
-        technique = measurement["measurementTechnique"].strip().casefold()
-        if isinstance(amount, str) and amount.strip().casefold() == "unknown":
-            if "unitText" in measurement:
-                raise PackageError("Unknown resource PropertyValue must not invent a unit or zero quantity")
-        else:
-            if not (isinstance(measurement.get("unitText"), str) and measurement["unitText"].strip()):
-                raise PackageError("Numeric resource PropertyValue must declare Schema.org unitText")
-            if amount == 0 and any(term in technique for term in ("unknown", "unmeasured", "not measured")):
-                raise PackageError("Unknown resource PropertyValue must not be encoded as zero")
-            evidence = measurement.get("valueReference")
-            if not ((isinstance(evidence, str) and evidence.strip()) or
-                    (isinstance(evidence, dict) and isinstance(evidence.get("@id"), str))):
-                raise PackageError("Numeric resource PropertyValue must link its evidence or estimate basis")
-        resource_measurements.append({
+        measurement = _measurement_node(value, nodes)
+        _measurement_evidence(measurement)
+        result.append({
             "propertyID": measurement["propertyID"],
-            "value": amount,
+            "value": measurement["value"],
             "unitText": measurement.get("unitText"),
             "measurementTechnique": measurement["measurementTechnique"],
             "evidence": measurement.get("valueReference"),
         })
-    return resource_measurements
+    return result
 
 
-def _execution_actions(graph: list, nodes: dict[str, dict], root: dict) -> tuple[list[dict], bool]:
-    run_profile = "https://w3id.org/ro/wfrun/process/0.6"
-    declares_run = any(ref.get("@id") == run_profile for ref in _as_refs(root.get("conformsTo")))
+def _execution_action_nodes(graph: list) -> list[dict]:
     actions = [
         node for node in graph
         if isinstance(node, dict)
@@ -340,22 +351,30 @@ def _execution_actions(graph: list, nodes: dict[str, dict], root: dict) -> tuple
     ids = [node.get("@id") for node in actions]
     if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
         raise PackageError("Each execution CreateAction must have a unique @id")
+    return actions
+
+
+def _validate_execution_action(action: dict, nodes: dict[str, dict]) -> None:
     allowed = {
         "https://schema.org/ActiveActionStatus",
         "https://schema.org/CompletedActionStatus",
         "https://schema.org/FailedActionStatus",
     }
-    for action in actions:
-        status = action.get("actionStatus")
-        if not isinstance(status, str) or status not in allowed:
-            raise PackageError("Every CreateAction must carry an explicit Schema.org actionStatus")
-        instrument = action.get("instrument")
-        if not isinstance(instrument, dict) or not isinstance(instrument.get("@id"), str):
-            raise PackageError("Every execution CreateAction must identify its instrument")
-        instrument_node = nodes.get(instrument["@id"])
-        if instrument_node is None or not ({"SoftwareApplication", "SoftwareSourceCode"} &
-                                           _types(instrument_node.get("@type"))):
-            raise PackageError("CreateAction instrument must resolve to described executable software")
+    status = action.get("actionStatus")
+    if not isinstance(status, str) or status not in allowed:
+        raise PackageError("Every CreateAction must carry an explicit Schema.org actionStatus")
+    instrument = action.get("instrument")
+    if not isinstance(instrument, dict) or not isinstance(instrument.get("@id"), str):
+        raise PackageError("Every execution CreateAction must identify its instrument")
+    instrument_node = nodes.get(instrument["@id"])
+    if instrument_node is None or not ({"SoftwareApplication", "SoftwareSourceCode"} &
+                                       _types(instrument_node.get("@type"))):
+        raise PackageError("CreateAction instrument must resolve to described executable software")
+
+
+def _validate_run_profile(root: dict, nodes: dict[str, dict], actions: list[dict]) -> bool:
+    run_profile = "https://w3id.org/ro/wfrun/process/0.6"
+    declares_run = any(ref.get("@id") == run_profile for ref in _as_refs(root.get("conformsTo")))
     if actions and not declares_run:
         raise PackageError("Execution actions require Process Run Crate 0.6 provenance")
     if declares_run and not actions:
@@ -365,7 +384,14 @@ def _execution_actions(graph: list, nodes: dict[str, dict], root: dict) -> tuple
         if (profile_node is None or profile_node.get("version") != "0.6" or
                 "Profile" not in _types(profile_node.get("@type"))):
             raise PackageError("Process Run Crate 0.6 conformance requires its described profile entity")
-    return actions, declares_run
+    return declares_run
+
+
+def _execution_actions(graph: list, nodes: dict[str, dict], root: dict) -> tuple[list[dict], bool]:
+    actions = _execution_action_nodes(graph)
+    for action in actions:
+        _validate_execution_action(action, nodes)
+    return actions, _validate_run_profile(root, nodes, actions)
 
 
 def _validate_lifecycle_members(graph: list, root: dict) -> None:
@@ -399,7 +425,8 @@ def _potential_action_count(graph: list, nodes: dict[str, dict]) -> int:
 def validate_lifecycle_crate(crate: Any) -> dict:
     """Validate lifecycle facts without interpreting scientific results."""
     graph, nodes = _lifecycle_graph(crate)
-    root, maturity = _lifecycle_root_protocol(nodes)
+    root = _lifecycle_root(nodes)
+    maturity = _lifecycle_protocol(root, nodes)
     resource_measurements = _resource_measurements(root, nodes)
     actions, declares_run = _execution_actions(graph, nodes, root)
     _validate_lifecycle_members(graph, root)
