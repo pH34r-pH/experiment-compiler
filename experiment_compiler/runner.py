@@ -35,7 +35,7 @@ def _read_package(data: bytes, expected_sha256: str) -> tuple[dict, dict[str, by
     return manifest, payload
 
 
-def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
+def _dependency_closure(payload: dict[str, bytes]) -> dict:
     for required in ("dependency-closure.json", "ro-crate-metadata.json"):
         if required not in payload:
             raise PackageError(f"execution admission requires packaged {required}")
@@ -49,14 +49,17 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
     if closure.get("runtimeNetworkRequired") is not False:
         raise PackageError("execution deferred: local adapter requires a declared no-network protocol")
+    return closure
+
+
+def _runner_config(payload: dict[str, bytes]) -> dict:
     for required in ("experiment/workflow.cwl", "experiment/job.yml", "experiment/runner.json"):
         if required not in payload:
             raise PackageError(f"execution deferred: plan has no admitted executable component {required}")
     runner = json_value(payload["experiment/runner.json"])
     if not isinstance(runner, dict) or runner.get("runner") != "cwltool" or not isinstance(runner.get("version"), str):
         raise PackageError("runner.json must pin the cwltool runner and exact version")
-    execution_mode = runner.get("executionMode")
-    if execution_mode not in {"cwltool-docker", "cwltool-podman"}:
+    if runner.get("executionMode") not in {"cwltool-docker", "cwltool-podman"}:
         raise PackageError("unsupported execution mode; this adapter requires cwltool Docker or Podman execution")
     timeout_seconds = runner.get("maxWallSeconds")
     if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 86400:
@@ -67,6 +70,10 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
         raise PackageError("pinned cwltool is not installed in this runner environment") from exc
     if installed != runner["version"]:
         raise PackageError(f"cwltool version mismatch: package requires {runner['version']}, installed {installed}")
+    return runner
+
+
+def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, str, set[str]]:
     workflow = payload["experiment/workflow.cwl"]
     if len(workflow) > 1024 * 1024:
         raise PackageError("CWL workflow exceeds the execution admission size limit")
@@ -91,6 +98,13 @@ def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
     _admit_job(job_document, payload, input_ids)
+    return limits, tmpfs_root, input_ids
+
+
+def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
+    closure = _dependency_closure(payload)
+    runner = _runner_config(payload)
+    limits, tmpfs_root, _ = _worker_admission(payload, runner)
     return closure, runner, limits, tmpfs_root
 
 
@@ -293,14 +307,263 @@ def _materialize(root: Path, payload: dict[str, bytes]) -> None:
         target.write_bytes(data)
 
 
+def _run_command(temporary: Path, work: Path, attempt_out: Path, provenance: Path,
+                 runner: dict) -> list[str]:
+    runtime_args = ["--podman"] if runner["executionMode"] == "cwltool-podman" else []
+    return [
+        sys.executable, "-m", "cwltool", *runtime_args, "--disable-pull",
+        "--strict-memory-limit", "--strict-cpu-limit",
+        "--disable-host-provenance", "--disable-user-provenance",
+        "--basedir", str(work / "experiment"),
+        "--tmpdir-prefix", str(temporary / "cwl-tmp-"),
+        "--tmp-outdir-prefix", str(temporary / "cwl-out-"),
+        "--outdir", str(attempt_out), "--provenance", str(provenance),
+        str(work / "experiment/workflow.cwl"), str(work / "experiment/job.yml"),
+    ]
+
+
+def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
+                 limits: dict, tmpfs_root: str) -> dict:
+    _require_bounded_tmpfs(temporary, Path(tmpfs_root), limits["tmpdirMiB"])
+    work = temporary / "package"
+    work.mkdir()
+    _materialize(work, payload)
+    attempt_out = temporary / "outputs"
+    provenance = temporary / "cwlprov"
+    command = _run_command(temporary, work, attempt_out, provenance, runner)
+    stdout_path = temporary / "stdout.log"
+    stderr_path = temporary / "stderr.log"
+    runner_home = temporary / "runner-home"
+    runner_home.mkdir()
+    process_environment = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(runner_home),
+        "TMPDIR": str(temporary),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    try:
+        with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
+            process = subprocess.Popen(
+                command, cwd=work, env=process_environment,
+                stdout=stdout_stream, stderr=stderr_stream, start_new_session=True,
+            )
+            timed_out = False
+            try:
+                return_code = process.wait(timeout=runner["maxWallSeconds"])
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    os.killpg(process.pid, 15)
+                    process.wait(timeout=5)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    try:
+                        os.killpg(process.pid, 9)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                return_code = process.returncode if process.returncode else 124
+    except subprocess.SubprocessError as exc:
+        raise PackageError(f"CWL runner could not start: {exc}") from exc
+    output_files: dict[str, bytes] = {}
+    if attempt_out.exists():
+        _collect_tree(attempt_out, output_files, MAX_TOTAL)
+    provenance_files: dict[str, bytes] = {}
+    if provenance.exists():
+        _collect_tree(provenance, provenance_files, MAX_TOTAL)
+    if not output_files and return_code == 0:
+        raise PackageError("CWL runner succeeded without producing any declared result files")
+    return {
+        "returnCode": return_code,
+        "timedOut": timed_out,
+        "stdout": bounded_read(stdout_path, 4 * 1024 * 1024),
+        "stderr": bounded_read(stderr_path, 4 * 1024 * 1024),
+        "outputs": output_files,
+        "provenance": provenance_files,
+    }
+
+
+def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_sha256: str,
+                      closure: dict, runner: dict, execution: dict,
+                      timing: dict) -> tuple[dict[str, bytes], str, list[str]]:
+    created = timing["created"]
+    ended = timing["ended"]
+    elapsed = timing["elapsed"]
+    run_id = hashlib.sha256((expected_sha256 + created.isoformat()).encode()).hexdigest()[:12]
+    evidence_root = f"evidence/attempts/{run_id}"
+    augmented = dict(payload)
+    plan_archive = f"{evidence_root}/plan-package.zip"
+    output_files = execution["outputs"]
+    provenance_files = execution["provenance"]
+    augmented[plan_archive] = package_bytes
+    augmented.update({f"{evidence_root}/{name}": value for name, value in output_files.items()})
+    augmented.update({
+        f"{evidence_root}/workflow-run/{name}": value
+        for name, value in provenance_files.items()
+    })
+    augmented[f"{evidence_root}/stdout.log"] = execution["stdout"]
+    augmented[f"{evidence_root}/stderr.log"] = execution["stderr"]
+    output_index = [
+        {"@id": f"{evidence_root}/{name}", "sha256": sha256_bytes(value), "contentSize": len(value)}
+        for name, value in sorted(output_files.items())
+    ]
+    receipt = {
+        "schemaVersion": 1,
+        "attemptId": run_id,
+        "planPackageSha256": expected_sha256,
+        "planPackageArchive": {
+            "@id": plan_archive, "sha256": expected_sha256, "contentSize": len(package_bytes),
+        },
+        "workflowSha256": sha256_bytes(payload["experiment/workflow.cwl"]),
+        "jobSha256": sha256_bytes(payload["experiment/job.yml"]),
+        "runner": {
+            "name": "cwltool", "version": runner["version"],
+            "python": platform.python_version(), "workerImageBase": runner.get("workerImageBase"),
+        },
+        "executionMode": (
+            "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"
+            if runner["executionMode"] == "cwltool-podman"
+            else "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime"
+        ),
+        "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
+        "workerContext": {
+            "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
+            "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
+            "attestation": "caller-reported; not independently verified by the adapter",
+        },
+        "status": (
+            "timed-out" if execution["timedOut"]
+            else "succeeded" if execution["returnCode"] == 0
+            else "failed"
+        ),
+        "exitCode": execution["returnCode"],
+        "timedOut": execution["timedOut"],
+        "startedAt": created.isoformat(),
+        "endedAt": ended.isoformat(),
+        "wallSeconds": elapsed,
+        "resourceMeasurements": {"peakProcessMemory": "unknown; not measured by this adapter"},
+        "outputs": output_index,
+        "workflowRunCrateFiles": sorted(provenance_files),
+        "availableClosure": closure["classifications"],
+    }
+    receipt_path = f"{evidence_root}/runner-receipt.json"
+    augmented[receipt_path] = canonical(receipt)
+    attempt_members = [f"{evidence_root}/{name}" for name in output_files]
+    attempt_members += [f"{evidence_root}/workflow-run/{name}" for name in provenance_files]
+    attempt_members += [
+        plan_archive, f"{evidence_root}/stdout.log", f"{evidence_root}/stderr.log", receipt_path,
+    ]
+    return augmented, run_id, attempt_members
+
+
+def _augment_result_crate(augmented: dict[str, bytes], expected_sha256: str, run_id: str,
+                          attempt_members: list[str], created: datetime, ended: datetime,
+                          execution: dict) -> tuple[str, str]:
+    crate = json_value(augmented["ro-crate-metadata.json"])
+    graph = crate["@graph"]
+    root = next(node for node in graph if node.get("@id") == "./")
+    context = crate.get("@context", [])
+    contexts = context if isinstance(context, list) else [context]
+    run_context = "https://w3id.org/ro/terms/workflow-run/context"
+    if run_context not in contexts:
+        contexts.append(run_context)
+    crate["@context"] = contexts
+    experiment_id = root.get("identifier")
+    title = root.get("name")
+    if (not isinstance(experiment_id, str) or
+            not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", experiment_id) or
+            not isinstance(title, str) or not title):
+        raise PackageError("RO-Crate root must declare a portable identifier and name before execution")
+    root["conformsTo"] = [
+        {"@id": "https://w3id.org/ro/crate/1.3"},
+        {"@id": "https://w3id.org/ro/wfrun/process/0.6"},
+    ]
+    root["datePublished"] = created.date().isoformat()
+    root["https://www.w3.org/ns/prov#wasDerivedFrom"] = {"@id": f"urn:sha256:{expected_sha256}"}
+    parts = _refs(root.get("hasPart"))
+    known_parts = {item.get("@id") for item in parts}
+    for name in attempt_members:
+        if name not in known_parts:
+            parts.append({"@id": name})
+            graph.append({"@id": name, "@type": "File", "encodingFormat": _media_type(name)})
+    root["hasPart"] = parts
+    if not any(node.get("@id") == "https://w3id.org/ro/wfrun/process/0.6" for node in graph):
+        graph.append({
+            "@id": "https://w3id.org/ro/wfrun/process/0.6",
+            "@type": ["CreativeWork", "Profile"], "version": "0.6",
+        })
+    license_id = root.get("license", {}).get("@id") if isinstance(root.get("license"), dict) else None
+    if isinstance(license_id, str) and not any(node.get("@id") == license_id for node in graph):
+        graph.append({"@id": license_id, "@type": "CreativeWork", "name": "Apache License 2.0"})
+    workflow_node = next((node for node in graph if node.get("@id") == "experiment/workflow.cwl"), None)
+    if workflow_node is None:
+        graph.append({
+            "@id": "experiment/workflow.cwl", "@type": ["File", "SoftwareSourceCode"],
+            "programmingLanguage": "Common Workflow Language", "name": "CWL execution workflow",
+        })
+        root["hasPart"].append({"@id": "experiment/workflow.cwl"})
+    graph.append({
+        "@id": f"#attempt-{run_id}",
+        "@type": "CreateAction",
+        "name": f"CWL attempt {run_id}",
+        "actionStatus": (
+            "https://schema.org/CompletedActionStatus"
+            if execution["returnCode"] == 0 and not execution["timedOut"]
+            else "https://schema.org/FailedActionStatus"
+        ),
+        "instrument": {"@id": "experiment/workflow.cwl"},
+        "object": {"@id": "experiment/protocol.md"},
+        "result": [{"@id": name} for name in attempt_members],
+        "startTime": created.isoformat(),
+        "endTime": ended.isoformat(),
+    })
+    augmented["ro-crate-metadata.json"] = canonical(crate)
+    return experiment_id, title
+
+
+def _compile_attempt_result(temporary: Path, output: Path, source_directory: Path,
+                            augmented: dict[str, bytes], manifest: dict, expected_sha256: str,
+                            run_id: str, experiment_id: str, title: str, execution: dict) -> dict:
+    stage = temporary / "result-source"
+    _materialize(stage, augmented)
+    recipe_path = stage / "experiment.json"
+    recipe = {
+        "buildRecipeVersion": 1,
+        "id": f"{experiment_id[:60]}-attempt-{run_id}",
+        "title": f"{title} — attempt {run_id}",
+        "profile": "compiled-experiment-lifecycle-v1",
+        "manifest": {
+            "schemaVersion": 2,
+            "packageType": "compiled-experiment",
+            "profile": "compiled-experiment-lifecycle-v1",
+            "source": manifest["source"],
+            "standards": manifest["standards"],
+            "evidence": {"planPackageSha256": expected_sha256, "attemptId": run_id},
+        },
+        "members": [
+            {"source": name, "path": name, "sha256": sha256_bytes(content), "size": len(content)}
+            for name, content in sorted(augmented.items())
+        ],
+    }
+    recipe_path.write_bytes(canonical(recipe))
+    result = compile_package(recipe_path, output)
+    recipe["expectedPackage"] = {
+        "sha256": result["packageSha256"], "size": result["packageSizeBytes"],
+    }
+    recipe_path.write_bytes(canonical(recipe))
+    shutil.copytree(stage, source_directory)
+    result["executionStatus"] = "failed" if execution["returnCode"] or execution["timedOut"] else "succeeded"
+    if result["executionStatus"] == "failed":
+        result["exitCode"] = execution["returnCode"]
+        result["timedOut"] = execution["timedOut"]
+    return result
+
+
 def run_package(package: Path, output: Path, *, expected_sha256: str,
                 allow_workflow_execution: bool = False) -> dict:
-    """Run a digest-pinned lifecycle package and create a new immutable result package.
-
-    Each CWL CommandLineTool must declare a digest-pinned container, explicit
-    network denial, and resource/time maxima. cwltool is invoked with strict
-    CPU/memory limits and image pulling disabled. Callers must explicitly opt in.
-    """
+    """Run a digest-pinned lifecycle package and create a new immutable result package."""
     if not allow_workflow_execution:
         raise PackageError("workflow execution requires explicit opt-in after reviewing the package")
     source_directory = output.with_name(output.stem + ".source")
@@ -311,193 +574,22 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     closure, runner, limits, tmpfs_root = _admit(payload)
     created = datetime.now(timezone.utc)
     started = time.monotonic()
-    try:
-        with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary:
-            _require_bounded_tmpfs(Path(temporary), Path(tmpfs_root), limits["tmpdirMiB"])
-            work = Path(temporary) / "package"
-            work.mkdir()
-            _materialize(work, payload)
-            attempt_out = Path(temporary) / "outputs"
-            provenance = Path(temporary) / "cwlprov"
-            runtime_args = ["--podman"] if runner["executionMode"] == "cwltool-podman" else []
-            command = [
-                sys.executable, "-m", "cwltool", *runtime_args, "--disable-pull", "--strict-memory-limit", "--strict-cpu-limit",
-                "--disable-host-provenance", "--disable-user-provenance",
-                "--basedir", str(work / "experiment"),
-                "--tmpdir-prefix", str(Path(temporary) / "cwl-tmp-"),
-                "--tmp-outdir-prefix", str(Path(temporary) / "cwl-out-"),
-                "--outdir", str(attempt_out), "--provenance", str(provenance),
-                str(work / "experiment/workflow.cwl"), str(work / "experiment/job.yml"),
-            ]
-            stdout_path = Path(temporary) / "stdout.log"
-            stderr_path = Path(temporary) / "stderr.log"
-            with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
-                runner_home = Path(temporary) / "runner-home"
-                runner_home.mkdir()
-                process_environment = {
-                    "PATH": "/usr/bin:/bin",
-                    "HOME": str(runner_home),
-                    "TMPDIR": temporary,
-                    "LANG": "C.UTF-8",
-                    "LC_ALL": "C.UTF-8",
-                    "PYTHONNOUSERSITE": "1",
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                }
-                process = subprocess.Popen(command, cwd=work, env=process_environment,
-                                            stdout=stdout_stream, stderr=stderr_stream,
-                                            start_new_session=True)
-                timed_out = False
-                try:
-                    return_code = process.wait(timeout=runner["maxWallSeconds"])
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    try:
-                        os.killpg(process.pid, 15)
-                        process.wait(timeout=5)
-                    except (ProcessLookupError, subprocess.TimeoutExpired):
-                        try:
-                            os.killpg(process.pid, 9)
-                        except ProcessLookupError:
-                            pass
-                        process.wait()
-                    return_code = process.returncode if process.returncode else 124
-            ended = datetime.now(timezone.utc)
-            elapsed = time.monotonic() - started
-            stdout_bytes = bounded_read(stdout_path, 4 * 1024 * 1024)
-            stderr_bytes = bounded_read(stderr_path, 4 * 1024 * 1024)
-            output_files: dict[str, bytes] = {}
-            if attempt_out.exists():
-                _collect_tree(attempt_out, output_files, MAX_TOTAL)
-            provenance_files: dict[str, bytes] = {}
-            if provenance.exists():
-                _collect_tree(provenance, provenance_files, MAX_TOTAL)
-            if not output_files and return_code == 0:
-                raise PackageError("CWL runner succeeded without producing any declared result files")
-            run_id = hashlib.sha256((expected_sha256 + created.isoformat()).encode()).hexdigest()[:12]
-            evidence_root = f"evidence/attempts/{run_id}"
-            augmented = dict(payload)
-            plan_archive = f"{evidence_root}/plan-package.zip"
-            augmented[plan_archive] = package_bytes
-            augmented.update({f"{evidence_root}/{name}": value for name, value in output_files.items()})
-            augmented.update({f"{evidence_root}/workflow-run/{name}": value
-                              for name, value in provenance_files.items()})
-            augmented[f"{evidence_root}/stdout.log"] = stdout_bytes
-            augmented[f"{evidence_root}/stderr.log"] = stderr_bytes
-            output_index = [{"@id": f"{evidence_root}/{name}", "sha256": sha256_bytes(value), "contentSize": len(value)}
-                            for name, value in sorted(output_files.items())]
-            receipt = {
-                "schemaVersion": 1,
-                "attemptId": run_id,
-                "planPackageSha256": expected_sha256,
-                "planPackageArchive": {"@id": plan_archive, "sha256": expected_sha256,
-                                       "contentSize": len(package_bytes)},
-                "workflowSha256": sha256_bytes(payload["experiment/workflow.cwl"]),
-                "jobSha256": sha256_bytes(payload["experiment/job.yml"]),
-                "runner": {"name": "cwltool", "version": runner["version"], "python": platform.python_version(),
-                           "workerImageBase": runner.get("workerImageBase")},
-                "executionMode": ("cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"
-                                  if runner["executionMode"] == "cwltool-podman" else
-                                  "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime"),
-                "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
-                "workerContext": {
-                    "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
-                    "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-                    "attestation": "caller-reported; not independently verified by the adapter",
-                },
-                "status": "timed-out" if timed_out else "succeeded" if return_code == 0 else "failed",
-                "exitCode": return_code,
-                "timedOut": timed_out,
-                "startedAt": created.isoformat(),
-                "endedAt": ended.isoformat(),
-                "wallSeconds": elapsed,
-                "resourceMeasurements": {"peakProcessMemory": "unknown; not measured by this adapter"},
-                "outputs": output_index,
-                "workflowRunCrateFiles": sorted(provenance_files),
-                "availableClosure": closure["classifications"],
-            }
-            augmented[f"{evidence_root}/runner-receipt.json"] = canonical(receipt)
-            crate = json_value(augmented["ro-crate-metadata.json"])
-            graph = crate["@graph"]
-            root = next(node for node in graph if node.get("@id") == "./")
-            context = crate.get("@context", [])
-            contexts = context if isinstance(context, list) else [context]
-            run_context = "https://w3id.org/ro/terms/workflow-run/context"
-            if run_context not in contexts:
-                contexts.append(run_context)
-            crate["@context"] = contexts
-            experiment_id = root.get("identifier")
-            title = root.get("name")
-            if (not isinstance(experiment_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", experiment_id) or
-                    not isinstance(title, str) or not title):
-                raise PackageError("RO-Crate root must declare a portable identifier and name before execution")
-            root["conformsTo"] = [
-                {"@id": "https://w3id.org/ro/crate/1.3"},
-                {"@id": "https://w3id.org/ro/wfrun/process/0.6"},
-            ]
-            root["datePublished"] = created.date().isoformat()
-            root["https://www.w3.org/ns/prov#wasDerivedFrom"] = {"@id": f"urn:sha256:{expected_sha256}"}
-            parts = _refs(root.get("hasPart"))
-            known_parts = {item.get("@id") for item in parts}
-            attempt_members = [f"{evidence_root}/{name}" for name in output_files]
-            attempt_members += [f"{evidence_root}/workflow-run/{name}" for name in provenance_files]
-            attempt_members += [plan_archive, f"{evidence_root}/stdout.log", f"{evidence_root}/stderr.log",
-                                f"{evidence_root}/runner-receipt.json"]
-            for name in attempt_members:
-                if name not in known_parts:
-                    parts.append({"@id": name})
-                    graph.append({"@id": name, "@type": "File", "encodingFormat": _media_type(name)})
-            root["hasPart"] = parts
-            if not any(node.get("@id") == "https://w3id.org/ro/wfrun/process/0.6" for node in graph):
-                graph.append({"@id": "https://w3id.org/ro/wfrun/process/0.6",
-                              "@type": ["CreativeWork", "Profile"], "version": "0.6"})
-            license_id = root.get("license", {}).get("@id") if isinstance(root.get("license"), dict) else None
-            if isinstance(license_id, str) and not any(node.get("@id") == license_id for node in graph):
-                graph.append({"@id": license_id, "@type": "CreativeWork", "name": "Apache License 2.0"})
-            workflow_node = next((node for node in graph if node.get("@id") == "experiment/workflow.cwl"), None)
-            if workflow_node is None:
-                workflow_node = {"@id": "experiment/workflow.cwl", "@type": ["File", "SoftwareSourceCode"],
-                                 "programmingLanguage": "Common Workflow Language", "name": "CWL execution workflow"}
-                graph.append(workflow_node)
-                root["hasPart"].append({"@id": "experiment/workflow.cwl"})
-            graph.append({"@id": f"#attempt-{run_id}", "@type": "CreateAction",
-                          "name": f"CWL attempt {run_id}",
-                          "actionStatus": "https://schema.org/CompletedActionStatus" if return_code == 0 and not timed_out
-                          else "https://schema.org/FailedActionStatus",
-                          "instrument": {"@id": "experiment/workflow.cwl"},
-                          "object": {"@id": "experiment/protocol.md"},
-                          "result": [{"@id": name} for name in attempt_members],
-                          "startTime": created.isoformat(), "endTime": ended.isoformat()})
-            augmented["ro-crate-metadata.json"] = canonical(crate)
-            stage = Path(temporary) / "result-source"
-            _materialize(stage, augmented)
-            recipe_path = stage / "experiment.json"
-            recipe = {
-                "buildRecipeVersion": 1,
-                "id": f"{experiment_id[:60]}-attempt-{run_id}",
-                "title": f"{title} — attempt {run_id}",
-                "profile": "compiled-experiment-lifecycle-v1",
-                "manifest": {"schemaVersion": 2, "packageType": "compiled-experiment",
-                    "profile": "compiled-experiment-lifecycle-v1", "source": manifest["source"],
-                    "standards": manifest["standards"],
-                    "evidence": {"planPackageSha256": expected_sha256, "attemptId": run_id}},
-                "members": [{"source": name, "path": name, "sha256": sha256_bytes(content), "size": len(content)}
-                            for name, content in sorted(augmented.items())],
-            }
-            recipe_path.write_bytes(canonical(recipe))
-            result = compile_package(recipe_path, output)
-            recipe["expectedPackage"] = {"sha256": result["packageSha256"],
-                                          "size": result["packageSizeBytes"]}
-            recipe_path.write_bytes(canonical(recipe))
-            shutil.copytree(stage, source_directory)
-            if return_code or timed_out:
-                result["executionStatus"] = "failed"
-                result["exitCode"] = return_code
-                result["timedOut"] = timed_out
-            else:
-                result["executionStatus"] = "succeeded"
-            return result
-    except subprocess.SubprocessError as exc:
-        raise PackageError(f"CWL runner could not start: {exc}") from exc
+    with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary_value:
+        temporary = Path(temporary_value)
+        execution = _execute_cwl(temporary, payload, runner, limits, tmpfs_root)
+        ended = datetime.now(timezone.utc)
+        elapsed = time.monotonic() - started
+        timing = {"created": created, "ended": ended, "elapsed": elapsed}
+        augmented, run_id, attempt_members = _attempt_evidence(
+            payload, package_bytes, expected_sha256, closure, runner, execution, timing,
+        )
+        experiment_id, title = _augment_result_crate(
+            augmented, expected_sha256, run_id, attempt_members, created, ended, execution,
+        )
+        return _compile_attempt_result(
+            temporary, output, source_directory, augmented, manifest, expected_sha256,
+            run_id, experiment_id, title, execution,
+        )
 
 
 def sha256_bytes(data: bytes) -> str:
