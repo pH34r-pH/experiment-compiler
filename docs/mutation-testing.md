@@ -27,13 +27,13 @@ It is still an alpha-stage project, so adoption is evidence-driven rather than e
 Install the bounded mutation toolchain with:
 
 ```sh
-python -m pip install '.[mutation]'
+python -m pip install '.[runner,mutation]'
 ```
 
 The initial pilot intentionally targets the small deterministic resource conversion module:
 
 ```sh
-python -m pytest -q
+python -m pytest -q tests
 irradiate run experiment_compiler/resources.py \
   --report json --output irradiate-report.json \
   --verify-survivors
