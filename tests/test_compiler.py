@@ -335,12 +335,14 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(recipes, [ROOT / "examples/linear-regression-frozen-lifecycle-v1/experiment.json",
                                    ROOT / "examples/linear-regression-plan-v1/experiment.json",
                                    SELF_CONTAINED / "experiment.json",
-                                   ROOT / "examples/muon-comparison-plan-v1/experiment.json"])
+                                   ROOT / "examples/muon-comparison-plan-v1/experiment.json",
+                                   ROOT / "examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/experiment.json"])
         catalog = describe_catalog(ROOT / "examples")
         self.assertEqual(catalog["schemaVersion"], 1)
         self.assertEqual([item["id"] for item in catalog["experiments"]],
                          ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
-                          "stdlib-linear-regression-v1-compiled-experiment", "muon-comparison-plan-v1"])
+                          "stdlib-linear-regression-v1-compiled-experiment", "muon-comparison-plan-v1",
+                          "muon-unit-hypersphere-depth3-multiseed-v1-final-87409154"])
         self.assertIsNone(catalog["experiments"][1]["package"])
         self.assertEqual(catalog["experiments"][1]["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(catalog["experiments"][2]["package"]["sha256"],
@@ -352,6 +354,11 @@ class CompilerTests(unittest.TestCase):
         self.assertFalse(muon["lifecycle"]["processRunCrate"])
         self.assertTrue(muon["unavailablePrerequisites"])
         self.assertTrue(all(item["value"] == "unknown" for item in muon["lifecycle"]["resourceMeasurements"]))
+        published = catalog["experiments"][4]
+        self.assertEqual(published["package"]["sha256"],
+                         "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4")
+        self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
+        self.assertEqual(len(published["scientificInterpretation"]), 1)
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")

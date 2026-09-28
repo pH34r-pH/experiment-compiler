@@ -4,7 +4,7 @@ examples/issue-164/inputs/** -text
 examples/issue-164/reference-manifest.json -text
 
 # Preserve this compiler-verified final package and its hashed source closure byte-for-byte.
-examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/** -text
+examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/** -text !eol
 # The compiler-generated CWL provenance includes significant format whitespace.
 examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.provn whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/evidence/attempts/87409154e60d/workflow-run/metadata/provenance/primary.cwlprov.ttl whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
