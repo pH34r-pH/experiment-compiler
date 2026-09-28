@@ -248,12 +248,7 @@ def compile_package(recipe_path: Path, output: Path) -> dict:
             "profile": recipe["profile"]}}
 
 
-def validate_lifecycle_crate(crate: Any) -> dict:
-    """Validate the lifecycle facts carried by a v2 RO-Crate graph.
-
-    This is a narrow application-profile check, not RO-Crate conformance
-    certification and not scientific interpretation.
-    """
+def _lifecycle_graph(crate: Any) -> tuple[list, dict[str, dict]]:
     if not isinstance(crate, dict) or not isinstance(crate.get("@graph"), list):
         raise PackageError("Lifecycle metadata requires an RO-Crate @graph array")
     graph = crate["@graph"]
@@ -269,6 +264,10 @@ def validate_lifecycle_crate(crate: Any) -> dict:
         if node["@id"] in nodes:
             raise PackageError(f"Duplicate lifecycle graph @id: {node['@id']}")
         nodes[node["@id"]] = node
+    return graph, nodes
+
+
+def _lifecycle_root_protocol(nodes: dict[str, dict]) -> tuple[dict, Any]:
     root = nodes.get("./")
     if not isinstance(root, dict) or "Dataset" not in _types(root.get("@type")):
         raise PackageError("Lifecycle RO-Crate requires a root Dataset")
@@ -284,13 +283,17 @@ def validate_lifecycle_crate(crate: Any) -> dict:
     if not isinstance(main, dict) or not isinstance(main.get("@id"), str):
         raise PackageError("Lifecycle root Dataset must identify its main protocol entity")
     protocol = nodes.get(main["@id"])
-    if not isinstance(protocol, dict) or not _types(protocol.get("@type")) & {"CreativeWork", "ScholarlyArticle", "SoftwareSourceCode"}:
+    if not isinstance(protocol, dict) or not _types(protocol.get("@type")) & {
+            "CreativeWork", "ScholarlyArticle", "SoftwareSourceCode"}:
         raise PackageError("Lifecycle mainEntity must be a protocol CreativeWork")
     maturity = protocol.get("creativeWorkStatus")
     if not (isinstance(maturity, str) and maturity.strip()) and not (
             isinstance(maturity, dict) and isinstance(maturity.get("@id"), str)):
         raise PackageError("Protocol CreativeWork must declare Schema.org creativeWorkStatus")
+    return root, maturity
 
+
+def _resource_measurements(root: dict, nodes: dict[str, dict]) -> list[dict]:
     resource_measurements = []
     for value in _as_refs(root.get("variableMeasured")):
         measurement = nodes.get(value.get("@id")) if isinstance(value.get("@id"), str) else value
@@ -316,20 +319,24 @@ def validate_lifecycle_crate(crate: Any) -> dict:
                     (isinstance(evidence, dict) and isinstance(evidence.get("@id"), str))):
                 raise PackageError("Numeric resource PropertyValue must link its evidence or estimate basis")
         resource_measurements.append({
-            "propertyID": measurement["propertyID"], "value": amount,
+            "propertyID": measurement["propertyID"],
+            "value": amount,
             "unitText": measurement.get("unitText"),
             "measurementTechnique": measurement["measurementTechnique"],
             "evidence": measurement.get("valueReference"),
         })
+    return resource_measurements
 
+
+def _execution_actions(graph: list, nodes: dict[str, dict], root: dict) -> tuple[list[dict], bool]:
     run_profile = "https://w3id.org/ro/wfrun/process/0.6"
-    declares_run = any(
-        ref.get("@id") == run_profile
-        for ref in _as_refs(root.get("conformsTo"))
-    )
-    actions = [node for node in graph if isinstance(node, dict) and
-               "CreateAction" in _types(node.get("@type")) and
-               node.get("actionStatus") != "https://schema.org/PotentialActionStatus"]
+    declares_run = any(ref.get("@id") == run_profile for ref in _as_refs(root.get("conformsTo")))
+    actions = [
+        node for node in graph
+        if isinstance(node, dict)
+        and "CreateAction" in _types(node.get("@type"))
+        and node.get("actionStatus") != "https://schema.org/PotentialActionStatus"
+    ]
     ids = [node.get("@id") for node in actions]
     if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
         raise PackageError("Each execution CreateAction must have a unique @id")
@@ -358,14 +365,23 @@ def validate_lifecycle_crate(crate: Any) -> dict:
         if (profile_node is None or profile_node.get("version") != "0.6" or
                 "Profile" not in _types(profile_node.get("@type"))):
             raise PackageError("Process Run Crate 0.6 conformance requires its described profile entity")
+    return actions, declares_run
 
-    members = {node.get("@id") for node in graph if isinstance(node, dict) and "File" in _types(node.get("@type"))}
+
+def _validate_lifecycle_members(graph: list, root: dict) -> None:
+    members = {
+        node.get("@id")
+        for node in graph
+        if isinstance(node, dict) and "File" in _types(node.get("@type"))
+    }
     for part in _as_refs(root.get("hasPart")):
         identifier = part.get("@id")
         if isinstance(identifier, str) and not identifier.startswith(("#", "http://", "https://")):
             if identifier not in members:
                 raise PackageError(f"RO-Crate root hasPart does not resolve to a described File: {identifier}")
 
+
+def _potential_action_count(graph: list, nodes: dict[str, dict]) -> int:
     potential = []
     for node in graph:
         if not isinstance(node, dict):
@@ -377,9 +393,24 @@ def validate_lifecycle_crate(crate: Any) -> dict:
             if action.get("actionStatus") != "https://schema.org/PotentialActionStatus":
                 raise PackageError("Unexecuted potentialAction must use PotentialActionStatus")
             potential.append(action.get("@id"))
-    return {"creativeWorkStatus": maturity, "attemptCount": len(actions),
-            "processRunCrate": declares_run, "potentialActionCount": len(potential),
-            "resourceMeasurements": resource_measurements}
+    return len(potential)
+
+
+def validate_lifecycle_crate(crate: Any) -> dict:
+    """Validate lifecycle facts without interpreting scientific results."""
+    graph, nodes = _lifecycle_graph(crate)
+    root, maturity = _lifecycle_root_protocol(nodes)
+    resource_measurements = _resource_measurements(root, nodes)
+    actions, declares_run = _execution_actions(graph, nodes, root)
+    _validate_lifecycle_members(graph, root)
+    potential_action_count = _potential_action_count(graph, nodes)
+    return {
+        "creativeWorkStatus": maturity,
+        "attemptCount": len(actions),
+        "processRunCrate": declares_run,
+        "potentialActionCount": potential_action_count,
+        "resourceMeasurements": resource_measurements,
+    }
 
 
 def _types(value: Any) -> set[str]:
