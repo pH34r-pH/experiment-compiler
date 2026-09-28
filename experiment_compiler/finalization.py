@@ -11,9 +11,10 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from .assembly import compile_source_closure
 from .core import (MANIFEST, MAX_FILE, MAX_TOTAL, PackageError, bounded_read,
-                   canonical, compile_package, json_value, safe_path, sha256,
-                   validate_lifecycle_crate, verify_bytes, write_once)
+                   canonical, json_value, safe_path, sha256,
+                   validate_lifecycle_crate, verify_bytes)
 from .revision import PROV, _read_parent_attempt, _root_and_protocol
 
 SCHEMA = "https://schema.org/"
@@ -149,37 +150,16 @@ def finalize_package(parent_package: Path, output: Path, *,
         if "experiment.json" in files:
             raise PackageError("Parent package member experiment.json conflicts with the source-owned recipe")
 
-        stage = temporary / "source"
-        stage.mkdir()
-        members = []
-        for package_path, data in sorted(files.items()):
-            source = package_path
-            target = stage.joinpath(*safe_path(source).split("/"))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-            members.append({"path": package_path, "source": source,
-                            "sha256": sha256(data), "size": len(data)})
         recipe = {
             "buildRecipeVersion": 1,
             "id": experiment_id,
             "title": title,
             "profile": "compiled-experiment-lifecycle-v1",
             "manifest": {key: value for key, value in parent_manifest.items() if key != "members"},
-            "members": members,
         }
-        recipe_path = stage / "experiment.json"
-        recipe_path.write_bytes(canonical(recipe))
-        temporary_package = temporary / "finalized.zip"
-        result = compile_package(recipe_path, temporary_package)
-        recipe["expectedPackage"] = {"sha256": result["packageSha256"],
-                                     "size": result["packageSizeBytes"]}
-        recipe_path.write_bytes(canonical(recipe))
-        shutil.copytree(stage, source_directory)
-        try:
-            write_once(output, temporary_package.read_bytes())
-        except (OSError, PackageError):
-            shutil.rmtree(source_directory, ignore_errors=True)
-            raise
+        result = compile_source_closure(
+            temporary, output, source_directory, files, recipe, "finalized.zip"
+        )
         return {**result, "parentPackageSha256": expected_sha256,
                 "parentPlanPackageSha256": receipt["planPackageSha256"],
                 "selectedAttemptId": attempt_id,
