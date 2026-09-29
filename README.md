@@ -67,7 +67,7 @@ None of those steps alone proves that a scientific conclusion is correct.
 
 Historical artifacts remain immutable; new semantics require a new versioned identity.
 
-Read the [Wiki](https://github.com/pH34r-pH/experiment-compiler/wiki) and [build recipe contract](docs/build-recipe.md) for the full lifecycle.
+Read the [architecture diagrams](docs/architecture.md), the [Wiki](https://github.com/pH34r-pH/experiment-compiler/wiki), and the [build recipe contract](docs/build-recipe.md) for the full lifecycle.
 
 ## Standards and closure
 
