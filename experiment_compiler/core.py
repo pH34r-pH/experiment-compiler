@@ -15,6 +15,7 @@ import zipfile
 import zlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import __version__
 
@@ -143,7 +144,8 @@ def validate_header(header: Any) -> str:
 def load_recipe(path: Path) -> dict:
     recipe = json_value(bounded_read(path, MAX_FILE))
     required = {"buildRecipeVersion", "id", "title", "profile", "manifest", "members"}
-    if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - {"expectedPackage"}:
+    optional = {"expectedPackage", "relatedArticles"}
+    if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - optional:
         raise PackageError("Recipe has unexpected or missing fields")
     if (type(recipe["buildRecipeVersion"]) is not int or recipe["buildRecipeVersion"] != 1 or
             recipe["profile"] not in {"poc-v1", "compiled-experiment-v1", "compiled-experiment-lifecycle-v1"}):
@@ -153,6 +155,19 @@ def load_recipe(path: Path) -> dict:
         raise PackageError("Recipe requires a portable ID and title")
     if validate_header(recipe["manifest"]) != recipe["profile"]:
         raise PackageError("Recipe profile differs from manifest profile")
+    related_articles = recipe.get("relatedArticles", [])
+    if not isinstance(related_articles, list):
+        raise PackageError("relatedArticles must be a list")
+    for article in related_articles:
+        if (not isinstance(article, dict) or set(article) != {"title", "url", "sourceCommit"} or
+                not isinstance(article["title"], str) or not article["title"].strip() or
+                not isinstance(article["url"], str) or not isinstance(article["sourceCommit"], str) or
+                not re.fullmatch(r"[0-9a-f]{40}", article["sourceCommit"])):
+            raise PackageError("Related article requires a title, URL and exact source commit")
+        parsed = urlsplit(article["url"])
+        if (parsed.scheme != "https" or parsed.netloc != "tyharbin.com" or
+                not re.fullmatch(r"/articles/[a-z0-9-]+/", parsed.path) or parsed.query or parsed.fragment):
+            raise PackageError("Related article URL must be a canonical tyharbin.com article route")
     members = recipe["members"]
     if not isinstance(members, list) or not 1 <= len(members) < MAX_MEMBERS:
         raise PackageError("Recipe requires a bounded, nonempty member list")

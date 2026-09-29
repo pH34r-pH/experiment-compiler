@@ -338,7 +338,7 @@ class CompilerTests(unittest.TestCase):
                                    ROOT / "examples/muon-comparison-plan-v1/experiment.json",
                                    ROOT / "examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/experiment.json"])
         catalog = describe_catalog(ROOT / "examples")
-        self.assertEqual(catalog["schemaVersion"], 1)
+        self.assertEqual(catalog["schemaVersion"], 2)
         self.assertEqual([item["id"] for item in catalog["experiments"]],
                          ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
                           "stdlib-linear-regression-v1-compiled-experiment", "muon-comparison-plan-v1",
@@ -359,6 +359,27 @@ class CompilerTests(unittest.TestCase):
                          "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4")
         self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(len(published["scientificInterpretation"]), 1)
+
+    def test_related_article_backlink_is_pinned_in_the_authoritative_recipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            example = Path(directory) / "example"
+            shutil.copytree(SELF_CONTAINED, example)
+            recipe_path = example / "experiment.json"
+            recipe = json.loads(recipe_path.read_text())
+            backlink = {"title": "Accessible does not imply used",
+                        "url": "https://tyharbin.com/articles/accessible-does-not-imply-used/",
+                        "sourceCommit": "c" * 40}
+            recipe["relatedArticles"] = [backlink]
+            recipe_path.write_bytes(canonical(recipe))
+            descriptor = describe_recipe(recipe_path)
+            self.assertEqual(descriptor["backlinks"], [backlink])
+            receipt = compile_package(recipe_path, Path(directory) / "article-linked.zip")
+            self.assertEqual(receipt["packageSha256"], recipe["expectedPackage"]["sha256"])
+
+            recipe["relatedArticles"][0]["url"] = "https://example.org/article"
+            recipe_path.write_bytes(canonical(recipe))
+            with self.assertRaisesRegex(PackageError, "canonical tyharbin.com article route"):
+                load_recipe(recipe_path)
 
     def test_source_tampering_fails_before_output(self):
         (self.recipe_path.parent / "inputs/VALIDATION.md").write_text("tampered")

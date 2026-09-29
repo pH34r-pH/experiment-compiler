@@ -96,6 +96,7 @@ def describe_recipe(recipe_path: Path) -> dict:
         "source": recipe["manifest"]["source"],
         "standards": recipe["manifest"]["standards"],
         "package": expected,
+        "backlinks": recipe.get("relatedArticles", []),
     }
 
 
@@ -149,6 +150,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "source": recipe["manifest"]["source"],
         "standards": recipe["manifest"]["standards"],
         "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],
+        "backlinks": recipe.get("relatedArticles", []),
     }
 
 
@@ -173,6 +175,6 @@ def discover_recipes(root: Path) -> list[Path]:
 def describe_catalog(root: Path) -> dict:
     """Derive a deterministic public catalog from all discovered compiled experiments."""
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "experiments": [describe_recipe(path) for path in discover_recipes(root)],
     }
