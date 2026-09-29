@@ -1,0 +1,34 @@
+flowchart TB
+  SRC["Reviewed source bytes"]
+
+  C["1 · compile"]
+  CYES["Establishes<br/>built from declared members + selected profile"]
+  CNO["Does not establish<br/>scientific validity · completeness · authorship"]
+
+  V["2 · verify"]
+  VYES["Establishes<br/>inventory / digest / path / JSON integrity<br/>+ optional whole-package pin"]
+  VNO["Does not establish<br/>trusted bytes · safe code · reproduction"]
+
+  A["3 · runner admission + bounded run"]
+  AYES["Establishes<br/>admitted workflow attempt occurred<br/>with bounded evidence + provenance"]
+  ANO["Does not establish<br/>scientific conclusion"]
+
+  F["4 · finalize"]
+  FYES["Establishes<br/>source-authored interpretation + review<br/>bound to one exact attempt"]
+  FNO["Does not establish<br/>independent validation or publication authorization"]
+
+  P["5 · reviewed promotion"]
+  PYES["Establishes<br/>reviewed artifact was promoted publicly"]
+  PNO["Still distinct from<br/>independent reproduction or universal scientific truth"]
+
+  SRC --> C --> V --> A --> F --> P
+  C --> CYES
+  C --> CNO
+  V --> VYES
+  V --> VNO
+  A --> AYES
+  A --> ANO
+  F --> FYES
+  F --> FNO
+  P --> PYES
+  P --> PNO
