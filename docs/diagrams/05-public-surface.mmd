@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph P["tyharbin.com · research publication"]
+    ARTICLE["MyST research article<br/>question · argument · evidence<br/>interactive figures · editable browser cells<br/>limitations"]
+    REF["Minimal exact Compiled Experiment reference"]
+    ARTICLE --> REF
+  end
+
+  subgraph E["experiments.tyharbin.com · reproduction surface"]
+    PROJ["Versioned static public projection<br/>derived from authoritative artifacts"]
+    DETAIL["Stable experiment detail route<br/>profile · SHA-256 · source commit<br/>protocol · lifecycle · evidence · resources"]
+    ACTIONS["Inspect · verify · obtain · run guidance"]
+    BACK["Canonical article backlink<br/>when declared"]
+    PKG["Exact immutable package bytes"]
+    PROJ --> DETAIL
+    DETAIL --> ACTIONS
+    DETAIL --> BACK
+    DETAIL --> PKG
+  end
+
+  subgraph G["Public repository + GitHub Pages build"]
+    REC["Reviewed recipes · packages · source closures"]
+    BUILD["Static build<br/>catalog · detail pages · package publishing"]
+    REC --> BUILD --> PROJ
+    REC --> PKG
+  end
+
+  REF -->|"resolve exact experiment"| PROJ
+  BACK -.->|"read the explanation"| ARTICLE
+
+  RULE["Boundary<br/>Portfolio owns explanation and browser interaction.<br/>Experiment Compiler owns reproduction identity, closure, provenance,<br/>verification/execution handoff, and derived experiment presentation."]
+  ARTICLE -.-> RULE
+  DETAIL -.-> RULE
