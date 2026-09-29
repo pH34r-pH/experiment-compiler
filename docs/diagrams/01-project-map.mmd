@@ -1,0 +1,49 @@
+flowchart TB
+  subgraph A["1 · Author and review the research closure"]
+    LAB["Source-owned research workspace<br/>protocols · data · code · evidence"]
+    REVIEW["Disclosure / review decision<br/>choose a shareable closure"]
+    RECIPE["Versioned experiment recipe<br/>profile · exact members · hashes · sizes"]
+    LAB --> REVIEW --> RECIPE
+  end
+
+  subgraph B["2 · Compile and inspect without executing"]
+    COMPILE["compile<br/>deterministic immutable ZIP"]
+    PACKAGE["Compiled Experiment<br/>manifest · standards metadata<br/>dependency/resource closure"]
+    VERIFY["verify<br/>byte + inventory integrity"]
+    DESCRIBE["describe / catalog<br/>derived display projections"]
+    COMPILE --> PACKAGE --> VERIFY
+    PACKAGE --> DESCRIBE
+  end
+
+  subgraph C["3 · Execute only through the explicit runner boundary"]
+    RUNNER["experiment-runner<br/>digest-pinned + explicit opt-in"]
+    ATTEMPT["Immutable attempt/result package<br/>Process Run Crate · outputs · logs · receipt"]
+    DECISION{"What happens next?"}
+    RUNNER --> ATTEMPT --> DECISION
+  end
+
+  subgraph D["4 · Iterate or finalize without mutating history"]
+    REVISE["revise<br/>new prospective plan"]
+    FINALIZE["finalize<br/>bind source-authored interpretation + review"]
+    FINAL["Immutable finalized artifact"]
+    DECISION -->|"revise method / protocol"| REVISE
+    REVISE --> RECIPE
+    DECISION -->|"select attempt"| FINALIZE --> FINAL
+  end
+
+  subgraph E["5 · Publish and expose reproduction"]
+    PROMOTE["Reviewed merge to main<br/>publication event"]
+    SITE["experiments.tyharbin.com<br/>static catalog · detail route · exact package"]
+    ARTICLE["Portfolio / MyST article<br/>explanation · intuition · browser interaction"]
+    FINAL --> PROMOTE --> SITE
+    ARTICLE -->|"exact experiment reference"| SITE
+    SITE -->|"canonical article backlink"| ARTICLE
+  end
+
+  RECIPE --> COMPILE
+  PACKAGE --> RUNNER
+
+  NOTE1["Compiler never infers scientific correctness."]
+  NOTE2["Process success ≠ scientific acceptance ≠ publication."]
+  PACKAGE -.-> NOTE1
+  ATTEMPT -.-> NOTE2
