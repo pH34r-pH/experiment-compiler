@@ -3,6 +3,10 @@
 [![Lifecycle](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml/badge.svg)](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml)
 [![License](https://img.shields.io/github/license/pH34r-pH/experiment-compiler)](LICENSE)
 
+<p align="center">
+  <img src="docs/assets/hero.webp" alt="Experiment Compiler — portable reproducible experiment packaging" width="100%">
+</p>
+
 **Compile reviewed research inputs into portable, inspectable, integrity-verifiable experiment artifacts.**
 
 Experiment Compiler packages explicit source bytes, standards metadata, dependency/resource closure, and provenance into versioned Compiled Experiments. It verifies those artifacts without inventing scientific semantics and provides a deliberately bounded execution handoff for reviewed lifecycle packages.
