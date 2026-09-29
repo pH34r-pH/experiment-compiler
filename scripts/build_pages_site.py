@@ -88,14 +88,14 @@ def render_detail(experiment: dict) -> str:
         if experiment.get(key) is not None}, indent=2, sort_keys=True))
     backlinks = experiment.get("backlinks") or []
     backlink_html = ("<section><h2>Related research articles</h2><ul>" + "".join(
-        f'<li><a href="{html.escape(item["url"], quote=True)}">{html.escape(item["title"])}</a></li>'
+        f'<li><a class="article-backlink" href="{html.escape(item["url"], quote=True)}">Read {html.escape(item["title"])} →</a></li>'
         for item in backlinks
     ) + "</ul></section>") if backlinks else ""
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Exact package identity, provenance, and lifecycle projection for {title}.">
 <title>{title} — Experiment Compiler</title><link rel="stylesheet" href="/assets/site.css"></head>
-<body><header class="topbar"><a class="brand" href="/">Experiment Compiler</a><nav aria-label="Primary"><a href="/#experiments">Catalog</a><a href="https://tyharbin.com/research/">Research articles ↗</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav></header>
+<body><header class="topbar"><a class="brand" href="/">TJHG <span>/ experiments</span></a><nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="/#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav></header>
 <main class="detail-page"><p class="eyebrow">COMPILED EXPERIMENT · {identifier}</p><h1>{title}</h1><p class="lede">{summary}</p>
 <section class="identity"><h2>Package identity</h2><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl><div class="actions">{package_action}</div></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>

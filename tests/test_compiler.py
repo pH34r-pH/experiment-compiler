@@ -357,6 +357,11 @@ class CompilerTests(unittest.TestCase):
         published = catalog["experiments"][4]
         self.assertEqual(published["package"]["sha256"],
                          "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4")
+        self.assertEqual(published["backlinks"], [{
+            "title": "Milestone 005 — The unit-hypersphere anomaly (later comparison, not a replay)",
+            "url": "https://tyharbin.com/articles/005-unit-hypersphere-anomaly/",
+            "sourceCommit": "78d373be0a7aea8a5d716273a4724a286b479366",
+        }])
         self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(len(published["scientificInterpretation"]), 1)
 
