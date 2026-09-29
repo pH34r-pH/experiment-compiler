@@ -1,0 +1,56 @@
+flowchart TB
+  RECIPE["experiment.json recipe<br/>profile · exact source/path/hash/size"]
+
+  subgraph ZIP["Compiled Experiment ZIP · immutable byte envelope"]
+    subgraph ID["Identity + research-object structure"]
+      MAN["experiment-package-manifest.json<br/>generated member inventory"]
+      ROC["ro-crate-metadata.json<br/>RO-Crate graph + lifecycle links"]
+    end
+
+    subgraph SCI["Source-authored scientific content"]
+      PROT["protocol.md<br/>question · method · controls · stop/accept rules"]
+      SRC["implementation · config · shareable data"]
+      CRO["Croissant metadata<br/>when dataset semantics apply"]
+    end
+
+    subgraph REP["Reproduction closure + execution handoff"]
+      CLOS["dependency-closure.json<br/>embedded · immutable public · host/ABI · unavailable"]
+      RES["resource evidence / estimates<br/>CPU · RAM · storage · time"]
+      EXEC["workflow.cwl · job.yml · runner.json<br/>when executable"]
+    end
+
+    subgraph EVI["Evidence + provenance"]
+      EVID["attempts · outputs · logs · receipts"]
+      DEC["scientific decision · publication review"]
+    end
+  end
+
+  RECIPE --> MAN
+  RECIPE --> ROC
+  RECIPE --> PROT
+  RECIPE --> SRC
+  RECIPE --> CRO
+  RECIPE --> CLOS
+  RECIPE --> RES
+  RECIPE --> EXEC
+  RECIPE --> EVID
+  RECIPE --> DEC
+
+  subgraph STD["Standards reused instead of a custom ontology"]
+    RO["RO-Crate 1.3<br/>research-object structure"]
+    PRC["Process Run Crate 0.6<br/>actual execution provenance"]
+    SCH["Schema.org<br/>Action / CreativeWork / Review states"]
+    PROV["PROV-O<br/>derivation + revision links"]
+    CWL["CWL 1.2<br/>workflow + portable resource requests"]
+    CR["MLCommons Croissant<br/>dataset metadata"]
+  end
+
+  ROC --> RO
+  EVID --> PRC
+  ROC --> SCH
+  ROC --> PROV
+  EXEC --> CWL
+  CRO --> CR
+
+  BOUND["Compiler owns the byte envelope, lifecycle relationships, and integrity checks.<br/>Scientific meaning remains source-authored."]
+  ZIP -.-> BOUND
