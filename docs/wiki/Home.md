@@ -30,6 +30,7 @@ reviewed result / publication artifact
 
 ## Start here
 
+- [Architecture](Architecture.md)
 - [Quickstart](Quickstart.md)
 - [Package profiles](Package-Profiles.md)
 - [Build and verification](Build-and-Verification.md)

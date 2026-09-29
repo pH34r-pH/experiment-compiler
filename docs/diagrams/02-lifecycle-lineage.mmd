@@ -1,0 +1,37 @@
+flowchart TB
+  P0["Prospective Plan P0<br/>protocol + inputs + dependency/resource closure"]
+  A0["Attempt A0<br/>exact P0 digest-pinned<br/>CreateAction + receipt + outputs"]
+  OUT{"Process outcome"}
+  OK["succeeded"]
+  FAIL["failed"]
+  TIME["timed out"]
+  CHOOSE{"Source-owner decision"}
+
+  P0 --> A0 --> OUT
+  OUT --> OK --> CHOOSE
+  OUT --> FAIL --> CHOOSE
+  OUT --> TIME --> CHOOSE
+
+  subgraph ITERATE["Revision branch"]
+    REV["revise<br/>new prospective Plan P1"]
+    P1["Plan P1<br/>new immutable identity + digest"]
+    A1["Attempt A1<br/>new immutable attempt"]
+    REV --> P1 --> A1
+  end
+
+  subgraph CLOSE["Finalization branch"]
+    FIN["finalize selected attempt<br/>attach scientific decision + publication review"]
+    F0["Final reviewable artifact F0"]
+    PUB["Reviewed merge to main<br/>publication event"]
+    CAT["Derived catalog + stable detail route"]
+    FIN --> F0 --> PUB --> CAT
+  end
+
+  CHOOSE -->|"method / protocol change"| REV
+  A1 --> CHOOSE
+  CHOOSE -->|"selected attempt ready for interpretation"| FIN
+
+  I["Invariant: prior packages are never edited in place."]
+  S["Separation: process success ≠ scientific acceptance ≠ publication."]
+  P0 -.-> I
+  F0 -.-> S
