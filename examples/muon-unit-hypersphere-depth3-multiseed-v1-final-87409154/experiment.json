@@ -362,5 +362,12 @@
     }
   ],
   "profile": "compiled-experiment-lifecycle-v1",
-  "title": "Muon unit-hypersphere depth-three multi-seed qualifying comparison: reviewed result"
+  "title": "Muon unit-hypersphere depth-three multi-seed qualifying comparison: reviewed result",
+  "relatedArticles": [
+    {
+      "title": "Milestone 005 \u2014 The unit-hypersphere anomaly (later comparison, not a replay)",
+      "url": "https://tyharbin.com/articles/005-unit-hypersphere-anomaly/",
+      "sourceCommit": "78d373be0a7aea8a5d716273a4724a286b479366"
+    }
+  ]
 }
