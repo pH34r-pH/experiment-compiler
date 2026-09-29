@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://experiments.tyharbin.com/data/experiments.schema.json",
+  "title": "Experiment Compiler public catalog projection",
+  "type": "object",
+  "required": ["schemaVersion", "project", "experiments"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "project": {
+      "type": "object",
+      "required": ["name", "repository"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "const": "Experiment Compiler" },
+        "repository": { "const": "https://github.com/pH34r-pH/experiment-compiler" }
+      }
+    },
+    "experiments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "profile", "source", "package", "detailUrl", "backlinks"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,79}$" },
+          "title": { "type": "string", "minLength": 1 },
+          "profile": { "enum": ["compiled-experiment-v1", "compiled-experiment-lifecycle-v1"] },
+          "source": {
+            "type": "object",
+            "required": ["repository", "commit"],
+            "properties": {
+              "repository": { "type": "string", "minLength": 1 },
+              "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+            }
+          },
+          "package": {
+            "type": "object",
+            "required": ["sha256", "size"],
+            "properties": {
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "size": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "detailUrl": { "type": "string", "pattern": "^/experiments/[a-z0-9-]+/$" },
+          "backlinks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["title", "url", "sourceCommit"],
+              "additionalProperties": false,
+              "properties": {
+                "title": { "type": "string", "minLength": 1 },
+                "url": { "type": "string", "format": "uri" },
+                "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+              }
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

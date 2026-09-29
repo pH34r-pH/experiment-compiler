@@ -46,7 +46,12 @@ function section(title, value) {
       const head = document.createElement("div");
       head.className = "experiment-head";
       const copy = document.createElement("div");
-      copy.append(text("h3", exp.title), text("p", exp.hypothesis || exp.question || "", "hypothesis"));
+      const title = document.createElement("h3");
+      const detailLink = document.createElement("a");
+      detailLink.href = exp.detailUrl || "#";
+      detailLink.textContent = exp.title;
+      title.append(detailLink);
+      copy.append(title, text("p", exp.hypothesis || exp.question || "", "hypothesis"));
 
       const meta = document.createElement("div");
       meta.className = "metrics";
@@ -89,6 +94,10 @@ function section(title, value) {
 
       const actions = document.createElement("div");
       actions.className = "actions";
+      const detailsLink = document.createElement("a");
+      detailsLink.href = exp.detailUrl || "#";
+      detailsLink.textContent = "Inspect full record ↗";
+      actions.append(detailsLink);
       if (exp.package && exp.package.sha256) {
         const download = document.createElement("a");
         download.className = "primary";
