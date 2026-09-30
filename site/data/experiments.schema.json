@@ -29,7 +29,7 @@
             "type": "object",
             "required": ["repository", "commit"],
             "properties": {
-              "repository": { "type": "string", "minLength": 1 },
+              "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
               "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
             }
           },
@@ -92,7 +92,7 @@
               "additionalProperties": false,
               "properties": {
                 "title": { "type": "string", "minLength": 1 },
-                "url": { "type": "string", "format": "uri" },
+                "url": { "type": "string", "pattern": "^https://tyharbin\\.com/articles/[a-z0-9-]+/$" },
                 "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
               }
             }
