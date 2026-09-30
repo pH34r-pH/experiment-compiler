@@ -46,6 +46,21 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn('class="article-backlink"', page)
         self.assertIn("Read A reviewed article →", page)
 
+    def test_detail_page_exposes_exact_protocol_when_summaries_are_absent(self):
+        page = render_detail({
+            "id": "real-protocol-shape", "title": "Illustrative study", "question": None,
+            "method": None, "source": {"repository": "owner/research", "commit": "b" * 40},
+            "protocol": {"record": "experiment/protocol.md", "text": "## Endpoints\n<script>alert(1)</script>"},
+        })
+        self.assertIn("Full authoritative protocol", page)
+        self.assertIn("experiment/protocol.md", page)
+        self.assertIn("## Endpoints\n&lt;script&gt;alert(1)&lt;/script&gt;", page)
+        self.assertNotIn("<script>alert(1)</script>", page)
+        self.assertIn("Not declared.", page)
+        self.assertIn("completed execution does not establish scientific acceptance", page)
+        self.assertIn("Interpretation is source-authored evidence, not approval", page)
+        self.assertIn("Independent reproduction requires its own observed run and comparison", page)
+
     def test_unrelated_experiment_gets_no_inferred_article_link(self):
         page = render_detail({
             "id": "standalone-example",
@@ -66,6 +81,9 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn("min-height: 48px", css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
         self.assertIn("@media (forced-colors: active)", css)
+        self.assertIn(".details > div, .details > details { min-width: 0;", css)
+        self.assertIn(".details pre { min-width: 0; max-width: 100%;", css)
+        self.assertIn(".detail-page summary, .details summary { min-height: 48px;", css)
 
 
 if __name__ == "__main__":
