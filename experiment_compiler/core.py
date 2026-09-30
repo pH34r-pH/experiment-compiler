@@ -15,7 +15,6 @@ import zipfile
 import zlib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from . import __version__
 
@@ -150,9 +149,8 @@ def _validate_related_articles(related_articles: Any) -> None:
                 not isinstance(article["url"], str) or not isinstance(article["sourceCommit"], str) or
                 not re.fullmatch(r"[0-9a-f]{40}", article["sourceCommit"])):
             raise PackageError("Related article requires a title, URL and exact source commit")
-        parsed = urlsplit(article["url"])
-        if (parsed.scheme != "https" or parsed.netloc != "tyharbin.com" or
-                not re.fullmatch(r"/articles/[a-z0-9-]+/", parsed.path) or parsed.query or parsed.fragment):
+        # Match the raw URL: URL parsers can silently strip control characters.
+        if not re.fullmatch(r"https://tyharbin\.com/articles/[a-z0-9-]+/", article["url"]):
             raise PackageError("Related article URL must be a canonical tyharbin.com article route")
 
 
