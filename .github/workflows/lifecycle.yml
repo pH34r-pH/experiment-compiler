@@ -182,7 +182,7 @@ jobs:
           path: |
             ${{ runner.temp }}/runner-output/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
   build:
     name: Build and reproduce Compiled Experiments (Python ${{ matrix.python }})
@@ -260,7 +260,7 @@ jobs:
           name: compiled-experiment-poc-python-${{ matrix.python }}-${{ github.sha }}
           path: dist/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
 
 
@@ -293,7 +293,7 @@ jobs:
           name: experiment-compiler-mutation-report-${{ github.sha }}
           path: ${{ runner.temp }}/irradiate-report.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
   standards-validation:
     name: Validate Croissant and RO-Crate metadata
@@ -355,7 +355,7 @@ jobs:
           name: experiment-compiler-site-${{ github.sha }}
           path: ${{ runner.temp }}/site/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   pages:
     name: Deploy GitHub Pages
