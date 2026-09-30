@@ -57,6 +57,17 @@ The compiler is intentionally conservative about claim strength:
 - **finalize** carries source-authored interpretation/review;
 - **publication** occurs through normal reviewed repository promotion.
 
+Each admitted run creates a controller-owned `<output-stem>.attempt/runner-receipt.json`
+before launch, using the packaged attempt receipt schema. The terminal receipt and
+bounded logs remain there even if result compilation fails. A receipt still marked
+`started` records an incomplete attempt after interruption; it does not establish
+completion. Existing result ZIP and `.source` evidence remain available for
+successfully packaged attempts. Attempt directories are never overwritten.
+
+Output collection rejects members above 16 MiB and shares the remaining 48 MiB
+recipe source budget between outputs and CWL provenance, reserving space for the
+plan, bounded logs and attempt metadata.
+
 None of those steps alone proves that a scientific conclusion is correct.
 
 ## Profiles
