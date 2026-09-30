@@ -54,138 +54,162 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertTrue(errors)
 
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
-        from experiment_compiler.core import MAX_FILE
-        for scenario in ("success", "nonzero", "timeout", "oversized-log", "symlink",
-                         "oversized-output", "aggregate", "shared-budget", "missing", "compile", "copy", "existing-output", "existing-source", "launch", "interrupted", "terminal-persist"):
+        scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
+                     "oversized-output", "aggregate", "shared-budget", "missing", "compile",
+                     "copy", "existing-output", "existing-source", "launch", "interrupted", "terminal-persist")
+        for scenario in scenarios:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
-                directory = Path(temporary)
-                plan = directory / "plan.zip"
-                built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
-                output = directory / "result.zip"
-                scratch = []
+                self._check_attempt_scenario(scenario, Path(temporary))
 
-                class Process:
-                    pid = 98765
-                    returncode = 9 if scenario == "nonzero" else 0
-                    calls = 0
+    def _mock_attempt_launch(self, scenario, directory, scratch):
+        class Process:
+            pid = 98765
+            returncode = 9 if scenario == "nonzero" else 0
+            calls = 0
 
-                    def wait(self, timeout=None):
-                        self.calls += 1
-                        if scenario == "timeout" and self.calls == 1:
-                            raise subprocess.TimeoutExpired("fixture", timeout)
-                        return self.returncode
+            def wait(self, timeout=None):
+                self.calls += 1
+                if scenario == "timeout" and self.calls == 1:
+                    raise subprocess.TimeoutExpired("fixture", timeout)
+                return self.returncode
 
-                def launch(command, **kwargs):
-                    receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
-                    self.assertEqual(receipt["status"], "started")
-                    self.assertIsNone(receipt["endedAt"])
-                    if scenario == "launch":
-                        raise OSError("fixture launch failure")
-                    if scenario == "interrupted":
-                        raise KeyboardInterrupt()
-                    scratch.append(Path(kwargs["cwd"]).parent)
-                    kwargs["stdout"].write(b"bounded diagnostic")
-                    if scenario == "oversized-log":
-                        kwargs["stdout"].truncate(4 * 1024 * 1024 + 1)
-                    out = Path(command[command.index("--outdir") + 1])
-                    out.mkdir()
-                    if scenario != "missing":
-                        (out / "result.txt").write_bytes(b"fixture")
-                    if scenario == "symlink":
-                        (out / "link").symlink_to(out / "result.txt")
-                    if scenario in ("oversized-output", "aggregate", "shared-budget"):
-                        for number in range(3 if scenario == "aggregate" else 2 if scenario == "shared-budget" else 1):
-                            with (out / f"large-{number}").open("wb") as stream:
-                                stream.truncate(MAX_FILE if scenario in ("aggregate", "shared-budget") else MAX_FILE + 1)
-                    if scenario == "shared-budget":
-                        provenance = Path(command[command.index("--provenance") + 1])
-                        provenance.mkdir()
-                        with (provenance / "too-much").open("wb") as stream:
-                            stream.truncate(MAX_FILE)
-                    if scenario == "existing-output":
-                        output.write_bytes(b"not owned by this attempt")
-                    if scenario == "existing-source":
-                        (directory / "result.source").mkdir()
-                        (directory / "result.source/existing").write_bytes(b"not owned by this attempt")
-                    return Process()
+        def launch(command, **kwargs):
+            receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
+            self.assertEqual(receipt["status"], "started")
+            self.assertIsNone(receipt["endedAt"])
+            if scenario == "launch":
+                raise OSError("fixture launch failure")
+            if scenario == "interrupted":
+                raise KeyboardInterrupt()
+            scratch.append(Path(kwargs["cwd"]).parent)
+            kwargs["stdout"].write(b"bounded diagnostic")
+            if scenario == "oversized-log":
+                kwargs["stdout"].truncate(4 * 1024 * 1024 + 1)
+            self._write_attempt_outputs(scenario, directory, command)
+            return Process()
 
-                original_replace = Path.replace
-                terminal_failure = []
+        return launch
 
-                def replace_receipt(path, target):
-                    if (scenario == "terminal-persist" and output.exists() and
-                            path.name == "runner-receipt.json.tmp" and not terminal_failure):
-                        terminal_failure.append(True)
-                        raise OSError("fixture terminal persistence failure")
-                    return original_replace(path, target)
+    def _write_attempt_outputs(self, scenario, directory, command):
+        from experiment_compiler.core import MAX_FILE
+        out = Path(command[command.index("--outdir") + 1])
+        out.mkdir()
+        if scenario != "missing":
+            (out / "result.txt").write_bytes(b"fixture")
+        if scenario == "symlink":
+            (out / "link").symlink_to(out / "result.txt")
+        sizes = {"oversized-output": [MAX_FILE + 1], "aggregate": [MAX_FILE] * 3,
+                 "shared-budget": [MAX_FILE] * 2}
+        for number, size in enumerate(sizes.get(scenario, [])):
+            with (out / f"large-{number}").open("wb") as stream:
+                stream.truncate(size)
+        if scenario == "shared-budget":
+            provenance = Path(command[command.index("--provenance") + 1])
+            provenance.mkdir()
+            with (provenance / "too-much").open("wb") as stream:
+                stream.truncate(MAX_FILE)
+        if scenario == "existing-output":
+            (directory / "result.zip").write_bytes(b"not owned by this attempt")
+        if scenario == "existing-source":
+            (directory / "result.source").mkdir()
+            (directory / "result.source/existing").write_bytes(b"not owned by this attempt")
 
-                original_copytree = shutil.copytree
+    def _mock_attempt_publication(self, scenario, output, terminal_failure):
+        original_replace = Path.replace
+        original_copytree = shutil.copytree
 
-                def copy_source(source, destination, *args, **kwargs):
-                    if scenario == "copy":
-                        (destination / "partial").write_bytes(b"partial copied source")
-                        raise OSError("fixture source copy failure")
-                    return original_copytree(source, destination, *args, **kwargs)
+        def replace_receipt(path, target):
+            if (scenario == "terminal-persist" and output.exists() and
+                    path.name == "runner-receipt.json.tmp" and not terminal_failure):
+                terminal_failure.append(True)
+                raise OSError("fixture terminal persistence failure")
+            return original_replace(path, target)
 
-                with patch.dict(os.environ, {
-                        "EXPERIMENT_RUNNER_SANDBOX": "fixture",
-                        "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
-                        "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
-                            '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
-                        "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-                }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
-                        patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                        patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
-                        patch("experiment_compiler.runner.os.killpg"), \
-                        patch.object(Path, "replace", new=replace_receipt), \
-                        patch("experiment_compiler.runner.shutil.copytree", side_effect=copy_source), \
-                        patch("experiment_compiler.runner.compile_package", side_effect=PackageError("fixture packaging failure") if scenario == "compile" else compile_package):
-                    if scenario in ("compile", "copy", "existing-output", "existing-source", "launch", "interrupted", "terminal-persist"):
-                        with self.assertRaises(KeyboardInterrupt if scenario == "interrupted" else PackageError if scenario == "compile" else OSError):
-                            run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
-                    else:
-                        run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
-                receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
-                self.assertEqual(receipt["planPackageSha256"], built["packageSha256"])
-                self.assertTrue(receipt["attemptId"])
-                self.assertEqual(receipt["status"], "started" if scenario in ("interrupted", "terminal-persist") else "succeeded" if scenario == "success" else "timed-out" if scenario == "timeout" else "failed")
-                self.assertTrue(all(not path.exists() for path in scratch))
-                if scenario in ("symlink", "oversized-output", "aggregate", "missing", "compile", "copy", "existing-output", "existing-source", "launch", "oversized-log", "shared-budget"):
-                    self.assertTrue(receipt["collectionErrors"])
-                if scenario in ("symlink", "oversized-output", "aggregate", "missing"):
-                    self.assertEqual(receipt["outputs"], [])
-                if scenario == "shared-budget":
-                    self.assertEqual(receipt["workflowRunCrateFiles"], [])
-                if scenario == "compile":
-                    self.assertIn("fixture packaging failure", receipt["collectionErrors"][-1])
-                    self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
-                    self.assertFalse(output.exists())
-                    self.assertFalse((directory / "result.source").exists())
-                if scenario == "copy":
-                    self.assertIn("fixture source copy failure", receipt["collectionErrors"][-1])
-                    self.assertFalse(output.exists())
-                    self.assertFalse((directory / "result.source").exists())
-                if scenario == "existing-output":
-                    self.assertEqual(output.read_bytes(), b"not owned by this attempt")
-                    self.assertFalse((directory / "result.source").exists())
-                if scenario == "existing-source":
-                    self.assertEqual((directory / "result.source/existing").read_bytes(), b"not owned by this attempt")
-                    self.assertFalse(output.exists())
-                if scenario == "terminal-persist":
-                    self.assertEqual(terminal_failure, [True])
-                    self.assertEqual(receipt["collectionErrors"], [])
-                    verify_bytes(output.read_bytes())
-                    import zipfile
-                    with zipfile.ZipFile(output) as archive:
-                        member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                        published = json.loads(archive.read(member))
-                    self.assertEqual(published["status"], "succeeded")
-                    self.assertEqual(published["attemptId"], receipt["attemptId"])
-                if scenario == "success":
-                    import zipfile
-                    with zipfile.ZipFile(output) as archive:
-                        member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                        self.assertEqual(receipt, json.loads(archive.read(member)))
+        def copy_source(source, destination, *args, **kwargs):
+            if scenario == "copy":
+                (destination / "partial").write_bytes(b"partial copied source")
+                raise OSError("fixture source copy failure")
+            return original_copytree(source, destination, *args, **kwargs)
+
+        return replace_receipt, copy_source
+
+    def _check_attempt_scenario(self, scenario, directory):
+        plan = directory / "plan.zip"
+        built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
+        output = directory / "result.zip"
+        scratch, terminal_failure = [], []
+        launch = self._mock_attempt_launch(scenario, directory, scratch)
+        replace_receipt, copy_source = self._mock_attempt_publication(scenario, output, terminal_failure)
+        with patch.dict(os.environ, {
+                "EXPERIMENT_RUNNER_SANDBOX": "fixture",
+                "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                    '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+        }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
+                patch("experiment_compiler.runner._require_bounded_tmpfs"), \
+                patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
+                patch("experiment_compiler.runner.os.killpg"), \
+                patch.object(Path, "replace", new=replace_receipt), \
+                patch("experiment_compiler.runner.shutil.copytree", side_effect=copy_source), \
+                patch("experiment_compiler.runner.compile_package", side_effect=PackageError("fixture packaging failure") if scenario == "compile" else compile_package):
+            errors = {"compile": PackageError, "interrupted": KeyboardInterrupt,
+                      "copy": OSError, "existing-output": OSError, "existing-source": OSError,
+                      "launch": OSError, "terminal-persist": OSError}
+            if scenario in errors:
+                with self.assertRaises(errors[scenario]):
+                    run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
+            else:
+                run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
+        receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
+        self.assertEqual(receipt["planPackageSha256"], built["packageSha256"])
+        self.assertTrue(receipt["attemptId"])
+        self.assertTrue(all(not path.exists() for path in scratch))
+        self._check_attempt_outcome(scenario, directory, receipt, terminal_failure)
+
+    def _check_attempt_outcome(self, scenario, directory, receipt, terminal_failure):
+        statuses = {"interrupted": "started", "terminal-persist": "started",
+                    "success": "succeeded", "timeout": "timed-out"}
+        self.assertEqual(receipt["status"], statuses.get(scenario, "failed"))
+        rejected = {"symlink", "oversized-output", "aggregate", "missing"}
+        errors = rejected | {"compile", "copy", "existing-output", "existing-source",
+                             "launch", "oversized-log", "shared-budget"}
+        if scenario in errors:
+            self.assertTrue(receipt["collectionErrors"])
+        if scenario in rejected:
+            self.assertEqual(receipt["outputs"], [])
+        if scenario == "shared-budget":
+            self.assertEqual(receipt["workflowRunCrateFiles"], [])
+        if scenario in ("compile", "copy"):
+            message = "fixture packaging failure" if scenario == "compile" else "fixture source copy failure"
+            self.assertIn(message, receipt["collectionErrors"][-1])
+            self.assertFalse((directory / "result.zip").exists())
+            self.assertFalse((directory / "result.source").exists())
+        if scenario == "compile":
+            self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
+        self._check_attempt_publication(scenario, directory, receipt, terminal_failure)
+
+    def _check_attempt_publication(self, scenario, directory, receipt, terminal_failure):
+        output = directory / "result.zip"
+        if scenario == "existing-output":
+            self.assertEqual(output.read_bytes(), b"not owned by this attempt")
+            self.assertFalse((directory / "result.source").exists())
+        if scenario == "existing-source":
+            self.assertEqual((directory / "result.source/existing").read_bytes(), b"not owned by this attempt")
+            self.assertFalse(output.exists())
+        if scenario in ("success", "terminal-persist"):
+            import zipfile
+            verify_bytes(output.read_bytes())
+            with zipfile.ZipFile(output) as archive:
+                member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+                published = json.loads(archive.read(member))
+            self.assertEqual(published["status"], "succeeded")
+            self.assertEqual(published["attemptId"], receipt["attemptId"])
+            if scenario == "terminal-persist":
+                self.assertEqual(terminal_failure, [True])
+                self.assertEqual(receipt["collectionErrors"], [])
+            else:
+                self.assertEqual(receipt, published)
 
     def test_runner_requires_explicit_execution_opt_in_before_opening_package(self):
         with self.assertRaisesRegex(PackageError, "explicit opt-in"):
