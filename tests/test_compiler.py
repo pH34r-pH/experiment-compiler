@@ -248,6 +248,56 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(record["contents"]["external"][0]["id"], "https://data.example.org/frozen.npz")
         self.assertEqual(record["unavailablePrerequisites"], [])
 
+    def test_catalog_keeps_real_protocol_shape_and_exposes_full_source(self):
+        recipe_path, recipe, _ = self.lifecycle_fixture(directory="real-protocol-shape")
+        protocol = ("# Illustrative evaluation study protocol\n\n"
+                    "## Preregistered endpoints\nMeasure held-out error per selected sample.\n\n"
+                    "## Frozen comparison denominator\nUse the declared reference sample set; missing evidence is inconclusive.\n")
+        member = next(item for item in recipe["members"] if item["path"] == "experiment/protocol.md")
+        (recipe_path.parent / member["source"]).write_text(protocol)
+        member.update(sha256=sha256(protocol.encode()), size=len(protocol.encode()))
+        recipe_path.write_bytes(canonical(recipe))
+        record = describe_recipe(recipe_path)
+        self.assertIsNone(record["question"])
+        self.assertIsNone(record["method"])
+        self.assertEqual(record["protocol"], {"record": "experiment/protocol.md", "text": protocol})
+
+    def test_catalog_projects_attempt_status_without_scientific_verdict(self):
+        for status in ("Active", "Failed", "Completed"):
+            recipe_path, _, _ = self.lifecycle_fixture(
+                directory=f"catalog-attempt-{status}",
+                action_status=f"https://schema.org/{status}ActionStatus", process_run=True)
+            record = describe_recipe(recipe_path)
+            self.assertEqual(len(record["executionAttempts"]), 1)
+            self.assertEqual(record["executionAttempts"][0]["actionStatus"],
+                             f"https://schema.org/{status}ActionStatus")
+            self.assertIsNone(record["scientificInterpretation"])
+            self.assertNotIn("scientificAcceptance", record)
+            self.assertNotIn("scientificReproduction", record)
+        recipe_path, _, _ = self.lifecycle_fixture(directory="catalog-prospective")
+        self.assertEqual(describe_recipe(recipe_path)["executionAttempts"], [])
+
+    def test_catalog_rejects_unretained_or_ambiguous_attempt_results(self):
+        for index, result in enumerate((
+                {"@id": "https://example.org/unretained.json"},
+                {"@id": "#ram"},
+                [{"@id": "experiment/README.md"}, {"@id": "experiment/README.md"}],
+                "experiment/README.md")):
+            recipe_path, recipe, graph = self.lifecycle_fixture(
+                directory=f"catalog-invalid-result-{index}",
+                action_status="https://schema.org/CompletedActionStatus", process_run=True)
+            action = next(node for node in graph if node.get("actionStatus") ==
+                          "https://schema.org/CompletedActionStatus")
+            action["result"] = result
+            metadata = recipe_path.parent / "ro-crate-metadata.json"
+            metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+                "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+            recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+            recipe["members"][3]["size"] = metadata.stat().st_size
+            recipe_path.write_bytes(canonical(recipe))
+            with self.subTest(result=result), self.assertRaisesRegex(PackageError, "Catalog execution result"):
+                describe_recipe(recipe_path)
+
     def test_lifecycle_rejects_unknown_resource_encoded_as_zero_or_with_unit(self):
         for index, measurement in enumerate((
                 {"@id": "#x", "@type": "PropertyValue", "propertyID": "RAM", "value": 0,
@@ -364,6 +414,12 @@ class CompilerTests(unittest.TestCase):
         }])
         self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(len(published["scientificInterpretation"]), 1)
+        attempt = published["executionAttempts"][0]
+        self.assertEqual(attempt["id"], "#attempt-87409154e60d")
+        self.assertEqual(attempt["actionStatus"], "https://schema.org/CompletedActionStatus")
+        self.assertIn("evidence/attempts/87409154e60d/pilot-result.json", attempt["result"])
+        self.assertIn("no overall winner or cost claim", published["scientificInterpretation"][0]["summary"])
+        self.assertEqual(published["protocol"]["record"], "experiment/protocol.md")
 
     def test_related_article_backlink_is_pinned_in_the_authoritative_recipe(self):
         with tempfile.TemporaryDirectory() as directory:
