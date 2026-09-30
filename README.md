@@ -96,7 +96,7 @@ This keeps packaging mechanics public and auditable without turning unfinished/p
 
 ## Public catalog projection
 
-The Pages build writes `/data/experiments.json` from the discovered authoritative recipes and lifecycle crates. Projection schema version 2 includes one stable detail route per record, exact ZIP SHA-256 and size, source repository and commit, plus any backlinks declared by the source record. The JSON Schema lives at [`site/data/experiments.schema.json`](site/data/experiments.schema.json) and ships beside the projection. The catalog contains no separately maintained experiment registry.
+The Pages build writes `/data/experiments.json` from the discovered authoritative recipes and lifecycle crates. Projection schema version 2 includes one stable detail route per record, exact ZIP SHA-256 and size, source repository and commit, plus any backlinks declared by the source record. The JSON Schema lives at [`site/data/experiments.schema.json`](site/data/experiments.schema.json) and ships beside the projection. The catalog contains no separately maintained experiment registry. Lifecycle records expose exact execution statuses and the full authoritative protocol when summary headings are absent; see [the projection contract](docs/catalog-projection.md).
 
 ## Repository map
 
