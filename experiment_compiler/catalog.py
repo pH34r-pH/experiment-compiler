@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .core import (MAX_FILE, PackageError, _types, bounded_read, compile_package,
+from .core import (MAX_FILE, PackageError, _execution_action_nodes, _types, bounded_read, compile_package,
                    json_value, load_recipe, validate_lifecycle_crate)
 
 
@@ -120,6 +120,25 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     if any(item["path"] == "dependency-closure.json" for item in recipe["members"]):
         closure = _json_member(recipe, recipe_path, "dependency-closure.json")
     entities = {node["@id"]: node for node in graph if isinstance(node, dict) and isinstance(node.get("@id"), str)}
+    # Keep execution status separate from source-owned scientific interpretation.
+    # A result reference must identify retained bytes, not an unavailable URL.
+    members = {item["path"] for item in recipe["members"]}
+    attempts = []
+    for action in _execution_action_nodes(graph):
+        raw_results = action.get("result", [])
+        results = raw_results if isinstance(raw_results, list) else [raw_results]
+        identifiers = []
+        for result in results:
+            identifier = result.get("@id") if isinstance(result, dict) else None
+            entity = entities.get(identifier) if isinstance(identifier, str) else None
+            if (identifier not in members or entity is None or
+                    "File" not in _types(entity.get("@type"))):
+                raise PackageError("Catalog execution result must resolve to a packaged File")
+            if identifier in identifiers:
+                raise PackageError("Catalog execution result references must be unique")
+            identifiers.append(identifier)
+        attempts.append({"id": action["@id"], "actionStatus": action["actionStatus"],
+                         "result": identifiers})
     interpretations = []
     for node in graph:
         if (not isinstance(node, dict) or "File" not in _types(node.get("@type")) or
@@ -130,11 +149,11 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         about = node.get("about")
         about_ids = [item.get("@id") for item in (about if isinstance(about, list) else [about])
                      if isinstance(item, dict)]
-        attempts = [identifier for identifier in about_ids
+        about_attempts = [identifier for identifier in about_ids
                     if identifier in entities and "CreateAction" in _types(entities[identifier].get("@type"))]
-        if isinstance(summary, str) and summary.strip() and len(attempts) == 1:
+        if isinstance(summary, str) and summary.strip() and len(about_attempts) == 1:
             interpretations.append({"record": node["@id"], "summary": summary,
-                                    "aboutAttempt": attempts[0]})
+                                    "aboutAttempt": about_attempts[0]})
     return {
         "schemaVersion": 1,
         "id": recipe["id"],
@@ -143,7 +162,9 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "hypothesis": _markdown_section(readme, "Hypothesis"),
         "question": _markdown_section(protocol, "Question"),
         "method": _markdown_section(protocol, "Method"),
+        "protocol": {"record": main_id, "text": protocol},
         "lifecycle": lifecycle,
+        "executionAttempts": attempts,
         "contents": None if closure is None else closure.get("classifications"),
         "unavailablePrerequisites": None if closure is None else closure.get("classifications", {}).get("unavailable"),
         "scientificInterpretation": interpretations or None,
