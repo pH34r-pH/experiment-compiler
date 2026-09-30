@@ -136,3 +136,88 @@ footer p { margin: .25em 0; }
   .eyebrow, .details h4, .terminal span { color: CanvasText; }
   a, button, summary { forced-color-adjust: auto; }
 }
+
+
+/* 2071 cross-site research instrument */
+:root{
+  --bg:#f7fbff;--panel:rgba(240,248,255,.8);--ink:#061a2c;--muted:#4c6c84;
+  --line:rgba(0,78,140,.28);--accent:#006cff;--glow:rgba(0,108,255,.18);
+  color-scheme:light;
+}
+html[data-mode=dark]{
+  --bg:#01060c;--panel:rgba(2,15,28,.82);--ink:#eaf7ff;--muted:#79a9ca;
+  --line:rgba(31,155,255,.3);--accent:#1b9cff;--glow:rgba(0,150,255,.25);
+  color-scheme:dark;
+}
+body{
+  padding-top:54px;
+  background:
+    linear-gradient(rgba(0,108,255,.06) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,108,255,.06) 1px,transparent 1px),
+    radial-gradient(circle at 82% 3%,var(--glow),transparent 25rem),
+    var(--bg);
+  background-size:32px 32px,32px 32px,auto,auto;
+}
+main,footer{width:min(1240px,calc(100% - 36px))}
+.topbar{
+  height:54px;padding-inline:max(18px,calc((100vw - 1240px)/2));
+  background:color-mix(in srgb,var(--bg) 88%,transparent);
+  border-color:var(--line);backdrop-filter:blur(22px) saturate(150%);
+}
+.brand{letter-spacing:.14em}
+.topbar nav{gap:3px}
+.topbar nav a{padding-inline:10px;border-bottom:1px solid transparent}
+.topbar nav a:hover,.topbar nav a:focus-visible{border-bottom-color:var(--accent)}
+.mode-toggle{display:flex;border:1px solid var(--line);margin-left:8px}
+.mode-toggle button{
+  min-height:36px;min-width:38px;border:0;background:transparent;color:var(--muted);
+  font:800 9px ui-monospace,monospace;letter-spacing:.08em;cursor:pointer
+}
+.mode-toggle button+button{border-left:1px solid var(--line)}
+.mode-toggle button[aria-pressed=true]{background:var(--accent);color:#fff}
+.hero{min-height:min(78svh,760px)}
+h1,h2{font-family:"Arial Narrow","Helvetica Neue",sans-serif;font-weight:400}
+h1{font-size:clamp(4rem,10vw,9rem);line-height:.8;max-width:8.7ch;letter-spacing:-.06em}
+h1 span,.terminal span{color:var(--accent)}
+h2{letter-spacing:-.04em}
+.terminal,.experiment,.standards a,.detail-page details{
+  border-radius:0;background:var(--panel);backdrop-filter:blur(12px)
+}
+.experiment{box-shadow:inset 0 1px rgba(255,255,255,.16)}
+.actions .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.actions a,.article-backlink,.standards a{
+  transition:background .16s cubic-bezier(.16,1,.3,1),border-color .16s,transform .16s
+}
+.actions a:hover,.article-backlink:hover,.standards a:hover{
+  border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--panel));transform:translateY(-1px)
+}
+.detail-page>.eyebrow{margin-top:18px}
+.detail-page h1{max-width:13ch;font-size:clamp(3.2rem,8vw,7rem);line-height:.88}
+.route-flash{
+  position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0;
+  background:linear-gradient(90deg,transparent 0 48%,rgba(65,190,255,.9) 49.8%,#fff 50%,rgba(65,190,255,.9) 50.2%,transparent 52%),#020912;
+  transform:scaleX(.02);transform-origin:center
+}
+body.route-leaving .route-flash{animation:route-scan .26s cubic-bezier(.16,1,.3,1) forwards}
+@keyframes route-scan{0%{opacity:0;transform:scaleX(.02)}45%{opacity:.9;transform:scaleX(.055)}100%{opacity:1;transform:scaleX(1)}}
+:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+@media(max-width:760px){
+  main,footer{width:calc(100% - 24px)}
+  .topbar{padding-inline:12px;gap:8px}
+  .brand span{display:none}
+  .topbar nav a{padding-inline:7px}
+  .mode-toggle{margin-left:0}
+  .mode-toggle button{min-width:36px}
+  .hero{min-height:auto;padding:70px 0 44px}
+  h1{font-size:clamp(3.6rem,19vw,6rem)}
+  section{padding:46px 0}
+}
+@media(max-width:430px){
+  .topbar nav a[href*="github.com"]{display:none}
+  .topbar nav a{font-size:8px}
+}
+@media(prefers-reduced-motion:reduce){.route-flash{display:none}}
+@media(forced-colors:active){
+  body,.topbar,.experiment,.metric,.details>div,.details>details,.standards a,.detail-page details{background:Canvas;color:CanvasText}
+  .mode-toggle button[aria-pressed=true]{background:Highlight;color:HighlightText}
+}
