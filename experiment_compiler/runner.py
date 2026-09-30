@@ -628,6 +628,36 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
     return result
 
 
+def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
+    pending = attempt_directory / "runner-receipt.json.tmp"
+    with pending.open("wb") as stream:
+        stream.write(canonical(value))
+        stream.flush()
+        os.fsync(stream.fileno())
+    pending.replace(attempt_directory / "runner-receipt.json")
+    directory_fd = os.open(attempt_directory, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: dict,
+                           started: float, exc: Exception) -> None:
+    receipt.update(status="failed", endedAt=datetime.now(timezone.utc).isoformat(),
+                   wallSeconds=time.monotonic() - started)
+    receipt["collectionErrors"] = list(receipt["collectionErrors"]) + [
+        f"Attempt failed: {type(exc).__name__}: {str(exc)[:4096]}"
+    ]
+    # Read only bounded controller logs if execution/collection raised.
+    for label in ("stdout", "stderr"):
+        path = temporary / f"{label}.log"
+        if path.exists():
+            data = _read_execution_log(path, label, receipt["collectionErrors"])
+            (attempt_directory / f"{label}.log").write_bytes(data)
+    _persist_attempt_receipt(attempt_directory, receipt)
+
+
 def run_package(package: Path, output: Path, *, expected_sha256: str,
                 allow_workflow_execution: bool = False) -> dict:
     """Run a digest-pinned lifecycle package and create a new immutable result package."""
@@ -654,22 +684,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     receipt = json_value(initial[receipt_key])
     receipt.update(status="started", endedAt=None, wallSeconds=None)
     attempt_directory.mkdir(parents=True)
-    receipt_path = attempt_directory / "runner-receipt.json"
-
-    def persist_receipt(value: dict) -> None:
-        pending = attempt_directory / "runner-receipt.json.tmp"
-        with pending.open("wb") as stream:
-            stream.write(canonical(value))
-            stream.flush()
-            os.fsync(stream.fileno())
-        pending.replace(receipt_path)
-        directory_fd = os.open(attempt_directory, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-
-    persist_receipt(receipt)
+    _persist_attempt_receipt(attempt_directory, receipt)
     with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary_value:
         temporary = Path(temporary_value)
         try:
@@ -682,7 +697,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
             receipt = json_value(augmented[receipt_key])
             for label in ("stdout", "stderr"):
                 (attempt_directory / f"{label}.log").write_bytes(execution[label])
-            persist_receipt(dict(receipt, status="started", endedAt=None, wallSeconds=None))
+            _persist_attempt_receipt(attempt_directory, dict(receipt, status="started", endedAt=None, wallSeconds=None))
             experiment_id, title = _augment_result_crate(
                 augmented, expected_sha256, run_id, attempt_members, created, ended, execution,
             )
@@ -691,24 +706,12 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                 run_id, experiment_id, title, execution,
             )
         except Exception as exc:
-            receipt.update(status="failed", endedAt=datetime.now(timezone.utc).isoformat(),
-                           wallSeconds=time.monotonic() - started)
-            receipt["collectionErrors"] = list(receipt["collectionErrors"]) + [
-                f"Attempt failed: {type(exc).__name__}: {str(exc)[:4096]}"
-            ]
-            # Read only bounded controller logs if execution/collection raised.
-            for label in ("stdout", "stderr"):
-                path = temporary / f"{label}.log"
-                if path.exists():
-                    data = _read_execution_log(path, label, receipt["collectionErrors"])
-                    (attempt_directory / f"{label}.log").write_bytes(data)
-            persist_receipt(receipt)
+            _retain_failed_attempt(attempt_directory, temporary, receipt, started, exc)
             raise
         # Publication succeeded. A controller receipt I/O failure must not
         # reclassify the valid published execution as a failed attempt.
-        persist_receipt(receipt)
+        _persist_attempt_receipt(attempt_directory, receipt)
         return result
-
 
 
 def sha256_bytes(data: bytes) -> str:
