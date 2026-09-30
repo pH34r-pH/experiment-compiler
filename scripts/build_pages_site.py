@@ -79,12 +79,18 @@ def render_detail(experiment: dict) -> str:
     summary = html.escape(experiment.get("hypothesis") or experiment.get("question") or "")
     question = html.escape(experiment.get("question") or "Not declared.")
     method = html.escape(experiment.get("method") or "Not declared.")
+    protocol = experiment.get("protocol")
+    protocol_html = ""
+    if isinstance(protocol, dict) and isinstance(protocol.get("text"), str):
+        protocol_html = ("<section><details><summary>Full authoritative protocol</summary>"
+                         f"<p>Package member: {html.escape(protocol['record'])}</p>"
+                         f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
     profile = html.escape(experiment.get("profile", ""))
     package_identity = (f"SHA-256 {html.escape(package_hash)} · {package.get('size', 0):,} bytes"
                         if package_hash else "Package identity not declared")
     provenance = html.escape(f"{source_repository}@{source_commit}")
     records = html.escape(json.dumps({key: experiment.get(key) for key in
-        ("lifecycle", "acceptance", "result", "scientificInterpretation", "environment", "resources", "contents")
+        ("lifecycle", "executionAttempts", "acceptance", "result", "scientificInterpretation", "environment", "resources", "contents")
         if experiment.get(key) is not None}, indent=2, sort_keys=True))
     backlinks = experiment.get("backlinks") or []
     backlink_html = ("<section><h2>Related research articles</h2><ul>" + "".join(
@@ -99,7 +105,8 @@ def render_detail(experiment: dict) -> str:
 <main class="detail-page"><p class="eyebrow">COMPILED EXPERIMENT · {identifier}</p><h1>{title}</h1><p class="lede">{summary}</p>
 <section class="identity"><h2>Package identity</h2><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl><div class="actions">{package_action}</div></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>
-<section><details><summary>Lifecycle, evidence, and declared environment</summary><pre>{records}</pre></details></section>
+{protocol_html}
+<section><p>Package integrity checks establish byte consistency. Execution status records an attempt; completed execution does not establish scientific acceptance. Interpretation is source-authored evidence, not approval. Independent reproduction requires its own observed run and comparison.</p><details><summary>Lifecycle, evidence, and declared environment</summary><pre>{records}</pre></details></section>
 {backlink_html}<p class="return-link"><a href="/#experiments">← Return to the compiled experiment catalog</a></p></main>
 <footer><span>Apache-2.0 · Tyler J.H.G.</span><a href="https://github.com/pH34r-pH/experiment-compiler">Source on GitHub ↗</a></footer></body></html>\n'''
 
