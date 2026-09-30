@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://experiments.tyharbin.com/data/article-reference-v1.schema.json",
+  "title": "Exact article reference v1 (public projection v2)",
+  "type": "object",
+  "required": [
+    "ref"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ref": {
+      "type": "string",
+      "pattern": "^(?!.*(?:^|-)latest(?:-|$))[a-z0-9][a-z0-9-]{0,79}$"
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "profile": {
+          "enum": [
+            "compiled-experiment-v1",
+            "compiled-experiment-lifecycle-v1"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "repository",
+            "commit"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}
