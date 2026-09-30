@@ -58,7 +58,7 @@ function section(title, value) {
       const env = exp.environment || {};
       meta.append(
         metric("Package", bytes(exp.package && exp.package.size)),
-        metric("Protocol", exp.lifecycle && exp.lifecycle.creativeWorkStatus || "published reproduction"),
+        metric("Protocol", exp.lifecycle && exp.lifecycle.creativeWorkStatus || "reference package"),
         metric("Attempts", exp.lifecycle ? fmt.format(exp.lifecycle.attemptCount) : "reference evidence"),
         metric("Network", env.networkRequired === false ? "none" : String(env.networkRequired)),
         metric("VRAM", bytes(exp.resources && exp.resources.accelerator && exp.resources.accelerator.peakVramBytes)),
@@ -70,9 +70,15 @@ function section(title, value) {
       const result = exp.result || {};
       const details = document.createElement("div");
       details.className = "details";
-      const evidenceText = exp.scientificInterpretation === null
-        ? "No scientific interpretation is recorded in this plan."
-        : "Held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; acceptance " + (result.acceptancePassed ? "passed" : "not passed") + ".";
+      const interpretations = (exp.scientificInterpretation || []).map(item =>
+        item.summary + " (source record: " + item.record + "; attempt: " + item.aboutAttempt + ")"
+      ).join("; ");
+      const evidenceText = exp.lifecycle
+        ? "Execution and source interpretation are separate records; package integrity does not establish scientific acceptance or independent reproduction."
+        : "Source reference result: held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; recorded acceptance " + (result.acceptancePassed ? "passed" : "not passed") + ".";
+      const attemptSummary = (exp.executionAttempts || []).map(item =>
+        item.id + ": " + item.actionStatus + "; retained result members: " + item.result.join(", ")
+      ).join("; ");
       const lifecycle = exp.lifecycle || {};
       const resourceSummary = (lifecycle.resourceMeasurements || []).map(item =>
         item.propertyID + ": " + item.value + (item.unitText ? " " + item.unitText : "") + " (" + item.measurementTechnique + ")"
@@ -86,11 +92,19 @@ function section(title, value) {
         section("Resource basis", resourceSummary),
         section("Unresolved prerequisites", unresolvedSummary),
         section("Evidence", evidenceText),
-        section("Scientific interpretation", exp.scientificInterpretation),
+        section("Execution attempts", attemptSummary),
+        section("Scientific interpretation", interpretations),
         section("Environment", (env.python || "Python") + "; " + (env.standardLibraryOnly ? "standard library only" : "dependencies declared") + "; accelerator " + (env.accelerator || "not reported") + "."),
         section("Reproduce", exp.reproduction && exp.reproduction.entrypoint ? "Run " + exp.reproduction.entrypoint + " after extraction." : "Entrypoint not declared."),
         section("Provenance", (exp.source && exp.source.repository ? exp.source.repository : "") + "@" + (exp.source && exp.source.commit ? exp.source.commit : ""))
       );
+
+      if (exp.protocol && typeof exp.protocol.text === "string") {
+        const protocol = document.createElement("details");
+        protocol.append(text("summary", "Full authoritative protocol"),
+          text("p", "Package member: " + exp.protocol.record), text("pre", exp.protocol.text));
+        details.append(protocol);
+      }
 
       const actions = document.createElement("div");
       actions.className = "actions";

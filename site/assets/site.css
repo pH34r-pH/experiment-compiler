@@ -56,7 +56,10 @@ section { padding: 76px 0; border-top: 1px solid var(--line); }
 .metric strong { display: block; color: var(--muted); font: 700 10px ui-monospace, monospace; text-transform: uppercase; }
 .metric span { display: block; margin-top: 6px; font: 700 16px ui-monospace, monospace; }
 .details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border-top: 1px solid var(--line); background: var(--line); }
-.details > div { min-width: 0; padding: 20px; background: var(--panel); }
+.details > div, .details > details { min-width: 0; padding: 20px; background: var(--panel); }
+.details > details { min-width: 0; }
+.details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; overflow-wrap: anywhere; }
+.details pre { min-width: 0; max-width: 100%; padding: 12px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; background: var(--bg); font-size: .78rem; }
 .details h4 { margin: 0 0 8px; color: var(--accent); font: 700 10px ui-monospace, monospace; text-transform: uppercase; }
 .details p { color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; padding: 20px; border-top: 1px solid var(--line); }
@@ -112,7 +115,7 @@ footer p { margin: .25em 0; }
   .metrics { grid-template-columns: 1fr; }
 }
 @media (pointer: coarse) {
-  .topbar nav a, .actions a, .detail-page summary { min-height: 48px; }
+  .topbar nav a, .actions a, .detail-page summary, .details summary { min-height: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -121,14 +124,14 @@ footer p { margin: .25em 0; }
 @media (prefers-contrast: more) {
   :root { --muted: var(--ink); --line: var(--ink); --glow: transparent; }
   .eyebrow, .details h4 { color: var(--ink); }
-  .experiment, .standards a, .details > div, .metric { border-width: 2px; }
+  .experiment, .standards a, .details > div, .details > details, .metric { border-width: 2px; }
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #111014; --panel: #19171e; --ink: #e9e4eb; --muted: #b5aeb9; --line: #5c5662; --accent: #b397c8; --glow: rgba(154, 123, 178, .22); color-scheme: dark; }
 }
 @media (forced-colors: active) {
   :root { color-scheme: light dark; }
-  body, .topbar, .experiment, .metric, .details > div, .standards a, .detail-page details, .detail-page pre { background: Canvas; color: CanvasText; }
+  body, .topbar, .experiment, .metric, .details > div, .details > details, .details pre, .standards a, .detail-page details, .detail-page pre { background: Canvas; color: CanvasText; }
   .actions .primary { border: 1px solid ButtonText; background: ButtonText; color: ButtonFace; forced-color-adjust: auto; }
   .eyebrow, .details h4, .terminal span { color: CanvasText; }
   a, button, summary { forced-color-adjust: auto; }

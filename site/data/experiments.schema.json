@@ -41,6 +41,48 @@
               "size": { "type": "integer", "minimum": 1 }
             }
           },
+          "protocol": {
+            "type": "object",
+            "required": ["record", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "record": { "type": "string", "minLength": 1 },
+              "text": { "type": "string" }
+            }
+          },
+          "executionAttempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "actionStatus",
+                "result"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actionStatus": {
+                  "enum": [
+                    "https://schema.org/ActiveActionStatus",
+                    "https://schema.org/CompletedActionStatus",
+                    "https://schema.org/FailedActionStatus"
+                  ]
+                },
+                "result": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          },
           "detailUrl": { "type": "string", "pattern": "^/experiments/[a-z0-9-]+/$" },
           "backlinks": {
             "type": "array",
