@@ -50,6 +50,50 @@ class CompilerTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(PackageError, "finite and positive"):
                 seconds_to_cwl_limit(value)
 
+    def test_public_recipe_excludes_unselected_private_workspace_identifiers(self):
+        fixture = self.root / "public-fixture"
+        shutil.copytree(SELF_CONTAINED, fixture)
+        recipe_path = fixture / "experiment.json"
+        private_path = "unreviewed-workspace.txt"
+        markers = ("synthetic-private-worker-917", "/scratch/synthetic-private-318",
+                   "synthetic-private-prompt-619")
+        private_bytes = ("\n".join(markers) + "\n").encode()
+        (fixture / private_path).write_bytes(private_bytes)
+        package = self.root / "public.zip"
+        compile_package(recipe_path, package)
+        original = package.read_bytes()
+        recipe = load_recipe(recipe_path)
+        verify_bytes(original, recipe=recipe)
+        projection = canonical(describe_catalog(fixture))
+        with zipfile.ZipFile(package) as archive:
+            self.assertNotIn(private_path, archive.namelist())
+            admitted = b"".join(archive.read(name) for name in archive.namelist())
+            for marker in markers:
+                self.assertNotIn(marker.encode(), admitted)
+                self.assertNotIn(marker.encode(), projection)
+            pairs = [(info, archive.read(info.filename)) for info in archive.infolist()]
+        # A self-consistent inventory and a payload's publication claim cannot
+        # authorize a member absent from the exact reviewed recipe.
+        modified = io.BytesIO()
+        with zipfile.ZipFile(modified, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for info, content in pairs:
+                if info.filename == MANIFEST:
+                    manifest = json.loads(content)
+                    manifest["members"].append({"path": private_path,
+                        "sha256": sha256(private_bytes), "size": len(private_bytes)})
+                    manifest["evidence"]["publicationClaim"] = "all files reviewed for public export"
+                    content = canonical(manifest)
+                archive.writestr(info, content)
+            archive.writestr(private_path, private_bytes)
+        tampered = modified.getvalue()
+        self.assertEqual(verify_bytes(tampered)["scope"], "package-integrity-only")
+        reviewed = copy.deepcopy(recipe)
+        reviewed.pop("expectedPackage")
+        with self.assertRaisesRegex(PackageError, "differs from reviewed recipe"):
+            verify_bytes(tampered, recipe=reviewed)
+        with self.assertRaises(PackageError):
+            verify_bytes(tampered, recipe=recipe)
+
     def test_git_lfs_pointer_is_not_accepted_as_payload_bytes(self):
         pointer = (b"version https://git-lfs.github.com/spec/v1\n" +
                    b"oid sha256:" + b"a" * 64 + b"\nsize 4096\n")
