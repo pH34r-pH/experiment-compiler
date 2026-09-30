@@ -105,14 +105,14 @@ def render_detail(experiment: dict) -> str:
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Exact package identity, provenance, and lifecycle projection for {title}.">
 <title>{title} — Experiment Compiler</title><link rel="stylesheet" href="/assets/site.css"></head>
-<body><header class="topbar"><a class="brand" href="/">TJHG <span>/ experiments</span></a><nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="/#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav></header>
+<body><header class="topbar"><a class="brand" href="/">TJHG <span>/ experiments</span></a><nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="/#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav><div class="mode-toggle" role="group" aria-label="Display mode"><button type="button" data-mode-choice="light" aria-pressed="true" aria-label="Light / blue">L</button><button type="button" data-mode-choice="dark" aria-pressed="false" aria-label="Dark / blue">D</button></div></header>
 <main class="detail-page"><p class="eyebrow">COMPILED EXPERIMENT · {identifier}</p><h1>{title}</h1><p class="lede">{summary}</p>
 <section class="identity"><h2>Package identity</h2><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl><div class="actions">{package_action}</div></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>
 {protocol_html}
 <section><p>Package integrity checks establish byte consistency. Execution status records an attempt; completed execution does not establish scientific acceptance. Interpretation is source-authored evidence, not approval. Independent reproduction requires its own observed run and comparison.</p><details><summary>Lifecycle, evidence, and declared environment</summary><pre>{records}</pre></details></section>
 {backlink_html}<p class="return-link"><a href="/#experiments">← Return to the compiled experiment catalog</a></p></main>
-<footer><span>Apache-2.0 · Tyler J.H.G.</span><a href="https://github.com/pH34r-pH/experiment-compiler">Source on GitHub ↗</a></footer></body></html>\n'''
+<footer><span>Apache-2.0 · Tyler J.H.G.</span><a href="https://github.com/pH34r-pH/experiment-compiler">Source on GitHub ↗</a></footer><script src="/assets/instrument.js"></script></body></html>\n'''
 
 
 if __name__ == "__main__":
