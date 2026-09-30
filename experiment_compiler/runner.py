@@ -13,10 +13,13 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -657,6 +660,67 @@ def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
         os.close(directory_fd)
 
 
+def _replay_operator_signal(handler, pending, original, failure):
+    number, frame = pending
+    try:
+        handler(number, frame)
+    except KeyboardInterrupt as interruption:
+        if not isinstance(original, KeyboardInterrupt):
+            if failure is not None:
+                interruption.add_note(f"Attempt evidence write failed: {type(failure).__name__}: {str(failure)[:1024]}")
+            raise
+        original.add_note(f"Deferred signal during evidence retention: {str(interruption)[:1024]}")
+    # Raise outside the deferred handler's except block so an earlier
+    # interruption stays its exception context/cause and retains its notes.
+    if isinstance(original, KeyboardInterrupt):
+        if failure is not None:
+            original.add_note(f"Attempt evidence write failed: {type(failure).__name__}: {str(failure)[:1024]}")
+        raise original
+
+
+@contextmanager
+def _defer_operator_signals(original: BaseException | None = None):
+    """Deliver the first handled signal after controller evidence writes finish."""
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    handlers = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)
+                if callable(signal.getsignal(number))}
+    if not handlers:
+        yield
+        return
+    pending = None
+    failure = None
+
+    def defer(number, frame):
+        nonlocal pending
+        if pending is None:
+            pending = (number, frame)
+
+    try:
+        installation_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handlers)
+        try:
+            for number in handlers:
+                signal.signal(number, defer)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, installation_mask)
+        yield
+    except (Exception, KeyboardInterrupt) as exc:
+        failure = exc
+        raise
+    finally:
+        # The evidence phase records delivery order. Block only the short
+        # restore/replay transition so a later signal cannot replace its first.
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handlers)
+        try:
+            for number, handler in handlers.items():
+                signal.signal(number, handler)
+            if pending is not None:
+                _replay_operator_signal(handlers[pending[0]], pending, original, failure)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
 def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: dict,
                            started: float, exc: BaseException) -> None:
     receipt.update(status="failed", endedAt=datetime.now(timezone.utc).isoformat(),
@@ -724,11 +788,13 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                 run_id, experiment_id, title, execution,
             )
         except (Exception, KeyboardInterrupt) as exc:
-            _retain_failed_attempt(attempt_directory, temporary, receipt, started, exc)
+            with _defer_operator_signals(exc):
+                _retain_failed_attempt(attempt_directory, temporary, receipt, started, exc)
             raise
         # Publication succeeded. A controller receipt I/O failure must not
         # reclassify the valid published execution as a failed attempt.
-        _persist_attempt_receipt(attempt_directory, receipt)
+        with _defer_operator_signals():
+            _persist_attempt_receipt(attempt_directory, receipt)
         return result
 
 

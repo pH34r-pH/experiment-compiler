@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, compile_package
+from experiment_compiler.runner import _defer_operator_signals
 from experiment_compiler.runner_cli import _operator_cancellation, main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,50 @@ CONTROLLER = textwrap.dedent("""\
             patch.object(runner, "_runner_config", side_effect=configure), \\
             patch.object(runner, "_run_command", side_effect=native_command), \\
             patch.object(runner.os, "killpg", side_effect=record_signal):
+        raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
+    """)
+RETENTION_CONTROLLER = textwrap.dedent("""\
+    import json, os, sys, time
+    from pathlib import Path
+    from unittest.mock import patch
+    from experiment_compiler import runner, runner_cli
+    directory = Path(sys.argv[1])
+    mode = sys.argv[2]
+    replace = Path.replace
+    def execute(temporary, *args):
+        (directory / "scratch").write_text(str(temporary))
+        (temporary / "stdout.log").write_bytes(b"retained native diagnostic")
+        (temporary / "stderr.log").write_bytes(b"retained native stderr")
+        if mode == "failure":
+            raise runner.PackageError("ordinary execution failure")
+        if mode == "interruption":
+            interruption = KeyboardInterrupt("earlier runner interruption")
+            interruption.add_note("original runner diagnostic")
+            raise interruption
+        return {"returnCode": 0, "timedOut": False, "stdout": b"retained native diagnostic",
+                "stderr": b"retained native stderr", "outputs": {"result.txt": b"fixture"},
+                "provenance": {}, "collectionErrors": []}
+    def pause_receipt(path, target):
+        if path.name == "runner-receipt.json.tmp":
+            value = json.loads(path.read_bytes())
+            selected = (value["status"] == "failed" or (directory / "result.zip").exists())
+            if selected:
+                (directory / "ready").write_text(value["status"])
+                deadline = time.monotonic() + 10
+                while not (directory / "release").exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("native receipt fixture release timed out")
+                    time.sleep(0.01)
+        return replace(path, target)
+    with patch.dict(os.environ, {
+            "EXPERIMENT_RUNNER_SANDBOX": "native test fixture",
+            "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+            "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+    }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
+            patch.object(runner, "_execute_cwl", side_effect=execute), \\
+            patch.object(Path, "replace", new=pause_receipt):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)
 
@@ -159,6 +204,78 @@ assert before == [signal.getsignal(n) for n in (signal.SIGINT, signal.SIGTERM)]
         self.assertEqual(result.returncode, 0, result.stderr.decode())
 
 
+@unittest.skipUnless(hasattr(signal, "pthread_sigmask"), "POSIX signal mask required")
+class ReceiptSignalDeferralTests(unittest.TestCase):
+    def test_first_signal_survives_deferral_restore_and_replay(self):
+        for phase in ("install", "write", "restore", "replay"):
+            with self.subTest(phase=phase):
+                previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+                original_install = signal.signal
+                with self.assertRaisesRegex(KeyboardInterrupt, "SIGTERM"), _operator_cancellation():
+                    handler = signal.getsignal(signal.SIGTERM)
+                    def install(number, restored):
+                        result = original_install(number, restored)
+                        if phase == "install" and number == signal.SIGTERM and restored is not handler:
+                            signal.raise_signal(signal.SIGTERM)
+                        if phase == "restore" and number == signal.SIGTERM and restored is handler:
+                            signal.raise_signal(signal.SIGINT)
+                        return result
+                    def replay(number, frame):
+                        try:
+                            handler(number, frame)
+                        finally:
+                            signal.raise_signal(signal.SIGINT)
+                    if phase == "replay":
+                        original_install(signal.SIGTERM, replay)
+                    with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+                        with _defer_operator_signals():
+                            if phase != "install":
+                                signal.raise_signal(signal.SIGTERM)
+                            if phase in ("install", "write"):
+                                signal.raise_signal(signal.SIGINT)
+                self.assertEqual(signal.pthread_sigmask(signal.SIG_BLOCK, []), previous_mask)
+
+    def test_first_signal_during_restore_runs_after_handlers_are_restored(self):
+        original_install = signal.signal
+        with self.assertRaisesRegex(KeyboardInterrupt, "SIGTERM"), _operator_cancellation():
+            handler = signal.getsignal(signal.SIGTERM)
+            def install(number, restored):
+                result = original_install(number, restored)
+                if number == signal.SIGTERM and restored is handler:
+                    signal.raise_signal(signal.SIGTERM)
+                return result
+            with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+                with _defer_operator_signals():
+                    pass
+
+    def test_evidence_io_failure_remains_bounded_cancellation_diagnostic(self):
+        with self.assertRaisesRegex(KeyboardInterrupt, "SIGTERM") as caught, _operator_cancellation():
+            with _defer_operator_signals():
+                signal.raise_signal(signal.SIGTERM)
+                raise OSError("fixture write failure " + "x" * 10000)
+        self.assertTrue(any("Attempt evidence write failed: OSError" in note for note in caught.exception.__notes__))
+        self.assertLess(sum(map(len, caught.exception.__notes__)), 1200)
+
+    def test_deferral_is_noop_off_main_thread_without_posix_mask_or_handled_signals(self):
+        entered = []
+        def enter():
+            with _defer_operator_signals():
+                entered.append(True)
+        with patch("experiment_compiler.runner.signal.signal") as install:
+            thread = threading.Thread(target=enter)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            with patch("experiment_compiler.runner.signal.getsignal", return_value=signal.SIG_DFL), \
+                    patch("experiment_compiler.runner.signal.pthread_sigmask") as mask:
+                enter()
+                mask.assert_not_called()
+            with patch("experiment_compiler.runner.hasattr", return_value=False):
+                enter()
+            install.assert_not_called()
+        self.assertEqual(entered, [True, True, True])
+
+
 @unittest.skipUnless(os.name == "posix", "runner process-group cancellation requires POSIX")
 class NativeRunnerCancellationTests(unittest.TestCase):
     def test_native_attempt_retains_sigterm_and_mixed_signal_cancellation(self):
@@ -171,6 +288,58 @@ class NativeRunnerCancellationTests(unittest.TestCase):
     def test_first_sigterm_during_timeout_cleanup_remains_cancellation(self):
         with tempfile.TemporaryDirectory() as temporary:
             self._run_cancelled_attempt(Path(temporary), signal.SIGTERM, (), timeout_cleanup=True)
+
+    def test_first_signal_during_receipt_write_preserves_failure_or_publication(self):
+        for mode in ("failure", "publication", "interruption"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                self._run_retention_signal(Path(temporary), mode)
+
+    def _run_retention_signal(self, directory, mode):
+        built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", directory / "plan.zip")
+        argv = ["run", str(directory / "plan.zip"), "--output", str(directory / "result.zip"),
+                "--expected-sha256", built["packageSha256"], "--allow-workflow-execution"]
+        with subprocess.Popen([sys.executable, "-c", RETENTION_CONTROLLER, str(directory), mode, json.dumps(argv)],
+                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as controller:
+            try:
+                self._wait_for(directory / "ready", controller)
+                receipt_path = directory / "result.attempt/runner-receipt.json"
+                self.assertEqual(json.loads(receipt_path.read_bytes())["status"], "started")
+                controller.send_signal(signal.SIGTERM)
+                time.sleep(0.03)
+                controller.send_signal(signal.SIGINT)
+                time.sleep(0.03)
+                (directory / "release").touch()
+                stdout, stderr = controller.communicate(timeout=10)
+                expected = "earlier runner interruption" if mode == "interruption" else "SIGTERM"
+                self.assertEqual(controller.returncode, 130 if mode == "interruption" else 143, stderr.decode())
+                self.assertEqual(stdout, b"")
+                self.assertIn(expected, stderr.decode())
+                self._check_retention_signal(directory, mode, receipt_path)
+            finally:
+                if controller.poll() is None:
+                    controller.kill()
+                    controller.communicate(timeout=5)
+
+    def _check_retention_signal(self, directory, mode, receipt_path):
+        receipt = json.loads(receipt_path.read_bytes())
+        published = mode == "publication"
+        self.assertEqual(receipt["status"], "succeeded" if published else "failed")
+        self.assertIsNotNone(receipt["endedAt"])
+        self.assertIsNotNone(receipt["wallSeconds"])
+        self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"retained native diagnostic")
+        self.assertEqual((directory / "result.attempt/stderr.log").read_bytes(), b"retained native stderr")
+        self.assertFalse(Path((directory / "scratch").read_text()).exists())
+        self.assertEqual((directory / "result.zip").exists(), published)
+        self.assertEqual((directory / "result.source").exists(), published)
+        if published:
+            with zipfile.ZipFile(directory / "result.zip") as archive:
+                member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
+                self.assertEqual(archive.read(member), receipt_path.read_bytes())
+        else:
+            original = "ordinary execution failure" if mode == "failure" else "earlier runner interruption"
+            self.assertTrue(any(original in error for error in receipt["collectionErrors"]))
+            if mode == "interruption":
+                self.assertIn("original runner diagnostic", receipt["collectionErrors"])
 
     def _wait_for(self, path, process):
         deadline = time.monotonic() + 10
