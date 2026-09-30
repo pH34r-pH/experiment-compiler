@@ -1,0 +1,35 @@
+{
+  "contractVersion": 1,
+  "projection": {
+    "project": {
+      "name": "Experiment Compiler",
+      "repository": "https://github.com/pH34r-pH/experiment-compiler"
+    },
+    "schemaVersion": 2,
+    "experiments": [
+      {
+        "id": "stdlib-linear-regression-v1-compiled-experiment",
+        "title": "Self-contained stdlib linear-regression reproduction",
+        "profile": "compiled-experiment-v1",
+        "source": {
+          "commit": "a4bebe3fff748268f037e5fa622b51ad40322a91",
+          "repository": "pH34r-pH/experiment-compiler"
+        },
+        "package": {
+          "sha256": "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544",
+          "size": 14010
+        },
+        "detailUrl": "/experiments/stdlib-linear-regression-v1-compiled-experiment/",
+        "backlinks": []
+      }
+    ]
+  },
+  "compiled_experiment": {
+    "ref": "stdlib-linear-regression-v1-compiled-experiment"
+  },
+  "article": {
+    "title": "Contract fixture article",
+    "url": "https://tyharbin.com/articles/contract-fixture/",
+    "sourceCommit": "cccccccccccccccccccccccccccccccccccccccc"
+  }
+}
