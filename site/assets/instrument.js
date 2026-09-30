@@ -10,8 +10,11 @@
   function setMode(value, persist = false) {
     const mode = value === "dark" ? "dark" : "light";
     root.dataset.mode = mode;
-    document.querySelectorAll("[data-mode-choice]").forEach(button => {
-      button.setAttribute("aria-pressed", String(button.dataset.modeChoice === mode));
+    document.querySelectorAll("[data-theme-toggle]").forEach(button => {
+      const dark = mode === "dark";
+      button.setAttribute("aria-pressed", String(dark));
+      button.setAttribute("aria-label", dark ? "Use light appearance" : "Use dark appearance");
+      button.textContent = dark ? "Light" : "Dark";
     });
     if (persist) {
       try { localStorage.setItem("experiment-mode", mode); } catch {}
@@ -19,8 +22,8 @@
   }
   setMode(preferredMode());
   document.addEventListener("click", event => {
-    const button = event.target.closest?.("[data-mode-choice]");
-    if (button) setMode(button.dataset.modeChoice, true);
+    const button = event.target.closest?.("[data-theme-toggle]");
+    if (button) setMode(root.dataset.mode === "dark" ? "light" : "dark", true);
   });
 
   if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
