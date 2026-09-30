@@ -11,8 +11,18 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .core import (MAX_FILE, PackageError, _execution_action_nodes, _types, bounded_read, compile_package,
-                   json_value, load_recipe, validate_lifecycle_crate)
+from .core import (
+    MAX_FILE,
+    PackageError,
+    _execution_action_nodes,
+    _types,
+    _validate_related_articles,
+    bounded_read,
+    compile_package,
+    json_value,
+    load_recipe,
+    validate_lifecycle_crate,
+)
 
 
 def _member_source(recipe: dict, recipe_path: Path, package_path: str) -> Path:
@@ -199,3 +209,94 @@ def describe_catalog(root: Path) -> dict:
         "schemaVersion": 2,
         "experiments": [describe_recipe(path) for path in discover_recipes(root)],
     }
+
+
+def resolve_article_reference(catalog: dict, reference: dict, *, article: dict | None = None) -> dict:
+    """Resolve a v1 exact article reference against a v2 public projection.
+
+    Optional article assertions require the source-owned backlink to round-trip;
+    sourceCommit is article provenance, never scientific qualification.
+    """
+    if not isinstance(catalog, dict):
+        raise PackageError("Public projection must be an object")
+    if type(catalog.get("schemaVersion")) is not int or catalog["schemaVersion"] != 2:
+        raise PackageError("Unsupported public projection version")
+    if catalog.get("project") != {"name": "Experiment Compiler",
+                                  "repository": "https://github.com/pH34r-pH/experiment-compiler"}:
+        raise PackageError("Public projection authority mismatch")
+    _validate_article_reference(reference)
+    record = _exact_projection_record(catalog, reference["ref"])
+    expected = reference.get("expected", {})
+    actual = _projected_identity(record)
+    if any(actual[key] != value for key, value in expected.items()):
+        raise PackageError("Expected experiment identity mismatch")
+    backlinks = record.get("backlinks")
+    _validate_related_articles(backlinks)
+    if article is not None:
+        _validate_related_articles([article])
+        if not any(item["url"] == article["url"] and
+                   item["sourceCommit"] == article["sourceCommit"] for item in backlinks):
+            raise PackageError("Canonical article relationship missing or mismatched")
+    return record
+
+
+def _validate_article_reference(reference: dict) -> None:
+    if not isinstance(reference, dict) or not {"ref"} <= reference.keys() or reference.keys() - {"ref", "expected"}:
+        raise PackageError("Article reference requires an exact ref")
+    identifier = reference["ref"]
+    if not isinstance(identifier, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", identifier) or "latest" in identifier.split("-"):
+        raise PackageError("Article reference must be immutable and exact")
+    _validate_expected_identity(reference.get("expected", {}))
+
+
+def _validate_expected_identity(expected: dict) -> None:
+    if not isinstance(expected, dict) or expected.keys() - {"sha256", "profile", "source"}:
+        raise PackageError("Malformed expected identity assertions")
+    if "sha256" in expected and (not isinstance(expected["sha256"], str) or
+                                 not re.fullmatch(r"[0-9a-f]{64}", expected["sha256"])):
+        raise PackageError("Expected digest must be SHA-256")
+    if "profile" in expected and expected["profile"] not in ("compiled-experiment-v1", "compiled-experiment-lifecycle-v1"):
+        raise PackageError("Unknown expected profile")
+    if "source" in expected:
+        _validate_expected_source(expected["source"])
+
+
+def _validate_expected_source(source: dict) -> None:
+    if (not isinstance(source, dict) or set(source) != {"repository", "commit"} or
+            not isinstance(source["repository"], str) or
+            not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", source["repository"]) or
+            not isinstance(source["commit"], str) or
+            not re.fullmatch(r"[0-9a-f]{40}", source["commit"])):
+        raise PackageError("Expected source requires repository and exact commit")
+
+
+def _exact_projection_record(catalog: dict, identifier: str) -> dict:
+    records = catalog.get("experiments")
+    if not isinstance(records, list):
+        raise PackageError("Projection experiments must be a list")
+    indexed = {}
+    for record in records:
+        key = record.get("id") if isinstance(record, dict) else None
+        if not isinstance(key, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", key):
+            raise PackageError("Malformed projection identity")
+        if key in indexed:
+            raise PackageError("Duplicate projection identity")
+        indexed[key] = record
+    record = indexed.get(identifier)
+    if record is None:
+        raise PackageError("Unknown exact experiment identity")
+    if record.get("detailUrl") != f"/experiments/{identifier}/":
+        raise PackageError("Experiment detail identity mismatch")
+    return record
+
+
+def _projected_identity(record: dict) -> dict:
+    package = record.get("package")
+    if not isinstance(package, dict):
+        raise PackageError("Missing or invalid package identity")
+    actual = {"sha256": package.get("sha256"), "profile": record.get("profile"),
+              "source": record.get("source")}
+    _validate_expected_identity(actual)
+    if type(package.get("size")) is not int or package["size"] < 1:
+        raise PackageError("Missing or invalid package size")
+    return actual

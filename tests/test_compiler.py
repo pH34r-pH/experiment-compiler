@@ -233,6 +233,72 @@ class CompilerTests(unittest.TestCase):
         self.assertIsNone(describe_recipe(recipe_path)["scientificInterpretation"])
         self.assertEqual(describe_catalog(recipe_path.parent)["experiments"][0]["lifecycle"]["attemptCount"], 0)
 
+    def test_source_owned_comparison_failures_remain_integrity_valid_evidence(self):
+        # Illustrative source reports, not a compiler-defined comparison schema.
+        cases = (
+            ("mismatched-reference", "Completed", "succeeded", "inconclusive",
+             {"selectedSamples": [1, 2], "referenceSamples": [3, 4]}),
+            ("failed-check", "Completed", "succeeded", "negative",
+             {"checkPassed": False, "observedError": 0.4, "maximumError": 0.1}),
+            ("missing-reference", "Completed", "succeeded", "inconclusive",
+             {"reference": None, "omission": "reference result unavailable"}),
+            ("non-comparable-reference", "Completed", "succeeded", "inconclusive",
+             {"endpointUnit": "error/sample", "referenceUnit": "error/batch"}),
+            ("failed-attempt", "Failed", "failed", "inconclusive",
+             {"exitCode": 9, "checkPassed": None}),
+            ("cancelled-attempt", "Failed", "cancelled", "inconclusive",
+             {"terminationReason": "source operator cancelled", "checkPassed": None}),
+        )
+        for name, action_status, receipt_status, decision, evidence in cases:
+            with self.subTest(case=name):
+                recipe_path, recipe, graph = self.lifecycle_fixture(
+                    directory=name, action_status=f"https://schema.org/{action_status}ActionStatus",
+                    process_run=True)
+                summary = f"{decision}: {name}; no overall winner."
+                payloads = {
+                    "evidence/comparison.json": canonical({"decision": decision, "winner": None,
+                        "denominator": "declared selected samples", **evidence}),
+                    "evidence/attempt.json": canonical({"status": receipt_status}),
+                    "evidence/interpretation.md": (summary + "\n").encode(),
+                }
+                for path, content in payloads.items():
+                    target = recipe_path.parent / path
+                    target.parent.mkdir(exist_ok=True)
+                    target.write_bytes(content)
+                    recipe["members"].append({"source": path, "path": path,
+                        "sha256": sha256(content), "size": len(content)})
+                    graph[1]["hasPart"].append({"@id": path})
+                    graph.append({"@id": path, "@type": "File"})
+                interpretation = graph[-1]
+                interpretation.update({"@type": ["File", "CreativeWork"],
+                    "name": "Scientific decision and interpretation", "abstract": summary,
+                    "about": {"@id": "#attempt-1"}})
+                attempt = next(node for node in graph if node["@id"] == "#attempt-1")
+                attempt["result"] = [{"@id": path} for path in payloads]
+                metadata = recipe_path.parent / "ro-crate-metadata.json"
+                metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context",
+                    "https://w3id.org/ro/terms/workflow-run/context"], "@graph": graph}))
+                recipe["members"][3].update(sha256=sha256(metadata.read_bytes()),
+                                            size=metadata.stat().st_size)
+                recipe_path.write_bytes(canonical(recipe))
+                output = self.root / f"{name}.zip"
+                compile_package(recipe_path, output)
+                verified = verify_bytes(output.read_bytes(), recipe=load_recipe(recipe_path))
+                self.assertEqual(verified["scope"], "package-integrity-only")
+                self.assertEqual(verified["scientificReproduction"], "not-run")
+                with zipfile.ZipFile(output) as archive:
+                    for path, content in payloads.items():
+                        self.assertEqual(archive.read(path), content)
+                record = describe_recipe(recipe_path)
+                self.assertEqual(record["scientificInterpretation"], [{
+                    "record": "evidence/interpretation.md", "summary": summary,
+                    "aboutAttempt": "#attempt-1"}])
+                self.assertEqual(record["executionAttempts"], [{"id": "#attempt-1",
+                    "actionStatus": f"https://schema.org/{action_status}ActionStatus",
+                    "result": list(payloads)}])
+                self.assertNotIn("scientificAcceptance", record)
+                self.assertNotIn("winner", record)
+
     def test_lifecycle_catalog_shows_external_prerequisite_only_with_digest_size_and_license(self):
         recipe_path, recipe, graph = self.lifecycle_fixture()
         closure_path = recipe_path.parent / "dependency-closure.json"

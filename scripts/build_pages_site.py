@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import shutil
 import sys
-import html
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,7 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from experiment_compiler.catalog import describe_catalog, discover_recipes
-from experiment_compiler.core import canonical, compile_package
+from experiment_compiler.core import (
+    _validate_related_articles,
+    canonical,
+    compile_package,
+)
 
 
 def main() -> int:
@@ -30,6 +34,9 @@ def main() -> int:
     shutil.copy2(ROOT / "site/index.html", destination / "index.html")
     (destination / "data").mkdir()
     shutil.copy2(ROOT / "site/data/experiments.schema.json", destination / "data/experiments.schema.json")
+
+    shutil.copy2(ROOT / "site/data/article-reference-v1.schema.json",
+                 destination / "data/article-reference-v1.schema.json")
 
     recipes_root = ROOT / "examples"
     catalog = describe_catalog(recipes_root)
@@ -96,7 +103,8 @@ def render_detail(experiment: dict) -> str:
     records = html.escape(json.dumps({key: experiment.get(key) for key in
         ("lifecycle", "executionAttempts", "acceptance", "result", "scientificInterpretation", "environment", "resources", "contents")
         if experiment.get(key) is not None}, indent=2, sort_keys=True))
-    backlinks = experiment.get("backlinks") or []
+    backlinks = experiment.get("backlinks", [])
+    _validate_related_articles(backlinks)
     backlink_html = ("<section><h2>Related research articles</h2><ul>" + "".join(
         f'<li><a class="article-backlink" href="{html.escape(item["url"], quote=True)}">Read {html.escape(item["title"])} →</a></li>'
         for item in backlinks
