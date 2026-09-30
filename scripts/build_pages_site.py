@@ -63,6 +63,15 @@ def main() -> int:
     return 0
 
 
+def render_protocol(protocol: object) -> str:
+    """Show exact authoritative source text without interpreting its headings."""
+    if not isinstance(protocol, dict) or not isinstance(protocol.get("text"), str):
+        return ""
+    return ("<section><details><summary>Full authoritative protocol</summary>"
+            f"<p>Package member: {html.escape(protocol['record'])}</p>"
+            f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
+
+
 def render_detail(experiment: dict) -> str:
     """Render a static package detail route from Compiler-derived metadata."""
     title = html.escape(experiment["title"])
@@ -79,12 +88,7 @@ def render_detail(experiment: dict) -> str:
     summary = html.escape(experiment.get("hypothesis") or experiment.get("question") or "")
     question = html.escape(experiment.get("question") or "Not declared.")
     method = html.escape(experiment.get("method") or "Not declared.")
-    protocol = experiment.get("protocol")
-    protocol_html = ""
-    if isinstance(protocol, dict) and isinstance(protocol.get("text"), str):
-        protocol_html = ("<section><details><summary>Full authoritative protocol</summary>"
-                         f"<p>Package member: {html.escape(protocol['record'])}</p>"
-                         f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
+    protocol_html = render_protocol(experiment.get("protocol"))
     profile = html.escape(experiment.get("profile", ""))
     package_identity = (f"SHA-256 {html.escape(package_hash)} · {package.get('size', 0):,} bytes"
                         if package_hash else "Package identity not declared")
