@@ -11,7 +11,7 @@ from unittest.mock import patch
 from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree,
-                                        _require_bounded_tmpfs, run_package)
+                                        _require_bounded_tmpfs, _terminate_process_group, run_package)
 from experiment_compiler.runner import sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,7 +56,7 @@ class RunnerBoundaryTests(unittest.TestCase):
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
         scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
                      "oversized-output", "aggregate", "shared-budget", "missing", "compile",
-                     "copy", "existing-output", "existing-source", "launch", "interrupted", "terminal-persist")
+                     "copy", "existing-output", "existing-source", "launch", "interrupted", "cancelled", "cancelled-cleanup-timeout", "cancelled-cleanup-interrupted", "terminal-persist")
         for scenario in scenarios:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
@@ -69,6 +69,12 @@ class RunnerBoundaryTests(unittest.TestCase):
 
             def wait(self, timeout=None):
                 self.calls += 1
+                if scenario.startswith("cancelled") and self.calls == 1:
+                    raise KeyboardInterrupt()
+                if scenario == "cancelled-cleanup-timeout" and self.calls > 1:
+                    raise subprocess.TimeoutExpired("fixture cleanup", timeout)
+                if scenario == "cancelled-cleanup-interrupted" and self.calls == 2:
+                    raise KeyboardInterrupt()
                 if scenario == "timeout" and self.calls == 1:
                     raise subprocess.TimeoutExpired("fixture", timeout)
                 return self.returncode
@@ -149,11 +155,12 @@ class RunnerBoundaryTests(unittest.TestCase):
         }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
-                patch("experiment_compiler.runner.os.killpg"), \
+                patch("experiment_compiler.runner.os.killpg") as kill_group, \
                 patch.object(Path, "replace", new=replace_receipt), \
                 patch("experiment_compiler.runner.shutil.copytree", side_effect=copy_source), \
                 patch("experiment_compiler.runner.compile_package", side_effect=PackageError("fixture packaging failure") if scenario == "compile" else compile_package):
-            errors = {"compile": PackageError, "interrupted": KeyboardInterrupt,
+            errors = {"compile": PackageError, "interrupted": KeyboardInterrupt, "cancelled": KeyboardInterrupt, "cancelled-cleanup-timeout": KeyboardInterrupt,
+                      "cancelled-cleanup-interrupted": KeyboardInterrupt,
                       "copy": OSError, "existing-output": OSError, "existing-source": OSError,
                       "launch": OSError, "terminal-persist": OSError}
             if scenario in errors:
@@ -161,6 +168,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                     run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
             else:
                 run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
+        if scenario == "timeout" or scenario.startswith("cancelled"):
+            self.assertEqual([call.args for call in kill_group.call_args_list], [(98765, 15), (98765, 9)])
         receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
         self.assertEqual(receipt["planPackageSha256"], built["packageSha256"])
         self.assertTrue(receipt["attemptId"])
@@ -168,9 +177,10 @@ class RunnerBoundaryTests(unittest.TestCase):
         self._check_attempt_outcome(scenario, directory, receipt, terminal_failure)
 
     def _check_attempt_outcome(self, scenario, directory, receipt, terminal_failure):
-        statuses = {"interrupted": "started", "terminal-persist": "started",
+        statuses = {"terminal-persist": "started",
                     "success": "succeeded", "timeout": "timed-out"}
         self.assertEqual(receipt["status"], statuses.get(scenario, "failed"))
+        self._check_cancellation_evidence(scenario, directory, receipt)
         rejected = {"symlink", "oversized-output", "aggregate", "missing"}
         errors = rejected | {"compile", "copy", "existing-output", "existing-source",
                              "launch", "oversized-log", "shared-budget"}
@@ -188,6 +198,20 @@ class RunnerBoundaryTests(unittest.TestCase):
         if scenario == "compile":
             self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
         self._check_attempt_publication(scenario, directory, receipt, terminal_failure)
+
+    def _check_cancellation_evidence(self, scenario, directory, receipt):
+        if scenario == "interrupted" or scenario.startswith("cancelled"):
+            self.assertTrue(any("Operator cancellation requested" in error
+                                for error in receipt["collectionErrors"]))
+            self.assertIsNotNone(receipt["endedAt"])
+            self.assertFalse((directory / "result.zip").exists())
+        if scenario.startswith("cancelled"):
+            self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
+        if scenario in ("cancelled-cleanup-timeout", "cancelled-cleanup-interrupted"):
+            diagnostic = "TimeoutExpired" if scenario.endswith("timeout") else "KeyboardInterrupt"
+            self.assertTrue(any("Process cleanup wait" in error and diagnostic in error
+                                for error in receipt["collectionErrors"]))
+            self.assertFalse(any("could not start" in error for error in receipt["collectionErrors"]))
 
     def _check_attempt_publication(self, scenario, directory, receipt, terminal_failure):
         output = directory / "result.zip"
@@ -210,6 +234,16 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(receipt["collectionErrors"], [])
             else:
                 self.assertEqual(receipt, published)
+
+    def test_process_cleanup_escalates_and_bounds_each_wait(self):
+        from unittest.mock import Mock
+        process = Mock(pid=8123)
+        process.wait.side_effect = [subprocess.TimeoutExpired("fixture", 5), -9]
+        with patch("experiment_compiler.runner.os.killpg") as kill_group:
+            errors = _terminate_process_group(process)
+        self.assertTrue(any("TimeoutExpired" in error for error in errors))
+        self.assertEqual([call.args for call in kill_group.call_args_list], [(8123, 15), (8123, 9)])
+        self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 5}, {"timeout": 5}])
 
     def test_runner_requires_explicit_execution_opt_in_before_opening_package(self):
         with self.assertRaisesRegex(PackageError, "explicit opt-in"):

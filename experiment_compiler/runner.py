@@ -332,6 +332,24 @@ def _run_command(temporary: Path, work: Path, attempt_out: Path, provenance: Pat
     ]
 
 
+def _terminate_process_group(process: Any) -> list[str]:
+    """Attempt bounded orchestrator cleanup without losing cancellation evidence."""
+    errors: list[str] = []
+    for signal in (15, 9):
+        try:
+            os.killpg(process.pid, signal)
+        except ProcessLookupError:
+            pass
+        except (OSError, KeyboardInterrupt) as exc:
+            errors.append(f"Process group signal {signal} failed: {type(exc).__name__}: {str(exc)[:1024]}")
+        try:
+            process.wait(timeout=5)
+        except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+            errors.append(f"Process cleanup wait after signal {signal} failed: {type(exc).__name__}: {str(exc)[:1024]}")
+    # A failed wait is evidence of incomplete cleanup, not proof of termination.
+    return errors
+
+
 def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
                  limits: dict, tmpfs_root: str, plan_size: int = 0) -> dict:
     _require_bounded_tmpfs(temporary, Path(tmpfs_root), limits["tmpdirMiB"])
@@ -370,23 +388,20 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
                 stdout=stdout_stream, stderr=stderr_stream, start_new_session=True,
             )
             timed_out = False
+            cleanup_errors: list[str] = []
             try:
                 return_code = process.wait(timeout=runner["maxWallSeconds"])
             except subprocess.TimeoutExpired:
                 timed_out = True
-                try:
-                    os.killpg(process.pid, 15)
-                    process.wait(timeout=5)
-                except (ProcessLookupError, subprocess.TimeoutExpired):
-                    try:
-                        os.killpg(process.pid, 9)
-                    except ProcessLookupError:
-                        pass
-                    process.wait()
+                cleanup_errors = _terminate_process_group(process)
                 return_code = process.returncode if process.returncode else 124
+            except KeyboardInterrupt as interruption:
+                for error in _terminate_process_group(process):
+                    interruption.add_note(error)
+                raise
     except subprocess.SubprocessError as exc:
         raise PackageError(f"CWL runner could not start: {exc}") from exc
-    collection_errors: list[str] = []
+    collection_errors: list[str] = cleanup_errors
     # Recipe source members have a 48 MiB aggregate budget. Reserve bounded
     # logs (8 MiB) and controller metadata (1 MiB), plus the archived plan.
     budget = max(0, MAX_TOTAL - MAX_FILE - sum(map(len, payload.values())) -
@@ -643,12 +658,15 @@ def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
 
 
 def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: dict,
-                           started: float, exc: Exception) -> None:
+                           started: float, exc: BaseException) -> None:
     receipt.update(status="failed", endedAt=datetime.now(timezone.utc).isoformat(),
                    wallSeconds=time.monotonic() - started)
     receipt["collectionErrors"] = list(receipt["collectionErrors"]) + [
         f"Attempt failed: {type(exc).__name__}: {str(exc)[:4096]}"
     ]
+    if isinstance(exc, KeyboardInterrupt):
+        receipt["collectionErrors"].append("Operator cancellation requested; scientific completion not established")
+        receipt["collectionErrors"].extend(note[:4096] for note in getattr(exc, "__notes__", []))
     # Read only bounded controller logs if execution/collection raised.
     for label in ("stdout", "stderr"):
         path = temporary / f"{label}.log"
@@ -705,7 +723,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                 temporary, output, source_directory, augmented, manifest, expected_sha256,
                 run_id, experiment_id, title, execution,
             )
-        except Exception as exc:
+        except (Exception, KeyboardInterrupt) as exc:
             _retain_failed_attempt(attempt_directory, temporary, receipt, started, exc)
             raise
         # Publication succeeded. A controller receipt I/O failure must not
