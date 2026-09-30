@@ -221,3 +221,10 @@ body.route-leaving .route-flash{animation:route-scan .26s cubic-bezier(.16,1,.3,
   body,.topbar,.experiment,.metric,.details>div,.details>details,.standards a,.detail-page details{background:Canvas;color:CanvasText}
   .mode-toggle button[aria-pressed=true]{background:Highlight;color:HighlightText}
 }
+
+/* Portfolio 2071 token alignment */
+:root{--bg:#f5faff;--panel:#fff;--ink:#04182c;--muted:#49627d;--line:#9bc7f5;--accent:#0068ff;--glow:rgba(0,104,255,.16)}
+html[data-mode=dark]{--bg:#00070e;--panel:#001523;--ink:#e8f6ff;--muted:#8ca9c3;--line:#124a74;--accent:#2d8cff;--glow:rgba(45,140,255,.18)}
+.theme-toggle{min-height:44px;padding:0 9px;border:0;background:transparent;color:var(--ink);font:750 10px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+.mode-toggle{display:none}
+@media(max-width:760px){.theme-toggle{padding-inline:6px;font-size:9px}}
