@@ -18,6 +18,7 @@ FORBIDDEN_NAMES = {".DS_Store", "Thumbs.db", ".jupyterlite.doit.db"}
 FORBIDDEN_SUFFIXES = {".bak", ".log", ".pyc", ".pyo", ".tmp"}
 BAD_LIVING_STEMS = {"draft", "new", "notes", "tmp", "temp", "untitled"}
 DESCRIPTIVE_SLUG = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+SEQUENCED_NAME = re.compile(r"^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$")
 CONVENTIONAL_NAME = re.compile(r"^(?:adr|spec)-?\d+$", re.IGNORECASE)
 
 
@@ -57,23 +58,17 @@ def _check_doc_name(path: Path, new_paths: set[str]) -> list[str]:
     stem = path.stem.lower()
     if stem in BAD_LIVING_STEMS or re.fullmatch(r"(?:issue-)?\d+", stem):
         return [f"new living document needs a descriptive name: {path}"]
-    if not DESCRIPTIVE_SLUG.fullmatch(stem) and not CONVENTIONAL_NAME.fullmatch(path.stem):
+    if (not DESCRIPTIVE_SLUG.fullmatch(stem) and
+            not SEQUENCED_NAME.fullmatch(stem) and
+            not CONVENTIONAL_NAME.fullmatch(path.stem)):
         return [f"new living document needs a descriptive name: {path}"]
     return []
-
-
-def _is_approved_generated(path: Path) -> bool:
-    if any(part in SUSPICIOUS_PARTS for part in path.parts):
-        return False
-    if path.suffix.lower() not in {".csv", ".json", ".sha256", ".svg", ".webp", ".zip"}:
-        return False
-    return path.parts[:1] == ("examples",) or path.parts[:2] == ("site", "data")
 
 
 def _check_artifact(path: Path) -> list[str]:
     if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES:
         return [f"new or changed path is an unapproved temporary/build artifact: {path}"]
-    if any(part in SUSPICIOUS_PARTS for part in path.parts) and not _is_approved_generated(path):
+    if any(part in SUSPICIOUS_PARTS for part in path.parts):
         return [f"new or changed path is an unapproved temporary/build artifact: {path}"]
     return []
 
@@ -110,13 +105,20 @@ def changed_files(root: Path, since: str) -> tuple[list[str], set[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--changed-since", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--changed-since")
+    source.add_argument("--paths", nargs="+")
     parser.add_argument("--list-living-docs", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    paths, new_paths = changed_files(root, args.changed_since)
+    if args.paths is not None:
+        paths, new_paths = args.paths, set(args.paths)
+    else:
+        paths, new_paths = changed_files(root, args.changed_since)
     if args.list_living_docs:
-        print("\n".join(path for path in paths if is_living_doc(Path(path))))
+        selected = [path for path in paths if is_living_doc(Path(path))]
+        if selected:
+            print("\n".join(selected))
         return 0
     errors = check_paths(root, paths, new_paths)
     if errors:

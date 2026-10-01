@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   audit:
-    name: Native + Lizard + jscpd
+    name: Native + Lizard + jscpd + docs
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -25,6 +25,66 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+
+      - name: Resolve documentation comparison base
+        id: docs_base
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" == "0000000000000000000000000000000000000000" ]]; then base="HEAD^"; fi
+            echo "sha=$base" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run changed-file documentation and artifact hygiene
+        run: python scripts/docs_hygiene.py --changed-since '${{ steps.docs_base.outputs.sha }}'
+      - name: Run documentation hygiene regression tests
+        run: python scripts/test_docs_hygiene.py
+      - name: Select changed living Markdown
+        id: docs_files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/docs_hygiene.py --changed-since '${{ steps.docs_base.outputs.sha }}' --list-living-docs > "$RUNNER_TEMP/changed-living-docs.txt"
+          if [[ -s "$RUNNER_TEMP/changed-living-docs.txt" ]]; then
+            echo 'any=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'any=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Markdown style (pinned markdownlint-cli2)
+        if: steps.docs_files.outputs.any == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t docs < "$RUNNER_TEMP/changed-living-docs.txt"
+          npx --yes markdownlint-cli2@0.18.1 --config .markdownlint-cli2.yaml "${docs[@]}"
+      - name: Install pinned lychee
+        if: steps.docs_files.outputs.any == 'true'
+        uses: lycheeverse/lychee-action@v2.4.1
+        with:
+          lycheeVersion: v0.20.1
+          args: --version
+          failIfEmpty: false
+      - name: Prove lychee rejects a broken local link
+        if: steps.docs_files.outputs.any == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/experiment-compiler-broken-link.md"
+          printf '%s\n' '[broken](missing-local-target.md)' > "$fixture"
+          if lychee --offline --no-progress --include-fragments --root-dir "$RUNNER_TEMP" "$fixture"; then
+            echo 'lychee unexpectedly accepted a broken local link' >&2
+            exit 1
+          fi
+      - name: Check actual relative links in changed living Markdown
+        if: steps.docs_files.outputs.any == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t docs < "$RUNNER_TEMP/changed-living-docs.txt"
+          lychee --offline --no-progress --include-fragments --root-dir "$GITHUB_WORKSPACE" "${docs[@]}"
 
       - name: Install lightweight audit tools
         run: python -m pip install --disable-pip-version-check "ruff==0.16.9" "lizard==1.24.0"

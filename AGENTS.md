@@ -61,5 +61,5 @@ Run from the repository root. Use the narrowest command covering the changed bou
 - Historical POC contract: `python -m experiment_compiler compile examples/issue-164/experiment.json --output /tmp/experiment-compiler-issue-164.zip` followed by `python -m experiment_compiler verify /tmp/experiment-compiler-issue-164.zip --recipe examples/issue-164/experiment.json`.
 - Current lifecycle profile: run `python scripts/validate_current_ro_profiles.py` on a generated `result.source` crate as in [`.github/workflows/lifecycle.yml`](.github/workflows/lifecycle.yml); the frozen plan fixture alone is not a Process Run Crate.
 - Derived site: `python scripts/build_pages_site.py --output /tmp/experiment-compiler-site`.
-- Documentation/artifact hygiene: `python scripts/test_docs_hygiene.py`; `.github/workflows/documentation-hygiene.yml` is the single changed-Markdown/artifact integration.
-- CI source of truth: `.github/workflows/lifecycle.yml` for package behavior and `.github/workflows/documentation-hygiene.yml` for changed living Markdown; do not create another guard.
+- Documentation/artifact hygiene: `python scripts/test_docs_hygiene.py`; the existing `.github/workflows/structural-quality-audit.yml` is the single changed-Markdown/artifact integration.
+- CI source of truth: `.github/workflows/lifecycle.yml` for package behavior and `.github/workflows/structural-quality-audit.yml` for structural/docs checks; do not create another guard.

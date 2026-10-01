@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,19 @@ from docs_hygiene import changed_files, check_paths
 
 
 class DocumentationHygieneTests(unittest.TestCase):
+    def test_cli_code_only_paths_emit_no_markdown_and_still_run_guard(self):
+        script = Path(__file__).with_name("docs_hygiene.py")
+        selected = subprocess.run(
+            [sys.executable, str(script), "--paths", "src/module.py", "--list-living-docs"],
+            check=True, text=True, stdout=subprocess.PIPE,
+        )
+        self.assertEqual("", selected.stdout)
+        guarded = subprocess.run(
+            [sys.executable, str(script), "--paths", "src/module.py"],
+            check=True, text=True, stdout=subprocess.PIPE,
+        )
+        self.assertIn("1 changed path(s)", guarded.stdout)
+
     def test_cache_is_rejected_under_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
