@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree,
+from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
                                         _require_bounded_tmpfs, _terminate_process_group, run_package)
 from experiment_compiler.runner import sha256_bytes
 
@@ -427,6 +427,22 @@ class: CommandLineTool
                                     allow_workflow_execution=True)
                     popen.assert_not_called()
 
+    def assert_engine_client_environment(self, environment, command):
+        python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
+        self.assertIn(python_lib, environment["LD_LIBRARY_PATH"].split(":"))
+        self.assertEqual(environment["XDG_DATA_HOME"], "/tmp/podman-data")
+        self.assertEqual(environment["XDG_RUNTIME_DIR"], "/tmp/podman-runtime")
+        self.assertEqual(environment["XDG_CONFIG_HOME"], "/tmp/podman-config")
+        self.assertEqual(environment["PATH"], "/usr/bin:/bin")
+        self.assertEqual(Path(environment["HOME"]).name, "runner-home")
+        self.assertNotEqual(environment["HOME"], "/private/host-home")
+        self.assertEqual(Path(environment["HOME"]).parent, Path(environment["TMPDIR"]))
+        for excluded in ("GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "AWS_SECRET_ACCESS_KEY",
+                         "CONTAINERS_CONF", "CONTAINER_HOST", "DOCKER_HOST", "PODMAN_CONNECTIONS_CONF"):
+            self.assertNotIn(excluded, environment)
+        self.assertNotIn("--preserve-entire-environment", command)
+        self.assertFalse(any(arg.startswith("--preserve-environment") for arg in command))
+
     def test_podman_mode_selects_podman_in_the_pinned_cwltool_runner(self):
         class CompletedProcess:
             pid = 102
@@ -437,9 +453,7 @@ class: CommandLineTool
 
         def fake_popen(command, **kwargs):
             self.assertIn("--podman", command)
-            python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
-            self.assertIn(python_lib, kwargs["env"]["LD_LIBRARY_PATH"].split(":"))
-            self.assertEqual(kwargs["env"]["XDG_DATA_HOME"], "/tmp/podman-data")
+            self.assert_engine_client_environment(kwargs["env"], command)
             self.assertIn("--disable-pull", command)
             self.assertNotIn("--no-container", command)
             outdir = Path(command[command.index("--outdir") + 1])
@@ -477,6 +491,17 @@ class: CommandLineTool
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                     "TMPDIR": str(directory),
                     "XDG_DATA_HOME": "/tmp/podman-data",
+                    "XDG_RUNTIME_DIR": "/tmp/podman-runtime",
+                    "XDG_CONFIG_HOME": "/tmp/podman-config",
+                    "HOME": "/private/host-home",
+                    "PATH": "/private/host-bin",
+                    "GITHUB_TOKEN": "SECRET-CANARY",
+                    "ACTIONS_RUNTIME_TOKEN": "SECRET-CANARY",
+                    "AWS_SECRET_ACCESS_KEY": "SECRET-CANARY",
+                    "CONTAINERS_CONF": "/private/host-config",
+                    "CONTAINER_HOST": "ssh://private/host",
+                    "DOCKER_HOST": "tcp://private/host",
+                    "PODMAN_CONNECTIONS_CONF": "/private/host-connections",
             }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                     patch("experiment_compiler.runner.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
@@ -490,6 +515,24 @@ class: CommandLineTool
             verify_bytes(result.read_bytes(), recipe=retained_recipe)
             verified = verify_bytes(result.read_bytes())
             self.assertEqual(verified["profile"], "compiled-experiment-lifecycle-v1")
+
+    def test_missing_or_empty_xdg_context_is_not_synthesized(self):
+        names = ("XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME")
+        for environment in ({}, dict.fromkeys(names, "")):
+            with self.subTest(environment=environment), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                with patch.dict(os.environ, environment, clear=True), \
+                        patch("experiment_compiler.runner._require_bounded_tmpfs"), \
+                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                    popen.return_value.wait.return_value = 0
+                    _execute_cwl(directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
+                                 {"tmpdirMiB": 64}, temporary)
+                client_environment = popen.call_args.kwargs["env"]
+                for name in names:
+                    self.assertNotIn(name, client_environment)
+                self.assertEqual(client_environment["HOME"], str(directory / "runner-home"))
+                self.assertEqual(client_environment["PATH"], "/usr/bin:/bin")
+                self.assertEqual(client_environment["TMPDIR"], temporary)
 
     def test_execution_collection_rejection_is_recorded_without_admitting_output(self):
         with tempfile.TemporaryDirectory() as temporary:
