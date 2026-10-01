@@ -81,6 +81,7 @@
       const range = Math.max(1, document.documentElement.scrollHeight - innerHeight);
       const progress = Math.min(1, Math.max(0, scrollY / range));
       root.style.setProperty("--gradient-y", `${-10 + progress * 72}%`);
+      root.style.setProperty("--parallax-y", `${(-3 + progress * 6).toFixed(2)}px`);
     };
     addEventListener("scroll", () => {
       if (!ticking) {

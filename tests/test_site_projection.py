@@ -224,6 +224,13 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn('target.origin !== location.origin', runtime)
         self.assertIn("Cross-origin pages cannot share", runtime)
 
+        catalog_runtime = (ROOT / "site/assets/site.js").read_text()
+        self.assertIn('"not declared"', catalog_runtime)
+        self.assertIn('className = "catalog-evidence"', catalog_runtime)
+        self.assertIn('className = "protocol-panel"', catalog_runtime)
+        self.assertIn("--parallax-y", css)
+        self.assertIn(".catalog .experiment:nth-child(3n + 2)", css)
+
 
 if __name__ == "__main__":
     unittest.main()
