@@ -38,7 +38,6 @@ Merging a reviewed public package is the publication event; process status alone
 
 See the lifecycle section in [docs/build-recipe.md](https://github.com/pH34r-pH/experiment-compiler/blob/main/docs/build-recipe.md).
 
-
 ## Operator interruption and physical boundaries
 
 A KeyboardInterrupt during the launched CWL process wait requests operator
