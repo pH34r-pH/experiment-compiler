@@ -14,6 +14,18 @@ Process status records whether execution completed or failed. It is not a scient
 
 The current adapter is intentionally narrow. Unsupported workflow/reference shapes fail admission rather than expanding the sandbox implicitly.
 
+The CWL orchestrator receives a fixed client environment with an attempt-owned
+`HOME`, fixed `PATH` and attempt temporary directory. It preserves only nonempty
+caller `XDG_RUNTIME_DIR`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` values so Podman
+uses the runtime/configuration/cache context selected by the trusted caller.
+Existing interpreter library handling also retains nonempty `LD_LIBRARY_PATH`.
+Credentials and remote-engine selectors remain excluded.
+These variables configure the host engine client; no CWL environment-preservation
+flag forwards them into task containers. The synthetic `HOME` remains: when an
+XDG value is absent, engine defaults can differ from the caller's home-based defaults.
+The adapter does not infer or synthesize those directories. Mocked handoff tests
+establish this allowlist, not physical container or workflow qualification.
+
 ## Result artifact
 
 Each run produces a separate immutable result package and source closure containing the exact reviewed members needed to rebuild/verify the package. Failed processes still produce bounded failure evidence.
@@ -25,7 +37,6 @@ A revision creates a new prospective plan linked to a selected prior attempt. Fi
 Merging a reviewed public package is the publication event; process status alone is not.
 
 See the lifecycle section in [docs/build-recipe.md](https://github.com/pH34r-pH/experiment-compiler/blob/main/docs/build-recipe.md).
-
 
 ## Operator interruption and physical boundaries
 
