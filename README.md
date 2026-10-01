@@ -110,6 +110,8 @@ The Pages build writes `/data/experiments.json` from the discovered authoritativ
 - `site/` — derived project/catalog presentation.
 - `scripts/` — fixture and standards validation helpers.
 
+Scoped maintainer maps and focused validation commands live in [`AGENTS.md`](AGENTS.md) and the directory-level maps linked there.
+
 ## Contributing, security, citation
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for sensitive reports, and cite research use with [CITATION.cff](CITATION.cff).
