@@ -3,20 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f4f9fd">
 <title>Experiment Compiler — portable reproducible experiments</title>
 <meta name="description" content="Compile reviewed research into portable objects another person or agent can reproduce independently.">
+<link rel="preload" href="assets/fonts/long-measure/NimbusSansNarrow-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/site.css">
+<script src="assets/instrument.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="topbar">
   <a class="brand" href="./">TJHG <span>/ experiments</span></a>
   <nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav>
-  <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">Dark</button>
+  <details class="theme-panel">
+    <summary>Theme <span data-theme-label>Auto</span></summary>
+    <div class="theme-options" role="group" aria-label="Theme">
+      <button type="button" data-theme-choice="auto" aria-pressed="false">Auto</button>
+      <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+    </div>
+  </details>
 </header>
-<main>
+<main id="main-content" tabindex="-1">
 <section class="hero">
+  <div class="register"><span>TYLER J.H.G.</span><span>EXPERIMENTS / PROVENANCE / REPRODUCTION</span><span class="signal">PUBLIC NODE</span></div>
   <p class="eyebrow">PORTABLE RESEARCH OBJECTS</p>
-  <h1>Compile an experiment.<br><span>Hand it to an agent.</span></h1>
+  <h1><span class="title-line">Compile an</span><span class="title-line title-accent">experiment.</span><span class="title-line">Hand it to an agent.</span></h1>
   <p class="lede">Experiment Compiler packages a declared research claim, protocol, environment, data, implementation references, evidence, and provenance into a deterministic object that another person can inspect and reproduce independently. Each package page identifies the exact ZIP and source revision.</p>
   <div class="terminal"><code>experiment-compiler compile experiment.json</code><span>→ Compiled Experiment.zip</span></div>
 </section>
@@ -37,7 +49,6 @@
 </section>
 </main>
 <footer><span>Apache-2.0 · Tyler J.H.G.</span><a href="https://github.com/pH34r-pH/experiment-compiler">Source on GitHub ↗</a></footer>
-<script src="assets/site.js"></script>
-<script src="assets/instrument.js"></script>
+<script src="assets/site.js" defer></script>
 </body>
 </html>

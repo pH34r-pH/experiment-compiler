@@ -201,19 +201,35 @@ class SiteProjectionTest(unittest.TestCase):
         with self.assertRaises(PackageError):
             resolve_article_reference(missing, fixture["compiled_experiment"])
 
-    def test_compiler_style_uses_the_shared_publication_tokens_and_controls(self):
+    def test_compiler_style_uses_the_2071_blue_glass_contract_and_controls(self):
         css = (ROOT / "site/assets/site.css").read_text()
-        for token in ("--bg: #e8e3d8", "--panel: #f2eee5", "--ink: #17191a",
-                      "--muted: #62615c", "--line: #aaa497", "--accent: #765466"):
+        for token in ("--bg: #f4f9fd", "--ink: #071724", "--muted: #425768",
+                      "--line: #9bb2c3", "--accent: #006fc7", "--bg: #00070d",
+                      "--accent: #29a7ff", "--glass-border:", "--gradient-y:"):
             self.assertIn(token, css)
         self.assertIn("height: 58px", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("min-height: 48px", css)
+        self.assertIn("backdrop-filter: blur(18px)", css)
+        self.assertIn("@font-face", css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
         self.assertIn("@media (forced-colors: active)", css)
+        self.assertNotIn("repeating-linear-gradient", css)
         self.assertIn(".details > div, .details > details { min-width: 0;", css)
         self.assertIn(".details pre { min-width: 0; max-width: 100%;", css)
         self.assertIn(".detail-page summary, .details summary { min-height: 48px;", css)
+
+        runtime = (ROOT / "site/assets/instrument.js").read_text()
+        self.assertIn('localStorage.getItem("experiment-theme")', runtime)
+        self.assertIn('target.origin !== location.origin', runtime)
+        self.assertIn("Cross-origin pages cannot share", runtime)
+
+        catalog_runtime = (ROOT / "site/assets/site.js").read_text()
+        self.assertIn('"not declared"', catalog_runtime)
+        self.assertIn('className = "catalog-evidence"', catalog_runtime)
+        self.assertIn('className = "protocol-panel"', catalog_runtime)
+        self.assertIn("--parallax-y", css)
+        self.assertIn(".catalog .experiment:nth-child(3n + 2)", css)
 
 
 if __name__ == "__main__":

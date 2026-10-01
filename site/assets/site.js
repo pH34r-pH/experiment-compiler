@@ -53,14 +53,20 @@ function section(title, value) {
       title.append(detailLink);
       copy.append(title, text("p", exp.hypothesis || exp.question || "", "hypothesis"));
 
+      article.style.setProperty("--card-depth", String((data.experiments || []).indexOf(exp) % 3));
       const meta = document.createElement("div");
       meta.className = "metrics";
       const env = exp.environment || {};
+      const network = env.networkRequired === true
+        ? "required"
+        : env.networkRequired === false
+          ? "none"
+          : "not declared";
       meta.append(
         metric("Package", bytes(exp.package && exp.package.size)),
         metric("Protocol", exp.lifecycle && exp.lifecycle.creativeWorkStatus || "reference package"),
         metric("Attempts", exp.lifecycle ? fmt.format(exp.lifecycle.attemptCount) : "reference evidence"),
-        metric("Network", env.networkRequired === false ? "none" : String(env.networkRequired)),
+        metric("Network", network),
         metric("VRAM", bytes(exp.resources && exp.resources.accelerator && exp.resources.accelerator.peakVramBytes)),
         metric("Planning RAM", bytes(exp.resources && exp.resources.ram && exp.resources.ram.planningRamBytes))
       );
@@ -70,6 +76,11 @@ function section(title, value) {
       const result = exp.result || {};
       const details = document.createElement("div");
       details.className = "details";
+      const disclosure = document.createElement("details");
+      disclosure.className = "catalog-evidence";
+      disclosure.append(text("summary", "Inspect evidence, environment, and protocol"));
+      const detailGrid = document.createElement("div");
+      detailGrid.className = "detail-grid";
       const interpretations = (exp.scientificInterpretation || []).map(item =>
         item.summary + " (source record: " + item.record + "; attempt: " + item.aboutAttempt + ")"
       ).join("; ");
@@ -86,7 +97,7 @@ function section(title, value) {
       const unresolvedSummary = (exp.unavailablePrerequisites || []).map(item =>
         typeof item === "string" ? item : (item.item || item.id || JSON.stringify(item))
       ).join(", ");
-      details.append(
+      detailGrid.append(
         section("Scientific question", exp.question),
         section("Method", exp.method),
         section("Resource basis", resourceSummary),
@@ -100,11 +111,14 @@ function section(title, value) {
       );
 
       if (exp.protocol && typeof exp.protocol.text === "string") {
-        const protocol = document.createElement("details");
-        protocol.append(text("summary", "Full authoritative protocol"),
+        const protocol = document.createElement("div");
+        protocol.className = "protocol-panel";
+        protocol.append(text("h4", "Full authoritative protocol"),
           text("p", "Package member: " + exp.protocol.record), text("pre", exp.protocol.text));
-        details.append(protocol);
+        detailGrid.append(protocol);
       }
+      disclosure.append(detailGrid);
+      details.append(disclosure);
 
       const actions = document.createElement("div");
       actions.className = "actions";

@@ -9,6 +9,8 @@ This directory is the hand-authored static presentation surface. It is not the e
 
 Route presentation changes here. Route identity, protocol, lifecycle, and evidence changes to [`experiment_compiler/catalog.py`](../experiment_compiler/catalog.py), the owning example, and its tests. Keep public pages explicit that package integrity and process success do not establish scientific acceptance.
 
+The current visual contract is [`docs/site-visual-contract.md`](../docs/site-visual-contract.md). It aligns the Compiler with the Portfolio 2071 blue-white/blue-black interface language while keeping the sites' runtimes, preferences, data, and publication paths independent. Do not add Portfolio research visualizations or executable-reader behavior here.
+
 Validate a site change with:
 
 ```sh
