@@ -134,6 +134,66 @@ def _check_desktop_filter(page, experiments: list[dict]) -> None:
     page.get_by_role("button", name="Sort within each family by Experiment record").click()
     assert _record_ids(group) == ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
                                   "stdlib-linear-regression-v1-compiled-experiment"]
+    _check_search_normalization(page, filter_box, group)
+
+
+def _check_search_normalization(page, filter_box, group) -> None:
+    displayed_name = "Straße Café ＡＢＣ K"
+    row = group.locator("tr.catalog-record").first
+    group.locator(".family-label").evaluate("(element, name) => element.textContent = name", displayed_name)
+    row.evaluate("element => element.dataset.search += ' straße café abc k'")
+    filter_box.fill(displayed_name)
+    assert row.is_visible()
+    filter_box.fill("Cafe\u0301 ＡＢＣ K")
+    assert row.is_visible()
+    filter_box.fill("")
+
+
+def _check_mse_sort(page) -> None:
+    family_id = "https://experiments.tyharbin.com/#family-stdlib-linear-regression"
+    group = page.locator(f'tbody.catalog-group[data-family-id="{family_id}"]')
+    denominator = 10 ** 1000
+    entries = [
+        {"id": "mse-large-above-one", "value": f"{denominator + 1}/{denominator}"},
+        {"id": "mse-one-float", "value": "1"},
+        {"id": "mse-large-below-one", "value": f"{denominator - 1}/{denominator}"},
+        {"id": "mse-b-negative-rational", "value": "1/-2"},
+        {"id": "mse-a-negative-float", "value": "-0.5"},
+        {"id": "mse-negative-quarter", "value": "-0.25"},
+        {"id": "mse-zero", "value": "0/7"},
+        {"id": "mse-half-rational", "value": "1/2"},
+        {"id": "mse-half-float", "value": "0.5"},
+        {"id": "mse-two-float", "value": "2.5"},
+        {"id": "mse-missing-b", "value": ""},
+        {"id": "mse-missing-a", "value": ""},
+    ]
+    group.evaluate("""(tbody, values) => {
+      const template = tbody.querySelector('tr.catalog-record');
+      for (const {id, value} of values) {
+        const row = template.cloneNode(true);
+        row.removeAttribute('id');
+        row.dataset.recordId = id;
+        row.dataset.sortId = id;
+        row.dataset.sortEvalMse = value;
+        row.dataset.search = id;
+        row.querySelector('.record-title').textContent = id;
+        tbody.append(row);
+      }
+    }""", entries)
+    page.get_by_role("button", name="Sort within each family by Eval MSE").click()
+    assert _record_ids(group) == [
+        "mse-a-negative-float", "mse-b-negative-rational", "mse-negative-quarter", "mse-zero",
+        "stdlib-linear-regression-v1-compiled-experiment", "mse-half-float", "mse-half-rational",
+        "mse-large-below-one", "mse-one-float", "mse-large-above-one", "mse-two-float",
+        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1", "mse-missing-a", "mse-missing-b",
+    ]
+    page.get_by_role("button", name="Sort within each family by Eval MSE, ascending").click()
+    assert _record_ids(group) == [
+        "mse-two-float", "mse-large-above-one", "mse-one-float", "mse-large-below-one",
+        "mse-half-float", "mse-half-rational", "stdlib-linear-regression-v1-compiled-experiment",
+        "mse-zero", "mse-negative-quarter", "mse-a-negative-float", "mse-b-negative-rational",
+        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1", "mse-missing-a", "mse-missing-b",
+    ]
 
 
 def _check_desktop(browser, base: str, experiments: list[dict], evidence: Path | None) -> None:
@@ -149,6 +209,7 @@ def _check_desktop(browser, base: str, experiments: list[dict], evidence: Path |
     if evidence:
         page.evaluate("document.activeElement.blur(); window.scrollTo(0, 0)")
         page.screenshot(path=str(evidence / "catalog-desktop.png"), full_page=True)
+    _check_mse_sort(page)
     context.close()
 
 

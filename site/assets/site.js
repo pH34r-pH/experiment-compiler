@@ -18,6 +18,7 @@
     attempts: "sortAttempts",
     "eval-mse": "sortEvalMse",
   };
+  const floatView = new DataView(new ArrayBuffer(8));
   let sortState = {key: "id", direction: "ascending"};
 
   for (const heading of table.querySelectorAll("thead th[data-sort-key]")) {
@@ -43,17 +44,43 @@
     if (key === "id") return row.dataset.sortId || "";
     const value = row.dataset[sortAttributes[key]];
     if (value === "" || value === undefined) return null;
-    if (key === "eval-mse" && value.includes("/")) {
-      const [rawNumerator, rawDenominator] = value.split("/");
-      let numerator = BigInt(rawNumerator);
-      let denominator = BigInt(rawDenominator);
-      if (denominator < 0n) {
-        numerator *= -1n;
-        denominator *= -1n;
+    if (key === "eval-mse") {
+      if (value.includes("/")) {
+        const [rawNumerator, rawDenominator] = value.split("/");
+        let numerator = BigInt(rawNumerator);
+        let denominator = BigInt(rawDenominator);
+        if (denominator === 0n) return null;
+        if (denominator < 0n) {
+          numerator *= -1n;
+          denominator *= -1n;
+        }
+        return {numerator, denominator};
       }
-      return {numerator, denominator};
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numberAsRational(numeric) : null;
     }
     return Number(value);
+  }
+
+  function numberAsRational(value) {
+    if (value === 0) return {numerator: 0n, denominator: 1n};
+    floatView.setFloat64(0, value, false);
+    const bits = floatView.getBigUint64(0, false);
+    const negative = (bits >> 63n) !== 0n;
+    const exponent = Number((bits >> 52n) & 0x7ffn);
+    let numerator = bits & ((1n << 52n) - 1n);
+    let binaryExponent;
+    if (exponent === 0) {
+      binaryExponent = -1074;
+    } else {
+      numerator |= 1n << 52n;
+      binaryExponent = exponent - 1023 - 52;
+    }
+    if (negative) numerator *= -1n;
+    if (binaryExponent >= 0) {
+      return {numerator: numerator << BigInt(binaryExponent), denominator: 1n};
+    }
+    return {numerator, denominator: 1n << BigInt(-binaryExponent)};
   }
 
   function sortRows() {
@@ -81,14 +108,12 @@
           return left.dataset.recordId.localeCompare(right.dataset.recordId);
         }
         let comparison;
-        if (typeof a === "object" && typeof b === "object") {
+        if (sortState.key === "eval-mse") {
           const difference = a.numerator * b.denominator - b.numerator * a.denominator;
           comparison = difference < 0n ? -1 : difference > 0n ? 1 : 0;
         } else {
-          const numeric = value => typeof value === "object"
-            ? Number(value.numerator) / Number(value.denominator) : value;
           comparison = typeof a === "number" || typeof b === "number"
-            ? numeric(a) - numeric(b) : String(a).localeCompare(String(b));
+            ? a - b : String(a).localeCompare(String(b));
         }
         if (comparison === 0) return left.dataset.recordId.localeCompare(right.dataset.recordId);
         if (sortState.direction === "descending") comparison *= -1;
@@ -99,7 +124,7 @@
   }
 
   function applyFilter() {
-    const query = filter.value.normalize("NFKC").toLocaleLowerCase().trim();
+    const query = normalizeSearchText(filter.value).trim();
     let visible = 0;
     let total = 0;
     for (const group of groups) {
@@ -119,6 +144,11 @@
     status.textContent = query
       ? `Showing ${visible} of ${total} records matching “${filter.value.trim()}”.`
       : `Showing all ${total} records.`;
+  }
+
+  function normalizeSearchText(value) {
+    // Keep aligned with build_pages_site._normalize_search_text.
+    return value.normalize("NFKC").toLowerCase();
   }
 
   filter.addEventListener("input", applyFilter);

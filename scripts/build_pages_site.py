@@ -8,6 +8,7 @@ import json
 import math
 import shutil
 import sys
+import unicodedata
 from decimal import Decimal, localcontext
 from pathlib import Path
 from urllib.parse import quote
@@ -130,14 +131,20 @@ def _catalog_search_text(experiment: dict) -> str:
     interpretation_text = " ".join(
         item.get("summary", "") for item in experiment.get("scientificInterpretation") or []
     )
-    return " ".join(str(value) for value in (
+    text = " ".join(str(value) for value in (
         experiment.get("id", ""), experiment.get("title", ""), family.get("@id", ""),
         family.get("name", ""), experiment.get("profile", ""),
         source.get("repository", ""), source.get("commit", ""),
         package.get("sha256", ""), lifecycle.get("creativeWorkStatus", ""),
         " ".join(item.get("actionStatus", "") for item in attempts),
         result_text, interpretation_text,
-    )).casefold()
+    ))
+    return _normalize_search_text(text)
+
+
+def _normalize_search_text(text: str) -> str:
+    """Use NFKC plus locale-independent lowercase, matching the browser query path."""
+    return unicodedata.normalize("NFKC", text).lower()
 
 
 def _catalog_title_cell(experiment: dict) -> str:

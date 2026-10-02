@@ -1,5 +1,7 @@
 import copy
+import html
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -71,6 +73,44 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertNotIn("A <careful> family", table)
         self.assertIn(f"href=\"/packages/{'b' * 64}.zip\"", table)
         self.assertIn('href="/experiments/record/"', table)
+
+    def test_catalog_search_index_uses_nfkc_lowercase_for_displayed_family_names(self):
+        record = {
+            "id": "family-normalization",
+            "title": "Search normalization",
+            "profile": "compiled-experiment-v1",
+            "isPartOf": {
+                "@id": "https://experiments.tyharbin.com/#family-normalization",
+                "@type": "CreativeWork",
+                "name": "Straße Café ＡＢＣ K",
+            },
+        }
+        table = render_catalog([record])
+        match = re.search(r'data-search="([^"]+)"', table)
+        self.assertIsNotNone(match)
+        search_index = html.unescape(match.group(1))
+        self.assertIn("straße café abc k", search_index)
+        self.assertNotIn("strasse café", search_index)
+
+    def test_catalog_eval_mse_attributes_preserve_rationals_floats_and_missing_values(self):
+        denominator = 10 ** 1000
+        base = {"title": "MSE value", "profile": "compiled-experiment-v1"}
+        records = [
+            {**base, "id": "large-rational", "result": {"metrics": {"evalMse": {
+                "numerator": denominator + 1, "denominator": denominator}}}},
+            {**base, "id": "negative-rational", "result": {"metrics": {"evalMse": {
+                "numerator": 1, "denominator": -2}}}},
+            {**base, "id": "zero-rational", "result": {"metrics": {"evalMse": {
+                "numerator": 0, "denominator": 7}}}},
+            {**base, "id": "finite-float", "result": {"metrics": {"evalMse": 0.5}}},
+            {**base, "id": "missing-mse"},
+        ]
+        table = render_catalog(records)
+        self.assertIn(f'data-sort-eval-mse="{denominator + 1}/{denominator}"', table)
+        self.assertIn('data-sort-eval-mse="1/-2"', table)
+        self.assertIn('data-sort-eval-mse="0/7"', table)
+        self.assertIn('data-sort-eval-mse="0.5"', table)
+        self.assertIn('data-sort-eval-mse=""', table)
 
     def test_detail_page_escapes_source_text_and_keeps_digest_scoped_actions(self):
         digest = "a" * 64
