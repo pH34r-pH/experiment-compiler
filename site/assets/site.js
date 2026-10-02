@@ -1,148 +1,158 @@
-const fmt = new Intl.NumberFormat();
+(() => {
+  const catalog = document.getElementById("catalog");
+  const table = document.getElementById("catalog-table");
+  const controls = document.getElementById("catalog-controls");
+  const filter = document.getElementById("catalog-filter");
+  const status = document.getElementById("catalog-status");
+  if (!catalog || !table || !controls || !filter || !status) return;
 
-function fraction(value) {
-  if (!value || typeof value.numerator !== "number" || typeof value.denominator !== "number") return "not reported";
-  return (value.numerator / value.denominator).toExponential(3);
-}
+  const groups = [...table.querySelectorAll("tbody.catalog-group")];
+  const sortLabels = {
+    id: "Experiment record",
+    "package-bytes": "Package size",
+    attempts: "Attempts",
+    "eval-mse": "Eval MSE",
+  };
+  const sortAttributes = {
+    "package-bytes": "sortPackageBytes",
+    attempts: "sortAttempts",
+    "eval-mse": "sortEvalMse",
+  };
+  const floatView = new DataView(new ArrayBuffer(8));
+  let sortState = {key: "id", direction: "ascending"};
 
-function bytes(value) {
-  if (typeof value !== "number") return "not reported";
-  if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + " MiB";
-  return fmt.format(value) + " B";
-}
-
-function text(tag, value, className) {
-  const el = document.createElement(tag);
-  if (className) el.className = className;
-  el.textContent = value;
-  return el;
-}
-
-function metric(label, value) {
-  const el = document.createElement("div");
-  el.className = "metric";
-  el.append(text("strong", label), text("span", value));
-  return el;
-}
-
-function section(title, value) {
-  const el = document.createElement("div");
-  el.append(text("h4", title), text("p", value || "Not declared."));
-  return el;
-}
-
-(async () => {
-  const host = document.getElementById("catalog");
-  try {
-    const response = await fetch("data/experiments.json", {cache: "no-store"});
-    if (!response.ok) throw new Error("catalog unavailable");
-    const data = await response.json();
-    host.replaceChildren();
-
-    for (const exp of data.experiments || []) {
-      const article = document.createElement("article");
-      article.className = "experiment";
-
-      const head = document.createElement("div");
-      head.className = "experiment-head";
-      const copy = document.createElement("div");
-      const title = document.createElement("h3");
-      const detailLink = document.createElement("a");
-      detailLink.href = exp.detailUrl || "#";
-      detailLink.textContent = exp.title;
-      title.append(detailLink);
-      copy.append(title, text("p", exp.hypothesis || exp.question || "", "hypothesis"));
-
-      article.style.setProperty("--card-depth", String((data.experiments || []).indexOf(exp) % 3));
-      const meta = document.createElement("div");
-      meta.className = "metrics";
-      const env = exp.environment || {};
-      const network = env.networkRequired === true
-        ? "required"
-        : env.networkRequired === false
-          ? "none"
-          : "not declared";
-      meta.append(
-        metric("Package", bytes(exp.package && exp.package.size)),
-        metric("Protocol", exp.lifecycle && exp.lifecycle.creativeWorkStatus || "reference package"),
-        metric("Attempts", exp.lifecycle ? fmt.format(exp.lifecycle.attemptCount) : "reference evidence"),
-        metric("Network", network),
-        metric("VRAM", bytes(exp.resources && exp.resources.accelerator && exp.resources.accelerator.peakVramBytes)),
-        metric("Planning RAM", bytes(exp.resources && exp.resources.ram && exp.resources.ram.planningRamBytes))
-      );
-
-      head.append(copy, meta);
-
-      const result = exp.result || {};
-      const details = document.createElement("div");
-      details.className = "details";
-      const disclosure = document.createElement("details");
-      disclosure.className = "catalog-evidence";
-      disclosure.append(text("summary", "Inspect evidence, environment, and protocol"));
-      const detailGrid = document.createElement("div");
-      detailGrid.className = "detail-grid";
-      const interpretations = (exp.scientificInterpretation || []).map(item =>
-        item.summary + " (source record: " + item.record + "; attempt: " + item.aboutAttempt + ")"
-      ).join("; ");
-      const evidenceText = exp.lifecycle
-        ? "Execution and source interpretation are separate records; package integrity does not establish scientific acceptance or independent reproduction."
-        : "Source reference result: held-out MSE " + fraction(result.metrics && result.metrics.evalMse) + "; recorded acceptance " + (result.acceptancePassed ? "passed" : "not passed") + ".";
-      const attemptSummary = (exp.executionAttempts || []).map(item =>
-        item.id + ": " + item.actionStatus + "; retained result members: " + item.result.join(", ")
-      ).join("; ");
-      const lifecycle = exp.lifecycle || {};
-      const resourceSummary = (lifecycle.resourceMeasurements || []).map(item =>
-        item.propertyID + ": " + item.value + (item.unitText ? " " + item.unitText : "") + " (" + item.measurementTechnique + ")"
-      ).join("; ");
-      const unresolvedSummary = (exp.unavailablePrerequisites || []).map(item =>
-        typeof item === "string" ? item : (item.item || item.id || JSON.stringify(item))
-      ).join(", ");
-      detailGrid.append(
-        section("Scientific question", exp.question),
-        section("Method", exp.method),
-        section("Resource basis", resourceSummary),
-        section("Unresolved prerequisites", unresolvedSummary),
-        section("Evidence", evidenceText),
-        section("Execution attempts", attemptSummary),
-        section("Scientific interpretation", interpretations),
-        section("Environment", (env.python || "Python") + "; " + (env.standardLibraryOnly ? "standard library only" : "dependencies declared") + "; accelerator " + (env.accelerator || "not reported") + "."),
-        section("Reproduce", exp.reproduction && exp.reproduction.entrypoint ? "Run " + exp.reproduction.entrypoint + " after extraction." : "Entrypoint not declared."),
-        section("Provenance", (exp.source && exp.source.repository ? exp.source.repository : "") + "@" + (exp.source && exp.source.commit ? exp.source.commit : ""))
-      );
-
-      if (exp.protocol && typeof exp.protocol.text === "string") {
-        const protocol = document.createElement("div");
-        protocol.className = "protocol-panel";
-        protocol.append(text("h4", "Full authoritative protocol"),
-          text("p", "Package member: " + exp.protocol.record), text("pre", exp.protocol.text));
-        detailGrid.append(protocol);
-      }
-      disclosure.append(detailGrid);
-      details.append(disclosure);
-
-      const actions = document.createElement("div");
-      actions.className = "actions";
-      const detailsLink = document.createElement("a");
-      detailsLink.href = exp.detailUrl || "#";
-      detailsLink.textContent = "Inspect full record ↗";
-      actions.append(detailsLink);
-      if (exp.package && exp.package.sha256) {
-        const download = document.createElement("a");
-        download.className = "primary";
-        download.href = "packages/" + exp.package.sha256 + ".zip";
-        download.download = "";
-        download.textContent = "Download Compiled Experiment ↓";
-        actions.append(download);
-      }
-      const source = document.createElement("a");
-      source.href = "https://github.com/" + exp.source.repository + "/tree/" + exp.source.commit;
-      source.textContent = "Frozen source ↗";
-      actions.append(source);
-
-      article.append(head, details, actions);
-      host.append(article);
-    }
-  } catch (error) {
-    host.textContent = "Compiled Experiment catalog unavailable.";
+  for (const heading of table.querySelectorAll("thead th[data-sort-key]")) {
+    const key = heading.dataset.sortKey;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalog-sort";
+    button.dataset.sort = key;
+    button.textContent = heading.textContent;
+    button.setAttribute("aria-label", `Sort within each family by ${sortLabels[key]}`);
+    heading.replaceChildren(button);
+    button.addEventListener("click", () => {
+      sortState = {
+        key,
+        direction: sortState.key === key && sortState.direction === "ascending"
+          ? "descending" : "ascending",
+      };
+      sortRows();
+    });
   }
+
+  function sortValue(row, key) {
+    if (key === "id") return row.dataset.sortId || "";
+    const value = row.dataset[sortAttributes[key]];
+    if (value === "" || value === undefined) return null;
+    if (key === "eval-mse") {
+      if (value.includes("/")) {
+        const [rawNumerator, rawDenominator] = value.split("/");
+        let numerator = BigInt(rawNumerator);
+        let denominator = BigInt(rawDenominator);
+        if (denominator === 0n) return null;
+        if (denominator < 0n) {
+          numerator *= -1n;
+          denominator *= -1n;
+        }
+        return {numerator, denominator};
+      }
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numberAsRational(numeric) : null;
+    }
+    return Number(value);
+  }
+
+  function numberAsRational(value) {
+    if (value === 0) return {numerator: 0n, denominator: 1n};
+    floatView.setFloat64(0, value, false);
+    const bits = floatView.getBigUint64(0, false);
+    const negative = (bits >> 63n) !== 0n;
+    const exponent = Number((bits >> 52n) & 0x7ffn);
+    let numerator = bits & ((1n << 52n) - 1n);
+    let binaryExponent;
+    if (exponent === 0) {
+      binaryExponent = -1074;
+    } else {
+      numerator |= 1n << 52n;
+      binaryExponent = exponent - 1023 - 52;
+    }
+    if (negative) numerator *= -1n;
+    if (binaryExponent >= 0) {
+      return {numerator: numerator << BigInt(binaryExponent), denominator: 1n};
+    }
+    return {numerator, denominator: 1n << BigInt(-binaryExponent)};
+  }
+
+  function sortRows() {
+    for (const heading of table.querySelectorAll("thead th[data-sort-key]")) {
+      const button = heading.querySelector("button");
+      if (heading.dataset.sortKey === sortState.key) {
+        heading.setAttribute("aria-sort", sortState.direction);
+        button.setAttribute("aria-pressed", "true");
+        button.setAttribute("aria-label", `Sort within each family by ${sortLabels[sortState.key]}, ${sortState.direction}`);
+      } else {
+        heading.removeAttribute("aria-sort");
+        button.setAttribute("aria-pressed", "false");
+        button.setAttribute("aria-label", `Sort within each family by ${sortLabels[heading.dataset.sortKey]}`);
+      }
+    }
+
+    for (const group of groups) {
+      const records = [...group.querySelectorAll("tr.catalog-record")];
+      records.sort((left, right) => {
+        const a = sortValue(left, sortState.key);
+        const b = sortValue(right, sortState.key);
+        if (a === null || b === null) {
+          if (a === null && b !== null) return 1;
+          if (a !== null && b === null) return -1;
+          return left.dataset.recordId.localeCompare(right.dataset.recordId);
+        }
+        let comparison;
+        if (sortState.key === "eval-mse") {
+          const difference = a.numerator * b.denominator - b.numerator * a.denominator;
+          comparison = difference < 0n ? -1 : difference > 0n ? 1 : 0;
+        } else {
+          comparison = typeof a === "number" || typeof b === "number"
+            ? a - b : String(a).localeCompare(String(b));
+        }
+        if (comparison === 0) return left.dataset.recordId.localeCompare(right.dataset.recordId);
+        if (sortState.direction === "descending") comparison *= -1;
+        return comparison;
+      });
+      for (const row of records) group.append(row);
+    }
+  }
+
+  function applyFilter() {
+    const query = normalizeSearchText(filter.value).trim();
+    let visible = 0;
+    let total = 0;
+    for (const group of groups) {
+      const rows = [...group.querySelectorAll("tr.catalog-record")];
+      let groupVisible = 0;
+      for (const row of rows) {
+        total += 1;
+        const match = !query || row.dataset.search.includes(query);
+        row.hidden = !match;
+        if (match) groupVisible += 1;
+      }
+      visible += groupVisible;
+      group.hidden = groupVisible === 0;
+    }
+    const empty = table.querySelector("tfoot");
+    if (empty) empty.hidden = visible !== 0;
+    status.textContent = query
+      ? `Showing ${visible} of ${total} records matching “${filter.value.trim()}”.`
+      : `Showing all ${total} records.`;
+  }
+
+  function normalizeSearchText(value) {
+    // Keep aligned with build_pages_site._normalize_search_text.
+    return value.normalize("NFKC").toLowerCase();
+  }
+
+  filter.addEventListener("input", applyFilter);
+  controls.hidden = false;
+  sortRows();
+  applyFilter();
 })();

@@ -1,12 +1,14 @@
 import copy
+import html
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from build_pages_site import render_detail
+from build_pages_site import render_catalog, render_detail
 
 from experiment_compiler.catalog import resolve_article_reference
 from experiment_compiler.core import PackageError, compile_package
@@ -21,6 +23,94 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn("backlinks", experiment["required"])
         self.assertIn("source", experiment["required"])
         self.assertIn("package", experiment["required"])
+        family = experiment["properties"]["isPartOf"]
+        self.assertEqual(family["required"], ["@id", "@type", "name"])
+        self.assertFalse(family["additionalProperties"])
+        self.assertEqual(family["properties"]["@type"]["const"], "CreativeWork")
+        try:
+            import jsonschema
+        except ImportError:
+            jsonschema = None
+        if jsonschema is not None:
+            jsonschema.validate({"@id": "https://experiments.tyharbin.com/#family-schema-test",
+                                 "@type": "CreativeWork", "name": "Schema test"}, family)
+            for invalid in (None, {"@id": "https://experiments.tyharbin.com/#family-schema-test",
+                                   "@type": "Dataset", "name": "Schema test"},
+                            {"@id": "https://evil.test/#family-schema-test",
+                             "@type": "CreativeWork", "name": "Schema test"}):
+                with self.subTest(invalid=invalid), self.assertRaises(jsonschema.ValidationError):
+                    jsonschema.validate(invalid, family)
+
+    def test_family_table_groups_by_exact_id_and_keeps_undeclared_records_separate(self):
+        first_id = "https://experiments.tyharbin.com/#family-shared"
+        second_id = "https://experiments.tyharbin.com/#family-other"
+        same_label = "A <careful> family & record"
+        base = {
+            "profile": "compiled-experiment-v1",
+            "source": {"repository": "owner/repo", "commit": "a" * 40},
+            "package": {"sha256": "b" * 64, "size": 123},
+            "detailUrl": "/experiments/record/",
+        }
+        records = [
+            {**base, "id": "zeta", "title": "Zeta", "isPartOf": {"@id": first_id,
+             "@type": "CreativeWork", "name": same_label}},
+            {**base, "id": "alpha", "title": "Alpha", "isPartOf": {"@id": first_id,
+             "@type": "CreativeWork", "name": same_label}},
+            {**base, "id": "same-label-other-family", "title": "Other",
+             "isPartOf": {"@id": second_id, "@type": "CreativeWork", "name": same_label}},
+            {**base, "id": "unknown-one", "title": "Unknown one"},
+            {**base, "id": "unknown-two", "title": "Unknown two"},
+        ]
+        table = render_catalog(records)
+        self.assertEqual(table.count('<tbody class="catalog-group"'), 4)
+        self.assertEqual(table.count(f'data-family-id="{first_id}"'), 1)
+        self.assertEqual(table.count(f'data-family-id="{second_id}"'), 1)
+        self.assertIn('id="family-shared"', table)
+        self.assertIn('id="family-other"', table)
+        self.assertEqual(table.count('Family not declared'), 2)
+        self.assertLess(table.index('data-record-id="alpha"'), table.index('data-record-id="zeta"'))
+        self.assertIn("A &lt;careful&gt; family &amp; record", table)
+        self.assertNotIn("A <careful> family", table)
+        self.assertIn(f"href=\"/packages/{'b' * 64}.zip\"", table)
+        self.assertIn('href="/experiments/record/"', table)
+
+    def test_catalog_search_index_uses_nfkc_lowercase_for_displayed_family_names(self):
+        record = {
+            "id": "family-normalization",
+            "title": "Search normalization",
+            "profile": "compiled-experiment-v1",
+            "isPartOf": {
+                "@id": "https://experiments.tyharbin.com/#family-normalization",
+                "@type": "CreativeWork",
+                "name": "Straße Café ＡＢＣ K",
+            },
+        }
+        table = render_catalog([record])
+        match = re.search(r'data-search="([^"]+)"', table)
+        self.assertIsNotNone(match)
+        search_index = html.unescape(match.group(1))
+        self.assertIn("straße café abc k", search_index)
+        self.assertNotIn("strasse café", search_index)
+
+    def test_catalog_eval_mse_attributes_preserve_rationals_floats_and_missing_values(self):
+        denominator = 10 ** 1000
+        base = {"title": "MSE value", "profile": "compiled-experiment-v1"}
+        records = [
+            {**base, "id": "large-rational", "result": {"metrics": {"evalMse": {
+                "numerator": denominator + 1, "denominator": denominator}}}},
+            {**base, "id": "negative-rational", "result": {"metrics": {"evalMse": {
+                "numerator": 1, "denominator": -2}}}},
+            {**base, "id": "zero-rational", "result": {"metrics": {"evalMse": {
+                "numerator": 0, "denominator": 7}}}},
+            {**base, "id": "finite-float", "result": {"metrics": {"evalMse": 0.5}}},
+            {**base, "id": "missing-mse"},
+        ]
+        table = render_catalog(records)
+        self.assertIn(f'data-sort-eval-mse="{denominator + 1}/{denominator}"', table)
+        self.assertIn('data-sort-eval-mse="1/-2"', table)
+        self.assertIn('data-sort-eval-mse="0/7"', table)
+        self.assertIn('data-sort-eval-mse="0.5"', table)
+        self.assertIn('data-sort-eval-mse=""', table)
 
     def test_detail_page_escapes_source_text_and_keeps_digest_scoped_actions(self):
         digest = "a" * 64
@@ -225,11 +315,16 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn("Cross-origin pages cannot share", runtime)
 
         catalog_runtime = (ROOT / "site/assets/site.js").read_text()
-        self.assertIn('"not declared"', catalog_runtime)
-        self.assertIn('className = "catalog-evidence"', catalog_runtime)
-        self.assertIn('className = "protocol-panel"', catalog_runtime)
+        self.assertIn('querySelectorAll("tbody.catalog-group")', catalog_runtime)
+        self.assertIn('dataset.search.includes(query)', catalog_runtime)
+        self.assertIn('aria-sort', catalog_runtime)
+        self.assertIn('within each family', catalog_runtime)
+        self.assertIn("GENERATED_CATALOG", (ROOT / "site/index.html").read_text())
+        self.assertIn("caption", (ROOT / "scripts/build_pages_site.py").read_text())
+        self.assertIn("scope=\"rowgroup\"", (ROOT / "scripts/build_pages_site.py").read_text())
         self.assertIn("--parallax-y", css)
-        self.assertIn(".catalog .experiment:nth-child(3n + 2)", css)
+        self.assertIn(".catalog-table", css)
+        self.assertIn(".table-scroll", css)
 
 
 if __name__ == "__main__":

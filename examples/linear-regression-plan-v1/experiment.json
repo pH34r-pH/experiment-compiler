@@ -1,6 +1,11 @@
 {
   "buildRecipeVersion": 1,
   "id": "linear-regression-plan-v1",
+  "isPartOf": {
+    "@id": "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+    "@type": "CreativeWork",
+    "name": "Exact-rational linear regression"
+  },
   "manifest": {
     "evidence": {},
     "packageType": "compiled-experiment",

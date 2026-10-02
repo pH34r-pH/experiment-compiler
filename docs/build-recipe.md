@@ -4,6 +4,8 @@ A build recipe is local packaging configuration, not an ontology or a substitute
 
 Required keys are `buildRecipeVersion` (integer 1), `id` (portable lowercase slug), `title`, `profile`, `manifest`, and nonempty `members`. Each member declares a relative `source` under the recipe directory, archive `path`, SHA-256 `sha256`, and byte `size`. No globs, shell commands, remote fetches or environment expansion are supported. Optional `expectedPackage` pins the complete ZIP hash and size for a compatibility fixture.
 
+Optional source-owned publication metadata `isPartOf` declares navigation membership in a catalog family. It contains exactly `@id`, `@type`, and `name`; the type is `CreativeWork`, the name is nonblank, and the bounded ID uses the canonical `https://experiments.tyharbin.com/#family-{lowercase-slug}` form. It sits alongside `relatedArticles` and is not included in the package manifest or ZIP. Repeated family IDs must use the same name. Equal names with different IDs remain different families, and omission leaves a record ungrouped. This is a catalog navigation label only; it does not assert artifact lineage, revision, supersession, scientific acceptance, or a combined result.
+
 The historical `poc-v1` manifest header uses `schemaVersion`, `packageType`, `status`, `source`, `standards`, and `evidence`. `compiled-experiment-v1` adds an explicit `profile` field and requires `packageType: compiled-experiment` plus `status: reproducible`. The lifecycle profile uses manifest `schemaVersion: 2` and has no overloaded top-level status field. The compiler validates only the packaging envelope, the lifecycle relationships below, and the byte inventory; scientific meaning stays in the packaged standards/protocol/evidence files. Source repository/commit and evidence values are declared input, not independently authenticated by this tool. The compiler derives the complete `members` inventory; callers cannot inject a second generated manifest.
 
 Compilation checks hashes before packaging, preserves raw input bytes, sorts archive paths, emits sorted/indented UTF-8 JSON with a trailing newline, sets every ZIP timestamp to 1980-01-01, uses Unix regular-file mode 0644 and DEFLATE level 9, and omits host paths/times from the package. An existing output is reused only when identical; different output bytes are never silently overwritten. Compression implementations can change output bytes across toolchains, so the POC's historical checksum remains a required gate. The build receipt records Python, zlib and compiler versions separately from the immutable ZIP.
@@ -13,7 +15,6 @@ Verification checks the exact member inventory, digests, sizes and JSON syntax. 
 `verify --recipe ...` also compares the manifest with the reviewed recipe. `verify --expected-sha256 ...` checks an external complete-package checksum. Without either external pin, success means self-consistency only: an attacker could change both content and its hashes. Hashes do not establish authorship or scientific validity. Receipts always state `scope: package-integrity-only` and `scientificReproduction: not-run`.
 
 This release preserves the initial POC wire format. A future complete research package must use an explicitly versioned profile and a new digest; never silently “repair” historical member bytes or relabel a new scientific run as historical evidence.
-
 
 ## Lifecycle profile: plans, attempts and interpretation
 
@@ -72,13 +73,11 @@ The retained finalization CI artifact is the completed handoff record. To publis
 
 Resource field mapping, byte closure classes, private-workspace use, and the publication boundary are documented in [resources-and-closure.md](resources-and-closure.md). CWL v1.2 expresses executable requirements; resource evidence and estimate basis stay with the source-owned experiment/provenance records.
 
-
 ## Self-contained reproduction profile
 
 `compiled-experiment-v1` does not authorize the compiler to execute package content. The public lifecycle separately exercises the known reviewed example after compilation: it verifies the ZIP, extracts it with Python's standard library, invokes the declared `experiment/reproduce.py` entrypoint, and compares the newly produced result bytes with the embedded reference result.
 
 A self-contained example should make its dependency closure explicit. The first example embeds code, tests, data/license/splits, environment, configuration, protocol, acceptance criteria, reference evidence/receipt, and resource measurements. Open-standard specifications may remain immutable public references. Missing prerequisites belong in an explicit unavailable list rather than being inferred or silently fetched.
-
 
 ## Standards validation boundary
 
