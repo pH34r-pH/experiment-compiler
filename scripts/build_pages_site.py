@@ -140,30 +140,33 @@ def _catalog_search_text(experiment: dict) -> str:
     )).casefold()
 
 
-def _catalog_row(experiment: dict) -> str:
-    identifier = experiment["id"]
-    record_id = "record-" + identifier
+def _catalog_title_cell(experiment: dict) -> str:
+    identifier = html.escape(experiment["id"])
     title = html.escape(experiment["title"])
-    escaped_id = html.escape(identifier)
-    search = html.escape(_catalog_search_text(experiment), quote=True)
+    return f'<th scope="row"><span class="record-title">{title}</span><code>{identifier}</code></th>'
+
+
+def _catalog_source_link(experiment: dict) -> str:
     source = experiment.get("source") or {}
     source_repository = source.get("repository", "Not reported")
     source_commit = source.get("commit", "")
     source_text = html.escape(f"{source_repository}@{source_commit}")
     source_url = f"https://github.com/{quote(source_repository, safe='/')}/tree/{quote(source_commit)}" if source_commit else ""
-    source_link = (f'<a href="{html.escape(source_url, quote=True)}">{source_text}</a>'
-                   if source_url else source_text)
+    return (f'<a href="{html.escape(source_url, quote=True)}">{source_text}</a>'
+            if source_url else source_text)
+
+
+def _catalog_package_values(experiment: dict) -> tuple[str, str, str]:
     package = experiment.get("package") or {}
     package_hash = package.get("sha256")
     package_size = package.get("size") if type(package.get("size")) is int else None
     package_size_value = html.escape(f"{package_size:,} bytes") if package_size is not None else "Not compiled"
     package_hash_value = f"<code>{html.escape(package_hash)}</code>" if package_hash else "Not compiled"
-    detail_url = experiment.get("detailUrl", "")
-    detail_link = (f'<a href="{html.escape(detail_url, quote=True)}">Details</a>'
-                   if detail_url else "Details unavailable")
-    download_link = (f'<a class="download-link" href="/packages/{quote(package_hash)}.zip" download>Download ZIP</a>'
-                     if package_hash else "Download unavailable")
+    size_sort = "" if package_size is None else str(package_size)
+    return package_size_value, package_hash_value, size_sort
 
+
+def _catalog_result_html(experiment: dict) -> tuple[str, str | None, str]:
     result = experiment.get("result") or {}
     eval_value, eval_display = _evaluation_mse(experiment)
     if result:
@@ -172,44 +175,67 @@ def _catalog_row(experiment: dict) -> str:
                            else "not reported")
         result_html = ("<span>Reference result</span><br>Eval MSE " + html.escape(eval_display) +
                        "<br><span>Recorded acceptance: " + acceptance_text + "</span>")
-    else:
-        interpretations = experiment.get("scientificInterpretation") or []
-        summaries = [item.get("summary") for item in interpretations if isinstance(item.get("summary"), str)]
-        if summaries:
-            result_html = "".join(
-                "<details class=\"row-interpretation\"><summary>Source interpretation on record</summary>"
-                f"<p>{html.escape(summary)}</p></details>" for summary in summaries
-            )
-        else:
-            result_html = "<span>Not reported</span>"
+        return result_html, eval_value, eval_display
 
+    interpretations = experiment.get("scientificInterpretation") or []
+    summaries = [item.get("summary") for item in interpretations if isinstance(item.get("summary"), str)]
+    if summaries:
+        result_html = "".join(
+            "<details class=\"row-interpretation\"><summary>Source interpretation on record</summary>"
+            f"<p>{html.escape(summary)}</p></details>" for summary in summaries
+        )
+        return result_html, eval_value, eval_display
+    return "<span>Not reported</span>", eval_value, eval_display
+
+
+def _catalog_status_values(experiment: dict) -> tuple[str, str, str]:
     lifecycle = experiment.get("lifecycle")
     attempts = experiment.get("executionAttempts") or []
-    if lifecycle:
-        status_text = html.escape(lifecycle.get("creativeWorkStatus") or "Not declared")
-        action_states = ", ".join(
-            html.escape(item.get("actionStatus", "Not declared").rsplit("/", 1)[-1])
-            for item in attempts
-        )
-        if action_states:
-            status_text += "<br><span>Action status: " + action_states + "</span>"
-        attempt_count = lifecycle.get("attemptCount")
-        attempt_display = html.escape(str(attempt_count)) if type(attempt_count) is int else "Not reported"
-    else:
-        status_text = "No lifecycle record"
-        attempt_count = None
-        attempt_display = "Not applicable"
+    if not lifecycle:
+        return "No lifecycle record", "", "Not applicable"
 
+    status_text = html.escape(lifecycle.get("creativeWorkStatus") or "Not declared")
+    action_states = ", ".join(
+        html.escape(item.get("actionStatus", "Not declared").rsplit("/", 1)[-1])
+        for item in attempts
+    )
+    if action_states:
+        status_text += "<br><span>Action status: " + action_states + "</span>"
+    attempt_count = lifecycle.get("attemptCount")
+    attempt_display = html.escape(str(attempt_count)) if type(attempt_count) is int else "Not reported"
     attempts_sort = "" if attempt_count is None else str(attempt_count)
+    return status_text, attempts_sort, attempt_display
+
+
+def _catalog_detail_links(experiment: dict) -> tuple[str, str]:
+    detail_url = experiment.get("detailUrl", "")
+    detail_link = (f'<a href="{html.escape(detail_url, quote=True)}">Details</a>'
+                   if detail_url else "Details unavailable")
+    package_hash = (experiment.get("package") or {}).get("sha256")
+    download_link = (f'<a class="download-link" href="/packages/{quote(package_hash)}.zip" download>Download ZIP</a>'
+                     if package_hash else "Download unavailable")
+    return detail_link, download_link
+
+
+def _catalog_row(experiment: dict) -> str:
+    identifier = experiment["id"]
+    record_id = html.escape("record-" + identifier, quote=True)
+    escaped_id = html.escape(identifier, quote=True)
+    search = html.escape(_catalog_search_text(experiment), quote=True)
+    package_size_value, package_hash_value, size_sort = _catalog_package_values(experiment)
+    result_html, eval_value, eval_display = _catalog_result_html(experiment)
+    status_text, attempts_sort, attempt_display = _catalog_status_values(experiment)
+    detail_link, download_link = _catalog_detail_links(experiment)
+    source_link = _catalog_source_link(experiment)
+    title_cell = _catalog_title_cell(experiment)
     eval_sort = "" if eval_value is None else eval_value
-    size_sort = "" if package_size is None else str(package_size)
     return (
-        f'<tr class="catalog-record" id="{html.escape(record_id, quote=True)}" '
-        f'data-record-id="{html.escape(identifier, quote=True)}" data-search="{search}" '
-        f'data-sort-id="{html.escape(identifier, quote=True)}" '
+        f'<tr class="catalog-record" id="{record_id}" '
+        f'data-record-id="{escaped_id}" data-search="{search}" '
+        f'data-sort-id="{escaped_id}" '
         f'data-sort-package-bytes="{size_sort}" data-sort-attempts="{attempts_sort}" '
         f'data-sort-eval-mse="{eval_sort}">'
-        f'<th scope="row"><span class="record-title">{title}</span><code>{escaped_id}</code></th>'
+        f'{title_cell}'
         f'<td>{result_html}</td><td>{status_text}</td>'
         f'<td data-value="{size_sort}">{package_size_value}</td>'
         f'<td data-value="{attempts_sort}">{attempt_display}</td>'
