@@ -5,6 +5,11 @@
     "size": 13523022
   },
   "id": "muon-unit-hypersphere-depth3-multiseed-v1-final-87409154",
+  "isPartOf": {
+    "@id": "https://experiments.tyharbin.com/#family-muon-adamw-comparison",
+    "@type": "CreativeWork",
+    "name": "Muon versus historical AdamW"
+  },
   "manifest": {
     "evidence": {
       "attemptId": "87409154e60d",

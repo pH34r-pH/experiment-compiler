@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
-    json_value, load_recipe, safe_path, sha256, unique_paths, verify_bytes)
+    json_value, load_recipe, manifest_for, safe_path, sha256, unique_paths, verify_bytes)
 from experiment_compiler.resources import bytes_to_mib_minimum, seconds_to_cwl_limit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -530,6 +530,92 @@ class CompilerTests(unittest.TestCase):
         self.assertIn("evidence/attempts/87409154e60d/pilot-result.json", attempt["result"])
         self.assertIn("no overall winner or cost claim", published["scientificInterpretation"][0]["summary"])
         self.assertEqual(published["protocol"]["record"], "experiment/protocol.md")
+        family_ids = [item.get("isPartOf", {}).get("@id") for item in catalog["experiments"]]
+        self.assertEqual(family_ids, [
+            "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+            "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+            "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+            "https://experiments.tyharbin.com/#family-muon-adamw-comparison",
+            "https://experiments.tyharbin.com/#family-muon-adamw-comparison",
+        ])
+        self.assertEqual(catalog["experiments"][0]["isPartOf"], {
+            "@id": "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+            "@type": "CreativeWork", "name": "Exact-rational linear regression",
+        })
+        final_root = ROOT / "examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154"
+        final_recipe = load_recipe(final_root / "experiment.json")
+        parent_plan = next(item for item in final_recipe["members"]
+                           if item["path"] == "evidence/attempts/87409154e60d/plan-package.zip")
+        parent_attempt = next(item for item in final_recipe["members"]
+                              if item["path"].endswith("/parent-attempt-package.zip"))
+        self.assertEqual(sha256((final_root / parent_plan["source"]).read_bytes()),
+                         "fec4f9d2270a40deebe580e376dfbf23ddb799059b4b67cadef211fa4d9c833a")
+        self.assertEqual(sha256((final_root / parent_attempt["source"]).read_bytes()),
+                         "0fb8db51740f3f48e2bbcf20b4cbb0cbbe6ac9dc2b931439ba71617c3fb94b89")
+        with tempfile.TemporaryDirectory() as directory:
+            proposal = compile_package(ROOT / "examples/muon-comparison-plan-v1/experiment.json",
+                                       Path(directory) / "proposal.zip")
+        self.assertEqual(proposal["packageSha256"],
+                         "aa329756e5fe4debfc79176d8f807a1457d0345205859b6a091aad152b71be7d")
+        self.assertNotEqual(proposal["packageSha256"], sha256((final_root / parent_plan["source"]).read_bytes()))
+
+    def test_is_part_of_is_source_owned_publication_metadata_outside_package(self):
+        recipe_path = SELF_CONTAINED / "experiment.json"
+        recipe = load_recipe(recipe_path)
+        self.assertNotIn("isPartOf", manifest_for(recipe))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "package.zip"
+            report = compile_package(recipe_path, output)
+            self.assertEqual(report["packageSha256"],
+                             "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
+            self.assertEqual(report["packageSizeBytes"], 14010)
+            with zipfile.ZipFile(output) as package:
+                manifest = json.loads(package.read(MANIFEST))
+                self.assertNotIn("isPartOf", manifest)
+
+    def test_recipe_rejects_malformed_family_publication_metadata(self):
+        valid = {"@id": "https://experiments.tyharbin.com/#family-example",
+                 "@type": "CreativeWork", "name": "Example family"}
+        invalid = [None, {}, {"@id": valid["@id"], "@type": "Dataset", "name": "Example"},
+                   {**valid, "extra": "not allowed"}, {**valid, "name": "  "},
+                   {**valid, "@id": "https://evil.test/#family-example"},
+                   {**valid, "@id": "https://experiments.tyharbin.com/#family-Upper"},
+                   {**valid, "@id": "https://experiments.tyharbin.com/#family-a--b"},
+                   {**valid, "@id": "https://experiments.tyharbin.com/#family-a/b"},
+                   {**valid, "@id": "https://experiments.tyharbin.com/#family-" + "a" * 40}]
+        for family in invalid:
+            with self.subTest(family=family), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "example"
+                shutil.copytree(SELF_CONTAINED, target)
+                recipe = json.loads((target / "experiment.json").read_text())
+                recipe["isPartOf"] = family
+                (target / "experiment.json").write_bytes(canonical(recipe))
+                with self.assertRaises(PackageError):
+                    load_recipe(target / "experiment.json")
+
+    def test_catalog_rejects_conflicting_names_for_one_family_identifier(self):
+        from experiment_compiler.catalog import describe_catalog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared_id = "https://experiments.tyharbin.com/#family-shared"
+            descriptors = [
+                {"id": "first", "isPartOf": {"@id": shared_id, "@type": "CreativeWork", "name": "First label"}},
+                {"id": "second", "isPartOf": {"@id": shared_id, "@type": "CreativeWork", "name": "Conflicting label"}},
+            ]
+            for identifier in ("first", "second"):
+                recipe = {"buildRecipeVersion": 1, "id": identifier, "title": identifier,
+                          "profile": "compiled-experiment-v1",
+                          "manifest": {"schemaVersion": 1, "packageType": "compiled-experiment",
+                                       "status": "reproducible", "profile": "compiled-experiment-v1",
+                                       "source": {"repository": "owner/repo", "commit": "a" * 40},
+                                       "standards": {}, "evidence": {}},
+                          "members": [{"source": "not-read.txt", "path": "not-read.txt",
+                                       "sha256": "b" * 64, "size": 1}]}
+                (root / identifier).mkdir()
+                (root / identifier / "experiment.json").write_bytes(canonical(recipe))
+            with patch("experiment_compiler.catalog.describe_recipe", side_effect=descriptors):
+                with self.assertRaisesRegex(PackageError, "Conflicting names"):
+                    describe_catalog(root)
 
     def test_related_article_backlink_is_pinned_in_the_authoritative_recipe(self):
         with tempfile.TemporaryDirectory() as directory:

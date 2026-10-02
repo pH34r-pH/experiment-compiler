@@ -24,6 +24,8 @@ MAX_TOTAL = 64 * 1024 * 1024
 MAX_MEMBERS = 1024
 SHA256 = re.compile(r"[0-9a-f]{64}")
 SHA1 = re.compile(r"[0-9a-f]{40}")
+FAMILY_URL_PREFIX = "https://experiments.tyharbin.com/#family-"
+FAMILY_ID = re.compile(re.escape(FAMILY_URL_PREFIX) + r"[a-z0-9]+(?:-[a-z0-9]+)*")
 EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -154,10 +156,21 @@ def _validate_related_articles(related_articles: Any) -> None:
             raise PackageError("Related article URL must be a canonical tyharbin.com article route")
 
 
+def _validate_is_part_of(is_part_of: Any) -> None:
+    if (not isinstance(is_part_of, dict) or set(is_part_of) != {"@id", "@type", "name"} or
+            is_part_of.get("@type") != "CreativeWork" or
+            not isinstance(is_part_of.get("name"), str) or not is_part_of["name"].strip()):
+        raise PackageError("isPartOf must declare exactly @id, @type, and a nonblank name")
+    identifier = is_part_of["@id"]
+    if (not isinstance(identifier, str) or len(identifier) > 80 or
+            FAMILY_ID.fullmatch(identifier) is None):
+        raise PackageError("isPartOf @id must be a canonical bounded family URL")
+
+
 def load_recipe(path: Path) -> dict:
     recipe = json_value(bounded_read(path, MAX_FILE))
     required = {"buildRecipeVersion", "id", "title", "profile", "manifest", "members"}
-    optional = {"expectedPackage", "relatedArticles"}
+    optional = {"expectedPackage", "relatedArticles", "isPartOf"}
     if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - optional:
         raise PackageError("Recipe has unexpected or missing fields")
     if (type(recipe["buildRecipeVersion"]) is not int or recipe["buildRecipeVersion"] != 1 or
@@ -169,6 +182,8 @@ def load_recipe(path: Path) -> dict:
     if validate_header(recipe["manifest"]) != recipe["profile"]:
         raise PackageError("Recipe profile differs from manifest profile")
     _validate_related_articles(recipe.get("relatedArticles", []))
+    if "isPartOf" in recipe:
+        _validate_is_part_of(recipe["isPartOf"])
     members = recipe["members"]
     if not isinstance(members, list) or not 1 <= len(members) < MAX_MEMBERS:
         raise PackageError("Recipe requires a bounded, nonempty member list")

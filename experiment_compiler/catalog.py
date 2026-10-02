@@ -86,7 +86,7 @@ def describe_recipe(recipe_path: Path) -> dict:
         None,
     )
 
-    return {
+    descriptor = {
         "schemaVersion": 1,
         "id": recipe["id"],
         "title": recipe["title"],
@@ -108,6 +108,9 @@ def describe_recipe(recipe_path: Path) -> dict:
         "package": expected,
         "backlinks": recipe.get("relatedArticles", []),
     }
+    if "isPartOf" in recipe:
+        descriptor["isPartOf"] = recipe["isPartOf"]
+    return descriptor
 
 
 def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
@@ -164,7 +167,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         if isinstance(summary, str) and summary.strip() and len(about_attempts) == 1:
             interpretations.append({"record": node["@id"], "summary": summary,
                                     "aboutAttempt": about_attempts[0]})
-    return {
+    descriptor = {
         "schemaVersion": 1,
         "id": recipe["id"],
         "title": recipe["title"],
@@ -183,6 +186,9 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],
         "backlinks": recipe.get("relatedArticles", []),
     }
+    if "isPartOf" in recipe:
+        descriptor["isPartOf"] = recipe["isPartOf"]
+    return descriptor
 
 
 def discover_recipes(root: Path) -> list[Path]:
@@ -205,9 +211,19 @@ def discover_recipes(root: Path) -> list[Path]:
 
 def describe_catalog(root: Path) -> dict:
     """Derive a deterministic public catalog from all discovered compiled experiments."""
+    experiments = [describe_recipe(path) for path in discover_recipes(root)]
+    family_names: dict[str, str] = {}
+    for experiment in experiments:
+        family = experiment.get("isPartOf")
+        if family is None:
+            continue
+        identifier, name = family["@id"], family["name"]
+        prior_name = family_names.setdefault(identifier, name)
+        if prior_name != name:
+            raise PackageError(f"Conflicting names for declared catalog family: {identifier}")
     return {
         "schemaVersion": 2,
-        "experiments": [describe_recipe(path) for path in discover_recipes(root)],
+        "experiments": experiments,
     }
 
 

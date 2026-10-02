@@ -1,6 +1,11 @@
 {
   "buildRecipeVersion": 1,
   "id": "muon-comparison-plan-v1",
+  "isPartOf": {
+    "@id": "https://experiments.tyharbin.com/#family-muon-adamw-comparison",
+    "@type": "CreativeWork",
+    "name": "Muon versus historical AdamW"
+  },
   "title": "Prospective Muon optimizer comparison candidate",
   "profile": "compiled-experiment-lifecycle-v1",
   "manifest": {

@@ -1,6 +1,8 @@
 # Lifecycle catalog source convention
 
-The public catalog is a projection of recipes and their RO-Crate records, not a second scientific registry. Its additive version 2 fields preserve source facts without judging scientific acceptance or independent reproduction.
+The public catalog is a projection of recipes and their RO-Crate records, not a second scientific registry. Its additive version 2 fields preserve source facts without judging scientific acceptance or independent reproduction. Optional `isPartOf` publication metadata is copied unchanged from the authoritative recipe into each flat record. The site groups records only when their exact canonical `@id` matches; if one ID has conflicting names, catalog derivation fails. Equal names with different IDs remain separate groups. Records without `isPartOf` remain separate and are not collected into a shared unknown group.
+
+Family membership is source-reviewed navigation metadata. It does not encode `wasDerivedFrom`, `wasRevisionOf`, iteration order, supersession, a latest record, or an aggregate scientific verdict. Every row retains its own experiment ID, result and lifecycle evidence, source repository/commit, package digest and size, detail route, and digest-addressed download. The generated index includes a semantic table as a no-JavaScript fallback; JavaScript adds text filtering and within-family sorting while leaving family membership and package identities intact.
 
 Future lifecycle sources may use `## Hypothesis` in the experiment README and `## Question` and `## Method` in the protocol for concise display summaries. These exact headings are optional presentation conventions, not scientific requirements. Missing sections project as null. The `protocol` object provides the authoritative protocol member `record` and its full UTF-8 `text`, including when its structure differs. Text is never rewritten or inferred; display clients must escape it as untrusted source content. Frozen protocols are not edited to populate summaries.
 
@@ -48,8 +50,9 @@ list remain valid projections; they cannot claim verified reciprocal linkage.
 
 Adding reviewed recipe publication metadata changes the derived presentation,
 not package member bytes. It must retain the package digest and source identity.
-No relation is inferred from titles, package hashes, article slugs, or successful
-execution. The current projection declares no public qualification or publication
+No family or article relation is inferred from titles, package hashes, article
+slugs, or successful execution. Family membership requires the exact source-owned
+`isPartOf` value described above. The current projection declares no public qualification or publication
 verdict. Those fields remain absent/unknown: package availability, `acceptance`,
 completed CreateActions, and CI success do not establish independent reproduction.
 Clients may show the exact inspect detail route, obtain the digest-addressed ZIP,

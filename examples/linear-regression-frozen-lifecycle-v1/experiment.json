@@ -1,6 +1,11 @@
 {
   "buildRecipeVersion": 1,
   "id": "linear-regression-frozen-lifecycle-v1",
+  "isPartOf": {
+    "@id": "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+    "@type": "CreativeWork",
+    "name": "Exact-rational linear regression"
+  },
   "manifest": {
     "evidence": {
       "referencePackageSha256": "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544"

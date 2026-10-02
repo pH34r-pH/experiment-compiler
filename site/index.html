@@ -35,8 +35,18 @@
 <section id="experiments">
   <p class="eyebrow">PUBLIC CATALOG</p>
   <h2>Compiled Experiments</h2>
-  <p class="intro">Every record is projected from its authoritative recipe and package artifacts. Open a record for its exact package identity, provenance, lifecycle evidence, and any source-declared links to research articles.</p>
-  <div id="catalog" class="catalog" aria-live="polite">Loading experiment metadata…</div>
+  <p class="intro">Family labels are source-declared navigation metadata. Each row remains a distinct compiled experiment with its own result evidence, provenance, package identity, detail route, and download.</p>
+  <div id="catalog" class="catalog">
+    <div id="catalog-controls" class="catalog-controls" hidden>
+      <label for="catalog-filter">Filter records</label>
+      <input id="catalog-filter" type="search" autocomplete="off" placeholder="Family, record, result, status, source, or package hash">
+      <p id="catalog-status" class="catalog-status" aria-live="polite">Interactive catalog ready.</p>
+    </div>
+    <div class="table-scroll" role="region" aria-label="Scrollable compiled experiment catalog" tabindex="0">
+      <!-- GENERATED_CATALOG -->
+    </div>
+    <noscript><p class="no-script-note">The table above is the complete generated catalog. Filtering and sorting require JavaScript.</p></noscript>
+  </div>
 </section>
 <section id="standards">
   <p class="eyebrow">OPEN BY CONSTRUCTION</p>

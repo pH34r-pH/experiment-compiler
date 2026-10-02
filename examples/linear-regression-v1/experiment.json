@@ -1,6 +1,11 @@
 {
   "buildRecipeVersion": 1,
   "id": "stdlib-linear-regression-v1-compiled-experiment",
+  "isPartOf": {
+    "@id": "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
+    "@type": "CreativeWork",
+    "name": "Exact-rational linear regression"
+  },
   "manifest": {
     "evidence": {
       "dependencyClosureSha256": "831de164f1c292113b92c793bac45dd485bb93a41811fd113b59181bd01971b1",
