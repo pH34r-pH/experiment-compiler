@@ -12,7 +12,6 @@ Completed execution, a retained interpretation summary, publication review and b
 
 Pinned lifecycle catalog records verify the deterministic package and every source member before projection. Unpinned prospective descriptions remain available without requiring the full source closure to be built; their presentation is not an integrity verification receipt.
 
-
 ## Exact article reference contract v1
 
 An article stores only `compiled_experiment: {ref: <immutable experiment ID>}`.

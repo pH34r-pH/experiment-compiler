@@ -16,7 +16,6 @@ Verification checks the exact member inventory, digests, sizes and JSON syntax. 
 
 This release preserves the initial POC wire format. A future complete research package must use an explicitly versioned profile and a new digest; never silently “repair” historical member bytes or relabel a new scientific run as historical evidence.
 
-
 ## Lifecycle profile: plans, attempts and interpretation
 
 `compiled-experiment-lifecycle-v1` is a versioned application profile over RO-Crate 1.3, Process Run Crate 0.6, Schema.org and PROV-O. It requires the conventional root member `ro-crate-metadata.json`; the RO-Crate root Dataset identifies the protocol as `mainEntity`, and that protocol CreativeWork carries Schema.org `creativeWorkStatus`. The profile does not define a second experiment-status enum.
@@ -74,13 +73,11 @@ The retained finalization CI artifact is the completed handoff record. To publis
 
 Resource field mapping, byte closure classes, private-workspace use, and the publication boundary are documented in [resources-and-closure.md](resources-and-closure.md). CWL v1.2 expresses executable requirements; resource evidence and estimate basis stay with the source-owned experiment/provenance records.
 
-
 ## Self-contained reproduction profile
 
 `compiled-experiment-v1` does not authorize the compiler to execute package content. The public lifecycle separately exercises the known reviewed example after compilation: it verifies the ZIP, extracts it with Python's standard library, invokes the declared `experiment/reproduce.py` entrypoint, and compares the newly produced result bytes with the embedded reference result.
 
 A self-contained example should make its dependency closure explicit. The first example embeds code, tests, data/license/splits, environment, configuration, protocol, acceptance criteria, reference evidence/receipt, and resource measurements. Open-standard specifications may remain immutable public references. Missing prerequisites belong in an explicit unavailable list rather than being inferred or silently fetched.
-
 
 ## Standards validation boundary
 
