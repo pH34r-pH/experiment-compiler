@@ -520,7 +520,7 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(published["backlinks"], [{
             "title": "Milestone 005 — The unit-hypersphere anomaly (later comparison, not a replay)",
             "url": "https://tyharbin.com/articles/005-unit-hypersphere-anomaly/",
-            "sourceCommit": "965fb9186a0c1bb99cc3bd60b2e86668b0f12a91",
+            "sourceCommit": "bb92366a67d1fb433b979b65b9036ecc26f3795e",
         }])
         self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(len(published["scientificInterpretation"]), 1)
