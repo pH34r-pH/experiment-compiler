@@ -117,3 +117,5 @@ Scoped maintainer maps and focused validation commands live in [`AGENTS.md`](AGE
 Read [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for sensitive reports, and cite research use with [CITATION.cff](CITATION.cff).
 
 Apache-2.0. Copyright 2026 Tyler J.H.G. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Native handoff preparation is documented in [Offline native Actions projection](docs/native-actions-projection.md).

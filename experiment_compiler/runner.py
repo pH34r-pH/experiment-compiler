@@ -121,7 +121,7 @@ def _finite_number(value: Any) -> bool:
         return False
 
 
-def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> set[str]:
+def _admit_workflow(document: Any, limits: Any, expected_image: Any, *, native_projection: bool = False) -> set[str]:
     # This MVP intentionally supports one self-contained CommandLineTool. A
     # Workflow can point `run` at another CWL document; inspecting only the
     # entrypoint would let that document bypass all requirements below.
@@ -192,13 +192,7 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> set[str]
             raise PackageError("execution deferred: every CommandLineTool must explicitly disable network access")
         if set(network) != {"networkAccess"}:
             raise PackageError("execution deferred: unsupported NetworkAccess fields")
-        docker = requirements.get("DockerRequirement")
-        docker_pull = docker.get("dockerPull") if isinstance(docker, dict) else None
-        if (not isinstance(docker_pull, str) or "@sha256:" not in docker_pull or
-                docker_pull != expected_image):
-            raise PackageError("execution deferred: each CommandLineTool needs a digest-pinned Docker image")
-        if set(docker) != {"dockerPull"}:
-            raise PackageError("execution deferred: unsupported DockerRequirement fields")
+        _admit_container_requirement(requirements, expected_image, native_projection)
         resources = requirements.get("ResourceRequirement")
         time_limit = requirements.get("ToolTimeLimit")
         if not isinstance(resources, dict) or not isinstance(time_limit, dict):
@@ -229,6 +223,20 @@ def _admit_workflow(document: Any, limits: Any, expected_image: Any) -> set[str]
                     r"\$\((?:inputs\.[A-Za-z][A-Za-z0-9_]*\.path|runtime\.outdir)\)", value_from):
                 raise PackageError("execution deferred: CWL expression is outside the reviewed path-only subset")
     return set(declared_inputs)
+
+
+def _admit_container_requirement(requirements: dict, expected_image: Any, native_projection: bool) -> None:
+    if native_projection:
+        if "DockerRequirement" in requirements:
+            raise PackageError("native projection cannot remove a source-owned DockerRequirement")
+        return
+    docker = requirements.get("DockerRequirement")
+    docker_pull = docker.get("dockerPull") if isinstance(docker, dict) else None
+    if (not isinstance(docker_pull, str) or "@sha256:" not in docker_pull or
+            docker_pull != expected_image):
+        raise PackageError("execution deferred: each CommandLineTool needs a digest-pinned Docker image")
+    if set(docker) != {"dockerPull"}:
+        raise PackageError("execution deferred: unsupported DockerRequirement fields")
 
 
 def _values_for_key(value: Any, key: str, _seen: set[int] | None = None) -> list[str]:
