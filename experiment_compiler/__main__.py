@@ -68,6 +68,13 @@ def _build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("--output", required=True, type=Path,
                           help="new immutable final ZIP; writes a sibling .source closure")
 
+    projection = commands.add_parser("project-actions", help="derive inert native Actions job data without dispatch")
+    projection.add_argument("package", type=Path)
+    projection.add_argument("--expected-sha256", required=True)
+    projection.add_argument("--profile", required=True, type=Path, help="separately trusted controller profile")
+    projection.add_argument("--expected-profile-sha256", required=True)
+    projection.add_argument("--output", required=True, type=Path)
+
     for command in (build, check):
         command.add_argument("--receipt", type=Path, help="write an integrity-only JSON receipt")
     return parser
@@ -138,6 +145,16 @@ def _verify(args: argparse.Namespace) -> dict:
     )
 
 
+def _project_actions(args: argparse.Namespace) -> dict:
+    from .actions_projection import project_actions
+    if args.output.resolve() in {args.package.resolve(), args.profile.resolve()}:
+        raise PackageError("Projection output must not replace its inputs")
+    result = project_actions(args.package, args.profile, expected_sha256=args.expected_sha256,
+                             expected_profile_sha256=args.expected_profile_sha256)
+    write_once(args.output, canonical(result))
+    return result
+
+
 _COMMANDS = {
     "describe": _describe,
     "catalog": _catalog,
@@ -145,6 +162,7 @@ _COMMANDS = {
     "revise": _revise,
     "finalize": _finalize,
     "verify": _verify,
+    "project-actions": _project_actions,
 }
 
 
