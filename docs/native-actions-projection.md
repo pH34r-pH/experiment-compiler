@@ -82,3 +82,55 @@ Qualification on 2026-10-04 used offline fixtures only. The regression suite cov
 pinned identities, preserved Docker semantics, resource/network admission, staged
 File references, hostile paths, parser limits, and absence of dispatch. It makes
 no physical-worker or model-performance claim.
+
+## Controller receipt retention API
+
+`experiment_compiler.native_receipts` supplies an explicit
+`experiment-compiler.native-runner/v1` producer for future controller integration.
+It launches nothing and does not admit a worker. There is no dispatch or native
+executor attached to this API. Only offline fixture records have been tested.
+
+The controller calls `start_native_attempt(directory, identity, started_at=...)`
+after its own admission and before launch, then
+`finish_native_attempt(directory, observations, expected_started_sha256=...)`
+after observing the process outcome. Both return the SHA-256 of the snapshot
+written. The parent directory must already exist and be owned by the controller,
+outside candidate write access. Persistence currently requires POSIX directory
+`fsync`; native Windows persistence still needs a qualified implementation.
+
+The identity contains a 12-character hexadecimal scientific `attemptId`, exact
+`sourceRepository` and 40-character `sourceCommit`, and SHA-256 pins named
+`planPackageSha256`, `profileSha256`, `runtimeSha256`, `stagedAssetsSha256`, and
+`requestSha256`. The runtime pin identifies the controller's exact runtime artifact;
+the staged-assets pin identifies its canonical asset inventory. The controller
+must independently verify those bytes; the receipt API only validates digest
+syntax. `controller` separately binds its repository, `.github/workflows/*.yml`
+(or `.yaml`) path, 40-character commit, positive `runId` and `runAttempt`, and job
+identifier. A GitHub retry is not authorization to reuse a scientific attempt ID.
+The caller owns new attempt allocation and protocol attempt budgets.
+
+The started snapshot fixes all identities and the timezone-aware `startedAt`.
+Terminal observations supply `status`, timezone-aware `endedAt`, nonnegative
+monotonic `wallSeconds`, nullable integer `exitCode`, bounded `collectionErrors`,
+and `resourceMeasurements` containing `peakProcessMemoryBytes` and `cpuSeconds`.
+Unmeasured resources are `null`, never inferred from a requested resource limit.
+Terminal states are `succeeded`, `failed`, `timed-out`, and `cancelled`; process
+success requires exit zero and no collection errors. Output rejection can be
+retained as failure with collection errors even after exit zero. Cancellation
+and timeout remain distinct even if cleanup exits successfully.
+
+The existing owning runner persistence helper writes the latest
+`runner-receipt.json`. Native attempts additionally retain write-once
+`started-receipt.json` and `terminal-receipt.json`; terminal records bind the exact
+started digest in `startedReceiptSha256`. Started evidence cannot be rewritten,
+terminal evidence cannot be replaced, and unexpected or symlinked members reject
+writes. A persistence exception must stop launch; a retained snapshot after an
+exception is not an acknowledgement of durable remote archival. Controllers must
+retain started evidence through their existing archive before disposable cleanup.
+
+A missing terminal after worker loss remains an unresolved started attempt;
+the API does not fabricate an end time, duration, exit code, or success. These
+receipts explicitly use controller-reported identity, not independent attestation.
+Even `succeeded` proves neither result-package completion nor scientific acceptance.
+Result packaging, qualified execution, and archive transport remain separate work.
+Existing container receipt and package bytes are unchanged.

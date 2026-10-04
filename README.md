@@ -118,4 +118,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for sens
 
 Apache-2.0. Copyright 2026 Tyler J.H.G. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Native handoff preparation is documented in [Offline native Actions projection](docs/native-actions-projection.md).
+Native handoff preparation and the controller-reported started/terminal receipt
+API are documented in [Offline native Actions projection](docs/native-actions-projection.md).
+These offline components do not launch native workloads or qualify a worker.
