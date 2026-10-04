@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 import zipfile
 
-from .core import (MANIFEST, MAX_FILE, MAX_MEMBERS, MAX_TOTAL, PackageError, bounded_read, canonical, compile_package,
+from .core import (MANIFEST, PackageError, bounded_read, canonical, compile_package,
                    json_value, safe_path, verify_bytes)
 
 
@@ -414,14 +414,15 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
     except subprocess.SubprocessError as exc:
         raise PackageError(f"CWL runner could not start: {exc}") from exc
     collection_errors: list[str] = cleanup_errors
-    # Recipe source members have a 48 MiB aggregate budget. Reserve bounded
-    # logs (8 MiB) and controller metadata (1 MiB), plus the archived plan.
-    budget = max(0, MAX_TOTAL - MAX_FILE - sum(map(len, payload.values())) -
-                 plan_size - 9 * 1024 * 1024)
-    output_files = _collect_execution_tree(attempt_out, "output", collection_errors, budget)
+    # Execution collection is bounded by the reviewed worker/CWL resource
+    # envelope, not by a Compiled Experiment archive-size policy.
+    output_budget = limits["outdirMiB"] * 1024 * 1024
+    provenance_budget = limits["tmpdirMiB"] * 1024 * 1024
+    output_files = _collect_execution_tree(
+        attempt_out, "output", collection_errors, output_budget
+    )
     provenance_files = _collect_execution_tree(
-        provenance, "provenance", collection_errors,
-        budget - sum(map(len, output_files.values())),
+        provenance, "provenance", collection_errors, provenance_budget
     )
     if not output_files and return_code == 0:
         collection_errors.append("CWL runner succeeded without producing any admitted result files")
@@ -437,7 +438,7 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
 
 
 def _collect_execution_tree(root: Path, label: str, errors: list[str],
-                            max_bytes: int = MAX_TOTAL - MAX_FILE) -> dict[str, bytes]:
+                            max_bytes: int) -> dict[str, bytes]:
     collected: dict[str, bytes] = {}
     if not root.exists():
         return collected
@@ -634,7 +635,8 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
         shutil.copytree(stage, source_directory, dirs_exist_ok=True)
         with output.open("xb") as stream:
             output_identity = os.fstat(stream.fileno())
-            stream.write(bounded_read(prepared_package, MAX_TOTAL))
+            with prepared_package.open("rb") as prepared:
+                shutil.copyfileobj(prepared, stream, length=1024 * 1024)
     except BaseException:
         if output_identity is not None and output.exists():
             current = output.stat()
@@ -757,7 +759,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     source_directory = output.with_name(output.stem + ".source")
     if output.exists() or source_directory.exists():
         raise PackageError("run output package or source directory already exists; attempts are never overwritten")
-    package_bytes = bounded_read(package, MAX_TOTAL)
+    package_bytes = bounded_read(package)
     manifest, payload = _read_package(package_bytes, expected_sha256)
     closure, runner, limits, tmpfs_root = _admit(payload)
     attempt_directory = output.with_name(output.stem + ".attempt")
@@ -818,14 +820,15 @@ def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int) -> No
             raise PackageError("CWL output contains a symlink")
         if not path.is_file():
             continue
-        if len(collected) >= MAX_MEMBERS:
-            raise PackageError("CWL output contains too many files")
         relative = path.relative_to(root).as_posix()
         safe_path(relative)
-        content = bounded_read(path, min(MAX_FILE, max_bytes))
+        remaining = max_bytes - total
+        if remaining < 0:
+            raise PackageError("CWL output exceeds the declared worker resource budget")
+        content = bounded_read(path, remaining)
         total += len(content)
         if total > max_bytes:
-            raise PackageError("CWL output and provenance exceed the package size limit")
+            raise PackageError("CWL output exceeds the declared worker resource budget")
         collected[relative] = content
 
 
