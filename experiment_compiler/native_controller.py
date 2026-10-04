@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import ContextManager, Protocol
 
 from .actions_projection import PROFILE_LIMIT, _pinned_profile, project_actions
-from .core import MAX_TOTAL, PackageError, bounded_read, canonical, json_value
+from .core import PackageError, bounded_read, canonical, json_value
 from .native_receipts import _identity, finish_native_attempt, start_native_attempt
 from .runner import _read_package
 
@@ -84,7 +84,7 @@ def _prepare(package: Path, profile_path: Path, selection: dict):
     # as an authorization. Only the independent authority below can admit execution.
     projection = project_actions(package, profile_path, expected_sha256=selection["packageSha256"],
                                  expected_profile_sha256=selection["profileSha256"])
-    package_bytes = bounded_read(package, MAX_TOTAL)
+    package_bytes = bounded_read(package)
     manifest, _ = _read_package(package_bytes, selection["packageSha256"])
     profile = _pinned_profile(profile_path, selection["profileSha256"])
     profile_bytes = bounded_read(profile_path, PROFILE_LIMIT)
