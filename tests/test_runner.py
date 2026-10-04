@@ -52,7 +52,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 stream.truncate(65)
             errors = []
             self.assertEqual(_collect_execution_tree(root, "output", errors, 64), {})
-            self.assertTrue(any("caller resource budget" in error for error in errors))
+            self.assertTrue(any("declared worker resource budget" in error for error in errors))
 
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
         scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
