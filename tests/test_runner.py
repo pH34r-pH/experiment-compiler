@@ -15,6 +15,8 @@ from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree
 from experiment_compiler.runner import sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
+MIB = 1024 * 1024
+WORKER_OUTPUT_BUDGET = 64 * MIB
 
 
 class RunnerBoundaryTests(unittest.TestCase):
@@ -43,19 +45,18 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(timelimit=value), self.assertRaises(PackageError):
                 _admit_workflow(invalid, limits, image)
 
-    def test_collector_rejects_oversized_individual_member(self):
-        from experiment_compiler.core import MAX_FILE
+    def test_collector_enforces_explicit_worker_output_budget(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with (root / "too-large").open("wb") as stream:
-                stream.truncate(MAX_FILE + 1)
+                stream.truncate(65)
             errors = []
-            self.assertEqual(_collect_execution_tree(root, "output", errors), {})
-            self.assertTrue(errors)
+            self.assertEqual(_collect_execution_tree(root, "output", errors, 64), {})
+            self.assertTrue(any("caller resource budget" in error for error in errors))
 
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
         scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
-                     "oversized-output", "aggregate", "shared-budget", "missing", "compile",
+                     "oversized-output", "aggregate", "oversized-provenance", "missing", "compile",
                      "copy", "existing-output", "existing-source", "launch", "interrupted", "cancelled", "cancelled-cleanup-timeout", "cancelled-cleanup-interrupted", "terminal-persist")
         for scenario in scenarios:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
@@ -97,23 +98,24 @@ class RunnerBoundaryTests(unittest.TestCase):
         return launch
 
     def _write_attempt_outputs(self, scenario, directory, command):
-        from experiment_compiler.core import MAX_FILE
         out = Path(command[command.index("--outdir") + 1])
         out.mkdir()
         if scenario != "missing":
             (out / "result.txt").write_bytes(b"fixture")
         if scenario == "symlink":
             (out / "link").symlink_to(out / "result.txt")
-        sizes = {"oversized-output": [MAX_FILE + 1], "aggregate": [MAX_FILE] * 3,
-                 "shared-budget": [MAX_FILE] * 2}
+        sizes = {
+            "oversized-output": [WORKER_OUTPUT_BUDGET + 1],
+            "aggregate": [32 * MIB, 32 * MIB, 1],
+        }
         for number, size in enumerate(sizes.get(scenario, [])):
             with (out / f"large-{number}").open("wb") as stream:
                 stream.truncate(size)
-        if scenario == "shared-budget":
+        if scenario == "oversized-provenance":
             provenance = Path(command[command.index("--provenance") + 1])
             provenance.mkdir()
             with (provenance / "too-much").open("wb") as stream:
-                stream.truncate(MAX_FILE)
+                stream.truncate(65 * MIB)
         if scenario == "existing-output":
             (directory / "result.zip").write_bytes(b"not owned by this attempt")
         if scenario == "existing-source":
@@ -183,12 +185,12 @@ class RunnerBoundaryTests(unittest.TestCase):
         self._check_cancellation_evidence(scenario, directory, receipt)
         rejected = {"symlink", "oversized-output", "aggregate", "missing"}
         errors = rejected | {"compile", "copy", "existing-output", "existing-source",
-                             "launch", "oversized-log", "shared-budget"}
+                             "launch", "oversized-log", "oversized-provenance"}
         if scenario in errors:
             self.assertTrue(receipt["collectionErrors"])
         if scenario in rejected:
             self.assertEqual(receipt["outputs"], [])
-        if scenario == "shared-budget":
+        if scenario == "oversized-provenance":
             self.assertEqual(receipt["workflowRunCrateFiles"], [])
         if scenario in ("compile", "copy"):
             message = "fixture packaging failure" if scenario == "compile" else "fixture source copy failure"
@@ -265,7 +267,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             root = Path(temporary)
             (root / "one.txt").write_bytes(b"1234")
             (root / "two.txt").write_bytes(b"5678")
-            with self.assertRaisesRegex(PackageError, "exceed the package size limit"):
+            with self.assertRaisesRegex(PackageError, "declared worker resource budget"):
                 _collect_tree(root, {}, 7)
 
     def test_collection_rejects_symlinks(self):
