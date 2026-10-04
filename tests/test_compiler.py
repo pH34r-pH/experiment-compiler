@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
-    json_value, load_recipe, manifest_for, safe_path, sha256, unique_paths, verify_bytes)
+    json_value, load_recipe, manifest_for, safe_path, sha256, unique_paths, verify_bytes, verify_package)
 from experiment_compiler.resources import bytes_to_mib_minimum, seconds_to_cwl_limit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -758,12 +758,35 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             verify_bytes(raw, recipe=recipe)
 
-    def test_verifier_rejects_size_limits_and_malformed_zip(self):
-        raw = self.build()
-        with patch("experiment_compiler.core.MAX_FILE", 100), self.assertRaises(PackageError):
-            verify_bytes(raw)
-        with patch("experiment_compiler.core.MAX_TOTAL", 100), self.assertRaises(PackageError):
-            verify_bytes(raw)
+    def test_large_artifact_exceeding_former_limits_compiles_and_verifies(self):
+        fixture = self.root / "large-artifact"
+        shutil.copytree(SELF_CONTAINED, fixture)
+        recipe_path = fixture / "experiment.json"
+        recipe = load_recipe(recipe_path)
+        recipe.pop("expectedPackage", None)
+        member = next(item for item in recipe["members"] if item["path"] == "experiment/data.csv")
+        payload = fixture / member["source"]
+        former_total_limit = 64 * 1024 * 1024
+        with payload.open("wb") as stream:
+            stream.seek(former_total_limit)
+            stream.write(b"\0")
+        member["size"] = payload.stat().st_size
+        digest = hashlib.sha256()
+        with payload.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        member["sha256"] = digest.hexdigest()
+        recipe_path.write_bytes(canonical(recipe))
+
+        package = self.root / "large-artifact.zip"
+        built = compile_package(recipe_path, package)
+        verified = verify_package(package, recipe=load_recipe(recipe_path))
+        self.assertEqual(verified["packageSha256"], built["packageSha256"])
+        self.assertGreater(member["size"], former_total_limit)
+        with zipfile.ZipFile(package) as archive:
+            self.assertEqual(archive.getinfo("experiment/data.csv").file_size, member["size"])
+
+    def test_verifier_rejects_malformed_zip(self):
         with self.assertRaises(PackageError):
             verify_bytes(b"not a zip")
 
