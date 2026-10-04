@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .core import (
     MANIFEST,
-    MAX_TOTAL,
     PackageError,
     bounded_read,
     json_value,
