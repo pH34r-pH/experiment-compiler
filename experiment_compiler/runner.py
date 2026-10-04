@@ -416,7 +416,7 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
     collection_errors: list[str] = cleanup_errors
     # Execution collection is bounded by the reviewed worker/CWL resource
     # envelope, not by a Compiled Experiment archive-size policy.
-    output_budget = limits["outdirMiB"] * 1024 * 1024
+    output_budget = limits.get("outdirMiB", limits["tmpdirMiB"]) * 1024 * 1024
     provenance_budget = limits["tmpdirMiB"] * 1024 * 1024
     output_files = _collect_execution_tree(
         attempt_out, "output", collection_errors, output_budget
@@ -438,7 +438,7 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
 
 
 def _collect_execution_tree(root: Path, label: str, errors: list[str],
-                            max_bytes: int) -> dict[str, bytes]:
+                            max_bytes: int | None = None) -> dict[str, bytes]:
     collected: dict[str, bytes] = {}
     if not root.exists():
         return collected
@@ -813,7 +813,7 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int) -> None:
+def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int | None) -> None:
     total = sum(len(value) for value in collected.values())
     for path in sorted(root.rglob("*")):
         if path.is_symlink():
@@ -822,12 +822,12 @@ def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int) -> No
             continue
         relative = path.relative_to(root).as_posix()
         safe_path(relative)
-        remaining = max_bytes - total
-        if remaining < 0:
+        remaining = None if max_bytes is None else max_bytes - total
+        if remaining is not None and remaining < 0:
             raise PackageError("CWL output exceeds the declared worker resource budget")
         content = bounded_read(path, remaining)
         total += len(content)
-        if total > max_bytes:
+        if max_bytes is not None and total > max_bytes:
             raise PackageError("CWL output exceeds the declared worker resource budget")
         collected[relative] = content
 
