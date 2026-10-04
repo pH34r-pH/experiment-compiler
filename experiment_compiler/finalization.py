@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 
 from .assembly import compile_source_closure
-from .core import (MANIFEST, MAX_FILE, MAX_TOTAL, PackageError, bounded_read,
+from .core import (MANIFEST, PackageError, bounded_read,
                    canonical, json_value, safe_path, sha256,
                    validate_lifecycle_crate, verify_bytes)
 from .revision import PROV, _read_parent_attempt, _root_and_protocol
@@ -21,7 +21,7 @@ SCHEMA = "https://schema.org/"
 
 
 def _source_text(path: Path, description: str) -> bytes:
-    data = bounded_read(path, MAX_FILE)
+    data = bounded_read(path)
     try:
         text = data.decode("utf-8")
     except UnicodeError as exc:
@@ -72,10 +72,7 @@ def finalize_package(parent_package: Path, output: Path, *,
     if output.exists() or output.is_symlink() or source_directory.exists() or source_directory.is_symlink():
         raise PackageError("Final artifact or source directory already exists; artifacts are never overwritten")
 
-    parent_bytes = bounded_read(parent_package, MAX_TOTAL)
-    if len(parent_bytes) > MAX_FILE:
-        raise PackageError(f"Parent attempt package exceeds the {MAX_FILE} byte single-member finalization limit")
-    parent_verification = verify_bytes(parent_bytes, expected_sha256=expected_sha256)
+    parent_bytes = bounded_read(parent_package)    parent_verification = verify_bytes(parent_bytes, expected_sha256=expected_sha256)
     if parent_verification["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("Finalization parent must use compiled-experiment-lifecycle-v1")
     parent_crate, receipt, _ = _read_parent_attempt(parent_bytes, attempt_id)
