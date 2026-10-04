@@ -72,7 +72,8 @@ def finalize_package(parent_package: Path, output: Path, *,
     if output.exists() or output.is_symlink() or source_directory.exists() or source_directory.is_symlink():
         raise PackageError("Final artifact or source directory already exists; artifacts are never overwritten")
 
-    parent_bytes = bounded_read(parent_package)    parent_verification = verify_bytes(parent_bytes, expected_sha256=expected_sha256)
+    parent_bytes = bounded_read(parent_package)
+    parent_verification = verify_bytes(parent_bytes, expected_sha256=expected_sha256)
     if parent_verification["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("Finalization parent must use compiled-experiment-lifecycle-v1")
     parent_crate, receipt, _ = _read_parent_attempt(parent_bytes, attempt_id)
