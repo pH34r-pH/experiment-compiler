@@ -272,7 +272,12 @@ def _zip_info(name: str) -> zipfile.ZipInfo:
 
 def _validate_source_member(root: Path, item: dict) -> Path:
     source = _source(root, item["source"])
-    size = source.stat().st_size
+    try:
+        size = source.stat().st_size
+    except OSError as exc:
+        raise PackageError(f"Expected regular file: {source}") from exc
+    if source.is_symlink() or not source.is_file():
+        raise PackageError(f"Expected regular file: {source}")
     if size != item["size"] or sha256_file(source) != item["sha256"]:
         raise PackageError(f"Source integrity mismatch: {item['source']}")
     if size <= 1024 and _is_git_lfs_pointer(bounded_read(source)):
@@ -357,11 +362,13 @@ def compile_package(recipe_path: Path, output: Path) -> dict:
     root = recipe_path.parent.resolve()
     expected = recipe.get("expectedPackage")
 
-    # Whole-package compatibility fixtures predate streaming assembly. Preserve
-    # their exact bytes while allowing new/general artifacts to stream to disk.
-    if expected is not None:
+    # Preserve the historical deterministic ZIP byte layout for ordinary small
+    # packages. This threshold chooses an assembly implementation only; it is
+    # not an artifact validity limit. Larger packages transparently stream.
+    use_legacy_assembly = sum(item["size"] for item in recipe["members"]) <= 64 * 1024 * 1024
+    if expected is not None or use_legacy_assembly:
         data = _legacy_compatibility_bytes(recipe, root)
-        if (sha256(data), len(data)) != (expected["sha256"], expected["size"]):
+        if expected is not None and (sha256(data), len(data)) != (expected["sha256"], expected["size"]):
             raise PackageError("Built ZIP differs from pinned compatibility target; do not update the target blindly")
         report = verify_bytes(data, recipe=recipe)
         write_once(output, data)
