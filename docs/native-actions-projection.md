@@ -134,3 +134,60 @@ receipts explicitly use controller-reported identity, not independent attestatio
 Even `succeeded` proves neither result-package completion nor scientific acceptance.
 Result packaging, qualified execution, and archive transport remain separate work.
 Existing container receipt and package bytes are unchanged.
+
+## Trusted native controller consumer
+
+`experiment_compiler.native_controller.run_native_controller` coordinates one
+native attempt through an explicitly injected Fleet authority. It reuses the
+owning package/profile/CWL/job admission and native receipt APIs. It supplies no
+default executor, scheduler, dispatch credentials, isolation implementation, or
+native CLI. The offline `project-actions` output remains inert and unchanged.
+
+The caller supplies package/profile paths, a controller-owned attempt directory,
+and `selection` containing `packageSha256`, `profileSha256`, `runtimeSha256`,
+`attemptId`, and the receipt `controller` identity. Package and profile bytes are
+verified against those independent pins. The scientific repository and commit
+come from the verified package manifest; controller repository/workflow/commit
+must match the profile's pinned workflow exactly. All required profile capability
+states must be `qualified` with a qualification-evidence digest, but those source
+assertions alone never authorize execution.
+
+The API constructs an immutable `NativeRequest`: verified package bytes, verified
+profile bytes, and canonical specification bytes binding exact source, runtime,
+asset inventory, CWL/job hashes, resource limits, wall budget and controller
+identity. This request is submitted to `authority.lease(request)`. A trusted
+Fleet implementation must independently authenticate the qualification evidence,
+verify current target runtime/asset bytes, admit protocol attempt/resource/deadline
+budgets, acquire shared foreground ownership, and enforce candidate credential,
+network and process boundaries. Unknown, expired or unsupported qualification
+must raise before entering the lease. The API checks that the returned lease
+binds the exact request and qualification-evidence digests; it does not treat an
+echoed digest as proof of physical qualification. The authority implementation and
+Python environment must remain outside candidate control.
+
+Within that qualified lease, the controller performs these steps:
+
+1. Persist the immutable started snapshot using the existing native receipt API.
+2. Call `lease.retain(receipt_bytes, expected_sha256=...)` and require an exact
+   digest acknowledgement of retention outside disposable worker state.
+3. Call `lease.execute(request)` once. The trusted adapter owns bounded execution,
+   observed exit/cancellation/timeout status, cleanup, and measured resources. It
+   returns the native receipt observation fields; unknown outcome must raise.
+4. Validate and persist the immutable terminal snapshot, then retain those exact
+   bytes through the same transport acknowledgement.
+5. Release the authority's exclusive lifetime. Return receipt hashes and the
+   observed operational status, never a scientific or result-package success claim.
+
+Any admission, persistence or started-retention failure prevents the executor
+call. Execution transport loss or invalid observations leave the started snapshot
+unresolved. Terminal transport loss preserves the locally observed terminal
+snapshot and raises; it neither rewrites that observation nor retries execution.
+The trusted authority must retain failures and release ownership even when a
+callback raises. Successful cleanup cannot change an observed failed process into
+success. A missing terminal is not evidence of cancellation or timeout.
+
+The consumer is qualified only by injected offline fixtures here. A real Fleet
+authority, executable native adapter, durable transport, and physical profile
+qualification are still necessary. Its local receipt store remains POSIX-only.
+No workflow is wired to this consumer by this change, and no physical workload
+was launched in its tests.
