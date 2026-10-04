@@ -823,7 +823,7 @@ def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int | None
         relative = path.relative_to(root).as_posix()
         safe_path(relative)
         remaining = None if max_bytes is None else max_bytes - total
-        if remaining is not None and remaining < 0:
+        if remaining is not None and (remaining < 0 or path.stat().st_size > remaining):
             raise PackageError("CWL output exceeds the declared worker resource budget")
         content = bounded_read(path, remaining)
         total += len(content)
