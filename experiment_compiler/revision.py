@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .assembly import compile_source_closure
-from .core import (MANIFEST, MAX_FILE, MAX_TOTAL, PackageError, bounded_read,
+from .core import (MANIFEST, PackageError, bounded_read,
                    canonical, json_value, load_recipe, safe_path, sha256,
                    validate_lifecycle_crate, verify_bytes)
 
@@ -159,7 +159,7 @@ def _stage_recipe(recipe_path: Path, destination: Path) -> tuple[dict, dict[str,
                 raise PackageError(f"Source symlinks are not permitted: {item['source']}")
         if not source.resolve().is_relative_to(root):
             raise PackageError("Source escapes recipe directory")
-        data = bounded_read(source, MAX_FILE)
+        data = bounded_read(source)
         if len(data) != item["size"] or sha256(data) != item["sha256"]:
             raise PackageError(f"Source integrity mismatch: {item['source']}")
         if item["path"] == MANIFEST:
@@ -187,9 +187,7 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
     if output.exists() or output.is_symlink() or source_directory.exists() or source_directory.is_symlink():
         raise PackageError("Revision output package or source directory already exists; revisions are never overwritten")
 
-    parent_bytes = bounded_read(parent_package, MAX_TOTAL)
-    if len(parent_bytes) > MAX_FILE:
-        raise PackageError(f"Parent attempt package exceeds the {MAX_FILE} byte single-member revision limit")
+    parent_bytes = bounded_read(parent_package)
     parent_verified = verify_bytes(parent_bytes, expected_sha256=expected_sha256)
     if parent_verified["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("Revision parent must use compiled-experiment-lifecycle-v1")

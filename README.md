@@ -64,9 +64,12 @@ bounded logs remain there even if result compilation fails. A receipt still mark
 completion. Existing result ZIP and `.source` evidence remain available for
 successfully packaged attempts. Attempt directories are never overwritten.
 
-Output collection rejects members above 16 MiB and shares the remaining 48 MiB
-recipe source budget between outputs and CWL provenance, reserving space for the
-plan, bounded logs and attempt metadata.
+Artifact packaging has no project-invented per-file or total-byte ceiling. Large
+third-party models/datasets may remain at their canonical immutable distribution
+(for example an exact Hugging Face revision), while source-owned evidence may be
+embedded or archived according to the selected publication repository. Execution
+output collection is bounded only by the reviewed CWL/worker resource envelope;
+bounded controller logs remain a separate operational safeguard.
 
 None of those steps alone proves that a scientific conclusion is correct.
 

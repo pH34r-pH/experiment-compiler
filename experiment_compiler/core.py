@@ -8,9 +8,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import platform
 import re
+import shutil
 import stat
+import tempfile
 import zipfile
 import zlib
 from pathlib import Path
@@ -19,9 +22,6 @@ from typing import Any
 from . import __version__
 
 MANIFEST = "experiment-package-manifest.json"
-MAX_FILE = 16 * 1024 * 1024
-MAX_TOTAL = 64 * 1024 * 1024
-MAX_MEMBERS = 1024
 SHA256 = re.compile(r"[0-9a-f]{64}")
 SHA1 = re.compile(r"[0-9a-f]{40}")
 FAMILY_URL_PREFIX = "https://experiments.tyharbin.com/#family-"
@@ -61,14 +61,33 @@ def json_value(data: bytes) -> Any:
         raise PackageError(f"Invalid JSON: {exc}") from exc
 
 
-def bounded_read(path: Path, maximum: int) -> bytes:
+def bounded_read(path: Path, maximum: int | None = None) -> bytes:
+    """Read a regular file, optionally under an explicit caller-owned resource budget.
+
+    Experiment Compiler does not impose a format-level byte ceiling. Callers such
+    as execution-log collection may supply an operational budget; compile/verify
+    use no implicit maximum.
+    """
     if path.is_symlink() or not path.is_file():
         raise PackageError(f"Expected regular file: {path}")
     with path.open("rb") as stream:
+        if maximum is None:
+            return stream.read()
         data = stream.read(maximum + 1)
     if len(data) > maximum:
-        raise PackageError(f"File exceeds {maximum} byte limit: {path.name}")
+        raise PackageError(f"File exceeds caller resource budget of {maximum} bytes: {path.name}")
     return data
+
+
+def sha256_file(path: Path) -> str:
+    """Hash a regular file incrementally without imposing an artifact-size limit."""
+    if path.is_symlink() or not path.is_file():
+        raise PackageError(f"Expected regular file: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def safe_path(value: Any) -> str:
@@ -101,7 +120,7 @@ def _digest(value: Any) -> bool:
 
 
 def _size(value: Any) -> bool:
-    return type(value) is int and 0 <= value <= MAX_FILE
+    return type(value) is int and value >= 0
 
 
 def validate_header(header: Any) -> str:
@@ -168,7 +187,7 @@ def _validate_is_part_of(is_part_of: Any) -> None:
 
 
 def load_recipe(path: Path) -> dict:
-    recipe = json_value(bounded_read(path, MAX_FILE))
+    recipe = json_value(bounded_read(path))
     required = {"buildRecipeVersion", "id", "title", "profile", "manifest", "members"}
     optional = {"expectedPackage", "relatedArticles", "isPartOf"}
     if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - optional:
@@ -185,20 +204,18 @@ def load_recipe(path: Path) -> dict:
     if "isPartOf" in recipe:
         _validate_is_part_of(recipe["isPartOf"])
     members = recipe["members"]
-    if not isinstance(members, list) or not 1 <= len(members) < MAX_MEMBERS:
-        raise PackageError("Recipe requires a bounded, nonempty member list")
+    if not isinstance(members, list) or not members:
+        raise PackageError("Recipe requires a nonempty member list")
     for item in members:
         if (not isinstance(item, dict) or set(item) != {"source", "path", "sha256", "size"} or
                 not _digest(item["sha256"]) or not _size(item["size"])):
             raise PackageError("Recipe member must pin source, path, SHA-256 and size")
         safe_path(item["source"])
     unique_paths([MANIFEST] + [item["path"] for item in members])
-    if sum(item["size"] for item in members) > MAX_TOTAL - MAX_FILE:
-        raise PackageError("Recipe exceeds total byte limit")
     expected = recipe.get("expectedPackage")
     if expected is not None and (not isinstance(expected, dict) or set(expected) != {"sha256", "size"} or
             not _digest(expected["sha256"]) or type(expected["size"]) is not int or
-            not 0 < expected["size"] <= MAX_TOTAL):
+            expected["size"] <= 0):
         raise PackageError("Invalid expected package identity")
     return recipe
 
@@ -234,7 +251,7 @@ def write_once(path: Path, data: bytes) -> None:
     """Idempotent for identical bytes; never overwrite a different existing file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() or path.is_symlink():
-        if bounded_read(path, MAX_TOTAL) == data:
+        if bounded_read(path) == data:
             return
         raise PackageError(f"Output already exists with different bytes: {path}")
     try:
@@ -245,39 +262,140 @@ def write_once(path: Path, data: bytes) -> None:
         raise
 
 
+def _zip_info(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name, EPOCH)
+    info.create_system = 3
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o100644 << 16
+    return info
+
+
+def _validate_source_member(root: Path, item: dict) -> Path:
+    source = _source(root, item["source"])
+    try:
+        size = source.stat().st_size
+    except OSError as exc:
+        raise PackageError(f"Expected regular file: {source}") from exc
+    if source.is_symlink() or not source.is_file():
+        raise PackageError(f"Expected regular file: {source}")
+    if size != item["size"] or sha256_file(source) != item["sha256"]:
+        raise PackageError(f"Source integrity mismatch: {item['source']}")
+    if size <= 1024 and _is_git_lfs_pointer(bounded_read(source)):
+        raise PackageError(f"Git LFS pointer is not the referenced payload: {item['source']}")
+    if item["path"].endswith((".json", ".jsonld")):
+        if not isinstance(json_value(bounded_read(source)), (dict, list)):
+            raise PackageError("JSON members must have an object or array root")
+    return source
+
+
+def _legacy_compatibility_bytes(recipe: dict, root: Path) -> bytes:
+    """Preserve byte-identical historical fixtures that already pin whole ZIP bytes."""
+    files: dict[str, bytes] = {}
+    for item in recipe["members"]:
+        source = _validate_source_member(root, item)
+        files[item["path"]] = bounded_read(source)
+    files[MANIFEST] = canonical(manifest_for(recipe))
+    target = io.BytesIO()
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for name, data in sorted(files.items()):
+            archive.writestr(_zip_info(name), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    return target.getvalue()
+
+
+def _write_streaming_zip(recipe: dict, root: Path, target: Path) -> None:
+    sources = {
+        item["path"]: _validate_source_member(root, item)
+        for item in recipe["members"]
+    }
+    with zipfile.ZipFile(
+        target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9, allowZip64=True
+    ) as archive:
+        for name, source in sorted(sources.items()):
+            info = _zip_info(name)
+            size = source.stat().st_size
+            info.file_size = size
+            with source.open("rb") as src, archive.open(
+                info, "w", force_zip64=size >= zipfile.ZIP64_LIMIT
+            ) as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+        archive.writestr(
+            _zip_info(MANIFEST),
+            canonical(manifest_for(recipe)),
+            compress_type=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        )
+
+
+def _files_equal(left: Path, right: Path) -> bool:
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as a, right.open("rb") as b:
+        while True:
+            a_chunk = a.read(1024 * 1024)
+            b_chunk = b.read(1024 * 1024)
+            if a_chunk != b_chunk:
+                return False
+            if not a_chunk:
+                return True
+
+
+def _publish_file_once(source: Path, output: Path) -> None:
+    """Publish a completed package without overwriting different existing bytes."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() or output.is_symlink():
+        if output.is_file() and not output.is_symlink() and _files_equal(source, output):
+            return
+        raise PackageError(f"Output already exists with different bytes: {output}")
+    created = False
+    try:
+        with source.open("rb") as src, output.open("xb") as dst:
+            created = True
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
+    except BaseException:
+        if created:
+            output.unlink(missing_ok=True)
+        raise
+
+
 def compile_package(recipe_path: Path, output: Path) -> dict:
     recipe = load_recipe(recipe_path)
     root = recipe_path.parent.resolve()
-    files: dict[str, bytes] = {}
-    for item in recipe["members"]:
-        data = bounded_read(_source(root, item["source"]), MAX_FILE)
-        if len(data) != item["size"] or sha256(data) != item["sha256"]:
-            raise PackageError(f"Source integrity mismatch: {item['source']}")
-        if _is_git_lfs_pointer(data):
-            raise PackageError(f"Git LFS pointer is not the referenced payload: {item['source']}")
-        if item["path"].endswith((".json", ".jsonld")):
-            if not isinstance(json_value(data), (dict, list)):
-                raise PackageError("JSON members must have an object or array root")
-        files[item["path"]] = data
-    files[MANIFEST] = canonical(manifest_for(recipe))
-    target = io.BytesIO()
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for name, data in sorted(files.items()):
-            info = zipfile.ZipInfo(name, EPOCH)
-            info.create_system = 3
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o100644 << 16
-            z.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-    data = target.getvalue()
     expected = recipe.get("expectedPackage")
-    if expected and (sha256(data), len(data)) != (expected["sha256"], expected["size"]):
-        raise PackageError("Built ZIP differs from pinned compatibility target; do not update the target blindly")
-    report = verify_bytes(data, recipe=recipe)
-    write_once(output, data)
-    return {**report, "build": {"compilerVersion": __version__, "python": platform.python_version(),
-            "zlib": zlib.ZLIB_RUNTIME_VERSION, "recipeSha256": sha256(bounded_read(recipe_path, MAX_FILE)),
-            "profile": recipe["profile"]}}
 
+    # Preserve the historical deterministic ZIP byte layout for ordinary small
+    # packages. This threshold chooses an assembly implementation only; it is
+    # not an artifact validity limit. Larger packages transparently stream.
+    use_legacy_assembly = sum(item["size"] for item in recipe["members"]) <= 64 * 1024 * 1024
+    if expected is not None or use_legacy_assembly:
+        data = _legacy_compatibility_bytes(recipe, root)
+        if expected is not None and (sha256(data), len(data)) != (expected["sha256"], expected["size"]):
+            raise PackageError("Built ZIP differs from pinned compatibility target; do not update the target blindly")
+        report = verify_bytes(data, recipe=recipe)
+        write_once(output, data)
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=".experiment-compiler-", suffix=".zip", dir=output.parent
+        )
+        os.close(fd)
+        temporary = Path(temporary_name)
+        try:
+            _write_streaming_zip(recipe, root, temporary)
+            report = verify_package(temporary, recipe=recipe)
+            _publish_file_once(temporary, output)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    return {
+        **report,
+        "build": {
+            "compilerVersion": __version__,
+            "python": platform.python_version(),
+            "zlib": zlib.ZLIB_RUNTIME_VERSION,
+            "recipeSha256": sha256_file(recipe_path),
+            "profile": recipe["profile"],
+        },
+    }
 
 def _lifecycle_graph(crate: Any) -> tuple[list, dict[str, dict]]:
     if not isinstance(crate, dict) or not isinstance(crate.get("@graph"), list):
@@ -487,62 +605,128 @@ def _as_refs(value: Any) -> list[dict]:
     return []
 
 
-def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dict | None = None) -> dict:
-    """Check complete inventory and hashes. This is not scientific qualification."""
-    if len(data) > MAX_TOTAL:
-        raise PackageError("ZIP exceeds total byte limit")
-    actual = sha256(data)
-    if expected_sha256 is not None and (not _digest(expected_sha256) or actual != expected_sha256):
+def _hash_stream(stream) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+        size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _verify_archive(archive: zipfile.ZipFile, *, package_sha256: str, package_size: int,
+                    expected_sha256: str | None = None, recipe: dict | None = None) -> dict:
+    if expected_sha256 is not None and (not _digest(expected_sha256) or package_sha256 != expected_sha256):
         raise PackageError("Package SHA-256 mismatch")
     expected = recipe.get("expectedPackage") if recipe else None
-    if expected and (actual, len(data)) != (expected["sha256"], expected["size"]):
+    if expected and (package_sha256, package_size) != (expected["sha256"], expected["size"]):
         raise PackageError("Package differs from recipe compatibility target")
+
+    infos = archive.infolist()
+    if len(infos) < 2:
+        raise PackageError("Invalid ZIP member count")
+    unique_paths([item.orig_filename for item in infos])
+    if any(
+        item.filename != item.orig_filename
+        or item.is_dir()
+        or item.flag_bits & 1
+        or stat.S_IFMT(item.external_attr >> 16) not in (0, stat.S_IFREG)
+        or item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+        for item in infos
+    ):
+        raise PackageError("Unsupported ZIP member")
+
+    manifest_raw = archive.read(MANIFEST)
+    manifest = json_value(manifest_raw)
+    if not isinstance(manifest, dict) or "members" not in manifest:
+        raise PackageError("Missing manifest member inventory")
+    profile = validate_header({key: value for key, value in manifest.items() if key != "members"})
+    members = manifest["members"]
+    if not isinstance(members, list) or not members:
+        raise PackageError("Manifest member list must be nonempty")
+    for item in members:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"path", "sha256", "size"}
+            or not _digest(item["sha256"])
+            or not _size(item["size"])
+        ):
+            raise PackageError("Malformed manifest member")
+
+    names = [MANIFEST] + [item["path"] for item in members]
+    unique_paths(names)
+    if set(names) != set(archive.namelist()):
+        raise PackageError("ZIP inventory differs from manifest (missing or unlisted file)")
+
+    by_name = {item.filename: item for item in infos}
+    for item in members:
+        info = by_name[item["path"]]
+        if info.file_size != item["size"]:
+            raise PackageError(f"Member size mismatch: {item['path']}")
+        with archive.open(item["path"]) as stream:
+            digest, size = _hash_stream(stream)
+        if (digest, size) != (item["sha256"], item["size"]):
+            raise PackageError(f"Member integrity mismatch: {item['path']}")
+        if item["path"].endswith((".json", ".jsonld")):
+            if not isinstance(json_value(archive.read(item["path"])), (dict, list)):
+                raise PackageError("JSON members must have an object or array root")
+
+    lifecycle_projection = None
+    if profile == "compiled-experiment-lifecycle-v1":
+        metadata_path = "ro-crate-metadata.json"
+        if metadata_path not in {item["path"] for item in members}:
+            raise PackageError(f"Lifecycle profile requires {metadata_path}")
+        lifecycle_projection = validate_lifecycle_crate(json_value(archive.read(metadata_path)))
+    if recipe and (profile != recipe["profile"] or manifest != manifest_for(recipe)):
+        raise PackageError("Package manifest differs from reviewed recipe")
+
+    return {
+        "schemaVersion": 1,
+        "status": "integrity-verified",
+        "scope": "package-integrity-only",
+        "scientificReproduction": "not-run",
+        "profile": profile,
+        "packageSha256": package_sha256,
+        "packageSizeBytes": package_size,
+        "memberCount": len(infos),
+        "manifestSha256": sha256(manifest_raw),
+        "source": manifest["source"],
+        "matchedExpectedPackage": bool(expected or expected_sha256),
+        **({"lifecycle": lifecycle_projection} if lifecycle_projection is not None else {}),
+    }
+
+
+def verify_package(package: Path, *, expected_sha256: str | None = None,
+                   recipe: dict | None = None) -> dict:
+    """Verify a package from disk with streaming member hashing and no format byte ceiling."""
+    if package.is_symlink() or not package.is_file():
+        raise PackageError(f"Expected regular package file: {package}")
+    package_sha = sha256_file(package)
+    package_size = package.stat().st_size
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as z:
-            infos = z.infolist()
-            if not 2 <= len(infos) <= MAX_MEMBERS:
-                raise PackageError("Invalid ZIP member count")
-            unique_paths([i.orig_filename for i in infos])
-            if any(i.filename != i.orig_filename or i.is_dir() or i.flag_bits & 1 or
-                    stat.S_IFMT(i.external_attr >> 16) not in (0, stat.S_IFREG) or
-                    i.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) or
-                    i.file_size > MAX_FILE for i in infos) or sum(i.file_size for i in infos) > MAX_TOTAL:
-                raise PackageError("Unsupported or oversized ZIP member")
-            manifest_raw = z.read(MANIFEST)
-            manifest = json_value(manifest_raw)
-            if not isinstance(manifest, dict) or "members" not in manifest:
-                raise PackageError("Missing manifest member inventory")
-            profile = validate_header({k: v for k, v in manifest.items() if k != "members"})
-            members = manifest["members"]
-            if not isinstance(members, list) or not members:
-                raise PackageError("Manifest member list must be nonempty")
-            for item in members:
-                if (not isinstance(item, dict) or set(item) != {"path", "sha256", "size"} or
-                        not _digest(item["sha256"]) or not _size(item["size"])):
-                    raise PackageError("Malformed manifest member")
-            names = [MANIFEST] + [item["path"] for item in members]
-            unique_paths(names)
-            if set(names) != set(z.namelist()):
-                raise PackageError("ZIP inventory differs from manifest (missing or unlisted file)")
-            for item in members:
-                payload = z.read(item["path"])
-                if (sha256(payload), len(payload)) != (item["sha256"], item["size"]):
-                    raise PackageError(f"Member integrity mismatch: {item['path']}")
-                if item["path"].endswith((".json", ".jsonld")):
-                    if not isinstance(json_value(payload), (dict, list)):
-                        raise PackageError("JSON members must have an object or array root")
-            if profile == "compiled-experiment-lifecycle-v1":
-                metadata_path = "ro-crate-metadata.json"
-                if metadata_path not in {item["path"] for item in members}:
-                    raise PackageError(f"Lifecycle profile requires {metadata_path}")
-                lifecycle_projection = validate_lifecycle_crate(json_value(z.read(metadata_path)))
-            if recipe and (profile != recipe["profile"] or manifest != manifest_for(recipe)):
-                raise PackageError("Package manifest differs from reviewed recipe")
+        with zipfile.ZipFile(package) as archive:
+            return _verify_archive(
+                archive,
+                package_sha256=package_sha,
+                package_size=package_size,
+                expected_sha256=expected_sha256,
+                recipe=recipe,
+            )
     except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
         raise PackageError(f"Invalid package: {exc}") from exc
-    return {"schemaVersion": 1, "status": "integrity-verified", "scope": "package-integrity-only",
-            "scientificReproduction": "not-run", "profile": profile,
-            "packageSha256": actual, "packageSizeBytes": len(data),
-            "memberCount": len(infos), "manifestSha256": sha256(manifest_raw),
-            "source": manifest["source"], "matchedExpectedPackage": bool(expected or expected_sha256),
-            **({"lifecycle": lifecycle_projection} if profile == "compiled-experiment-lifecycle-v1" else {})}
+
+
+def verify_bytes(data: bytes, *, expected_sha256: str | None = None, recipe: dict | None = None) -> dict:
+    """Compatibility API for callers that already hold package bytes in memory."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            return _verify_archive(
+                archive,
+                package_sha256=sha256(data),
+                package_size=len(data),
+                expected_sha256=expected_sha256,
+                recipe=recipe,
+            )
+    except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
+        raise PackageError(f"Invalid package: {exc}") from exc
+

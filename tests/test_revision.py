@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from experiment_compiler.core import MAX_FILE, PackageError, compile_package, json_value, load_recipe, sha256, verify_bytes
+from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, sha256, verify_bytes
 from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
@@ -139,18 +139,6 @@ class RevisionTests(unittest.TestCase):
                                attempt_id=attempt_id)
             self.assertFalse(output.exists())
             self.assertFalse(output.with_name("duplicate-id.source").exists())
-
-    def test_revision_rejects_oversized_parent_before_staging(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            parent = directory / "oversized.zip"
-            parent.write_bytes(b"x" * (MAX_FILE + 1))
-            recipe = self._revision_recipe(directory)
-            output = directory / "never-written.zip"
-            with self.assertRaisesRegex(PackageError, "single-member revision limit"):
-                revise_package(parent, recipe, output, expected_sha256="0" * 64,
-                               attempt_id="unreached")
-            self.assertFalse(output.exists())
 
     def test_revision_rejects_prospective_action_masquerading_as_attempt(self):
         with tempfile.TemporaryDirectory() as temporary:

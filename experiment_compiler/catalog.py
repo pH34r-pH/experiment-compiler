@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from .core import (
-    MAX_FILE,
     PackageError,
     _execution_action_nodes,
     _types,
@@ -33,7 +32,7 @@ def _member_source(recipe: dict, recipe_path: Path, package_path: str) -> Path:
 
 
 def _json_member(recipe: dict, recipe_path: Path, package_path: str) -> Any:
-    value = json_value(bounded_read(_member_source(recipe, recipe_path, package_path), MAX_FILE))
+    value = json_value(bounded_read(_member_source(recipe, recipe_path, package_path)))
     if not isinstance(value, (dict, list)):
         raise PackageError(f"Expected JSON object/array: {package_path}")
     return value
@@ -41,7 +40,7 @@ def _json_member(recipe: dict, recipe_path: Path, package_path: str) -> Any:
 
 def _text_member(recipe: dict, recipe_path: Path, package_path: str) -> str:
     try:
-        return bounded_read(_member_source(recipe, recipe_path, package_path), MAX_FILE).decode("utf-8")
+        return bounded_read(_member_source(recipe, recipe_path, package_path)).decode("utf-8")
     except UnicodeError as exc:
         raise PackageError(f"Expected UTF-8 text: {package_path}") from exc
 

@@ -22,6 +22,8 @@ Finalization carries source-authored interpretation and review. It does not inde
 
 The current runner path is deliberately bounded and not a general service for arbitrary adversarial workflows. Stronger untrusted-workload support requires stronger isolation, such as disposable credential-free compute, rather than relaxing admission checks.
 
-## Package limits
+## Artifact size and operational limits
 
-Entry and byte limits are security/operability boundaries. Large-model research should inventory closure first and design an explicit scalable artifact strategy rather than simply increasing ZIP limits until a package fits.
+Compiled Experiment validity has no arbitrary member-count, per-file, or total-byte ceiling. Research artifacts range from small code bundles to multi-gigabyte datasets/checkpoints, and the packaging contract should follow the selected venue/repository rather than a local constant.
+
+Operational execution remains resource-bounded: the reviewed CWL/worker envelope controls CPU, RAM, temporary/output storage, and wall time. Publication targets may also impose real transport quotas. Those are execution or destination constraints, not properties of RO-Crate/CWL or of a scientifically valid Compiled Experiment.

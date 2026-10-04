@@ -19,7 +19,7 @@ The historical compatibility fixture additionally pins the complete ZIP digest.
 
 ## Verification
 
-The verifier checks inventory, member digests/sizes, JSON syntax, path safety, duplicate/case collisions, symlinks/special files, encryption flags, and package-size limits.
+The verifier checks inventory, member digests/sizes, JSON syntax, path safety, duplicate/case collisions, symlinks/special files, and encryption flags. It hashes package members incrementally and does not impose a Compiled Experiment byte ceiling.
 
 It never extracts or executes package code.
 
