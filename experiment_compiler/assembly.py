@@ -43,8 +43,11 @@ def compile_source_closure(temporary: Path, output: Path, source_directory: Path
 
     shutil.copytree(stage, source_directory)
     try:
-        write_once(output, temporary_package.read_bytes())
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with temporary_package.open("rb") as source, output.open("xb") as destination:
+            shutil.copyfileobj(source, destination, length=1024 * 1024)
     except (OSError, PackageError):
+        output.unlink(missing_ok=True)
         shutil.rmtree(source_directory, ignore_errors=True)
         raise
     return result
