@@ -120,4 +120,5 @@ Apache-2.0. Copyright 2026 Tyler J.H.G. See [LICENSE](LICENSE) and [NOTICE](NOTI
 
 Native handoff preparation and the controller-reported started/terminal receipt
 API are documented in [Offline native Actions projection](docs/native-actions-projection.md).
-These offline components do not launch native workloads or qualify a worker.
+The optional controller consumer requires an explicitly supplied trusted Fleet
+authority; no native executor, dispatch route, or worker qualification is supplied.
