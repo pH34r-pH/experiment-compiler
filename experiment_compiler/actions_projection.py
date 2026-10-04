@@ -153,7 +153,7 @@ def project_actions(package: Path, profile_path: Path, *, expected_sha256: str,
     no workflow is dispatched, and no started/terminal receipt is manufactured.
     """
     _digest(expected_sha256, "package")
-    _, payload = _read_package(bounded_read(package, MAX_TOTAL), expected_sha256)
+    _, payload = _read_package(bounded_read(package), expected_sha256)
     profile = _pinned_profile(profile_path, expected_profile_sha256)
     assets = _closure(payload, profile)
     job, inputs, maximum = _native_plan(payload, profile)
