@@ -8,13 +8,11 @@ from pathlib import Path
 from . import __version__
 from .catalog import describe_catalog, describe_recipe
 from .core import (
-    MAX_TOTAL,
     PackageError,
-    bounded_read,
     canonical,
     compile_package,
     load_recipe,
-    verify_bytes,
+    verify_package,
     write_once,
 )
 from .finalization import finalize_package
@@ -138,8 +136,8 @@ def _verify(args: argparse.Namespace) -> dict:
     if args.receipt and args.receipt.resolve() == args.package.resolve():
         raise PackageError("Receipt must not replace package")
     recipe = load_recipe(args.recipe) if args.recipe else None
-    return verify_bytes(
-        bounded_read(args.package, MAX_TOTAL),
+    return verify_package(
+        args.package,
         expected_sha256=args.expected_sha256,
         recipe=recipe,
     )
