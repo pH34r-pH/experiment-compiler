@@ -48,7 +48,6 @@ Public catalog discovery derives entries from existing authoritative package art
 
 This is the same anti-drift principle used throughout the project: compile and derive views from source artifacts instead of creating another status file to remember to update.
 
-
 ## Archive boundary
 
 [pH34r-pH/compiled-experiments](https://github.com/pH34r-pH/compiled-experiments) is a downstream archival release surface, not another research workspace or compiler. It accepts only exact finalized public bytes after the source owner approves disclosure, verifies their digests/receipts/provenance, and preserves them under an immutable release identity. It must not rebuild or execute the artifact.
