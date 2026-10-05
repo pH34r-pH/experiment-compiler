@@ -103,6 +103,17 @@ This keeps packaging mechanics public and auditable without turning unfinished/p
 
 The Pages build writes `/data/experiments.json` from the discovered authoritative recipes and lifecycle crates. Projection schema version 2 includes one stable detail route per record, exact ZIP SHA-256 and size, source repository and commit, plus any backlinks declared by the source record. The JSON Schema lives at [`site/data/experiments.schema.json`](site/data/experiments.schema.json) and ships beside the projection. The catalog contains no separately maintained experiment registry. Lifecycle records expose exact execution statuses and the full authoritative protocol when summary headings are absent; see [the projection contract](docs/catalog-projection.md).
 
+## Archival publication layer
+
+The live reproduction projection and the archival citation record are separate responsibilities.
+
+- **Experiment Compiler / `experiments.tyharbin.com`** owns package identity, lifecycle semantics, static experiment detail pages, and inspect/verify/run guidance.
+- **[pH34r-pH/compiled-experiments](https://github.com/pH34r-pH/compiled-experiments)** receives only exact source-owner-approved finalized public bytes plus their reviewed metadata/receipts. It does not rebuild or execute the package.
+- A reviewed GitHub Release in that archive is the explicit human publication handoff to Zenodo. Zenodo DOI creation is not a Compiler operation.
+- Exact archival release/DOI relations may be projected back into experiment/article metadata after they exist; missing archival metadata does not change package integrity, execution state, or scientific interpretation.
+
+See [compiled-experiments#1](https://github.com/pH34r-pH/compiled-experiments/issues/1) for the cross-repository integration contract.
+
 ## Repository map
 
 - `experiment_compiler/` — compiler, verifier, lifecycle, runner, and catalog implementation.
