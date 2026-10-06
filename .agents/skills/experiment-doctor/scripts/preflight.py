@@ -50,6 +50,33 @@ def _source_path(root: Path, source: str) -> Path:
     return path
 
 
+def _record_metadata(metadata: dict, path: Path, member_path: str, source: str) -> str | None:
+    key = member_path.lower()
+    if key.endswith("dependency-closure.json"):
+        category = "dependencyClosure"
+    elif key.endswith("environment.json") or key.endswith("runtime.json"):
+        category = "runtime"
+    elif key.endswith("resource-requirements.json"):
+        category = "resourceRequirements"
+    else:
+        return None
+
+    value = _read_object(path)
+    if value is None:
+        labels = {
+            "dependencyClosure": "dependency closure",
+            "runtime": "runtime contract",
+            "resourceRequirements": "resource requirements",
+        }
+        label = labels[category]
+        return f"{label} is not a readable JSON object: {source}"
+    if category == "dependencyClosure":
+        metadata[category] = value
+    else:
+        metadata.setdefault(category, {})[member_path] = value
+    return None
+
+
 def _summarize(recipe_path: Path, recipe: dict) -> tuple[dict, list[str]]:
     root = recipe_path.parent
     members = recipe["members"]
@@ -72,25 +99,9 @@ def _summarize(recipe_path: Path, recipe: dict) -> tuple[dict, list[str]]:
         if not present or not readable:
             errors.append(f"declared source is missing or unreadable: {source}")
             continue
-        key = member["path"].lower()
-        if key.endswith("dependency-closure.json"):
-            value = _read_object(path)
-            if value is None:
-                errors.append(f"dependency closure is not a readable JSON object: {source}")
-            else:
-                metadata["dependencyClosure"] = value
-        elif key.endswith("environment.json") or key.endswith("runtime.json"):
-            value = _read_object(path)
-            if value is None:
-                errors.append(f"runtime contract is not a readable JSON object: {source}")
-            else:
-                metadata.setdefault("runtime", {})[member["path"]] = value
-        elif key.endswith("resource-requirements.json"):
-            value = _read_object(path)
-            if value is None:
-                errors.append(f"resource requirements are not a readable JSON object: {source}")
-            else:
-                metadata.setdefault("resourceRequirements", {})[member["path"]] = value
+        metadata_error = _record_metadata(metadata, path, member["path"], source)
+        if metadata_error:
+            errors.append(metadata_error)
     counts = {}
     closure = metadata.get("dependencyClosure")
     if isinstance(closure, dict) and isinstance(closure.get("classifications"), dict):
