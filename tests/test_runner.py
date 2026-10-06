@@ -20,6 +20,60 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 
 
 class RunnerBoundaryTests(unittest.TestCase):
+    def test_result_package_staging_uses_output_storage_not_bounded_tmpfs(self):
+        class CompletedProcess:
+            pid = 100
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        with tempfile.TemporaryDirectory() as workspace_value, tempfile.TemporaryDirectory() as tmpfs_value:
+            workspace = Path(workspace_value)
+            tmpfs = Path(tmpfs_value)
+            plan = workspace / "plan.zip"
+            built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
+            output = workspace / "result.zip"
+
+            def fake_popen(command, **kwargs):
+                outdir = Path(command[command.index("--outdir") + 1])
+                provenance = Path(command[command.index("--provenance") + 1])
+                outdir.mkdir(parents=True)
+                (outdir / "result.json").write_text('{"fixture":"result"}\\n')
+                provenance.mkdir(parents=True)
+                (provenance / "workflow-run.json").write_text('{"fixture":"provenance"}\\n')
+                return CompletedProcess()
+
+            original_compile = compile_package
+            staged_package_paths = []
+
+            def record_package_path(recipe_path, package_path):
+                path = Path(package_path)
+                staged_package_paths.append(path)
+                self.assertEqual(path.parent.parent, workspace)
+                self.assertNotEqual(path.parent, tmpfs)
+                return original_compile(recipe_path, path)
+
+            with patch.dict(os.environ, {
+                    "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+                    "EXPERIMENT_RUNNER_SANDBOX": "test worker",
+                    "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                        '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                    "EXPERIMENT_RUNNER_TMPFS_ROOT": str(tmpfs),
+                    "TMPDIR": str(tmpfs),
+            }), patch("experiment_compiler.runner.tempfile.tempdir", str(tmpfs)), \\
+                    patch("experiment_compiler.runner._require_bounded_tmpfs"), \\
+                    patch("experiment_compiler.runner.importlib.metadata.version",
+                          return_value="3.2.20260720092025"), \\
+                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen), \\
+                    patch("experiment_compiler.runner.compile_package", side_effect=record_package_path):
+                run_package(plan, output, expected_sha256=built["packageSha256"],
+                            allow_workflow_execution=True)
+
+            self.assertEqual(len(staged_package_paths), 1)
+            self.assertTrue(output.is_file())
+            self.assertFalse(list(tmpfs.glob("compiled-experiment-run-*")))
+
     def test_nonfinite_resource_limits_are_rejected(self):
         import copy
         import yaml

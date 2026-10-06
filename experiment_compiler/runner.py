@@ -625,28 +625,32 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
     # Prepare the ZIP before exposing either publication destination. Claim
     # destinations exclusively and remove only paths owned by this attempt if
     # publishing the retained source or package fails.
-    prepared_package = temporary / "result.zip"
-    result = compile_package(recipe_path, prepared_package)
-    source_identity = None
-    output_identity = None
-    try:
-        source_directory.mkdir()
-        source_identity = source_directory.stat()
-        shutil.copytree(stage, source_directory, dirs_exist_ok=True)
-        with output.open("xb") as stream:
-            output_identity = os.fstat(stream.fileno())
-            with prepared_package.open("rb") as prepared:
-                shutil.copyfileobj(prepared, stream, length=1024 * 1024)
-    except BaseException:
-        if output_identity is not None and output.exists():
-            current = output.stat()
-            if (current.st_dev, current.st_ino) == (output_identity.st_dev, output_identity.st_ino):
-                output.unlink()
-        if source_identity is not None and source_directory.exists():
-            current = source_directory.stat()
-            if (current.st_dev, current.st_ino) == (source_identity.st_dev, source_identity.st_ino):
-                shutil.rmtree(source_directory)
-        raise
+    # The result ZIP can be large and the runner's private temp tree is the
+    # worker-bounded tmpfs. Stage the package beside its publication target so
+    # ZIP assembly and the immutable copy do not consume that scratch budget.
+    with tempfile.TemporaryDirectory(prefix=".compiled-experiment-result-", dir=output.parent) as package_temp:
+        prepared_package = Path(package_temp) / "result.zip"
+        result = compile_package(recipe_path, prepared_package)
+        source_identity = None
+        output_identity = None
+        try:
+            source_directory.mkdir()
+            source_identity = source_directory.stat()
+            shutil.copytree(stage, source_directory, dirs_exist_ok=True)
+            with output.open("xb") as stream:
+                output_identity = os.fstat(stream.fileno())
+                with prepared_package.open("rb") as prepared:
+                    shutil.copyfileobj(prepared, stream, length=1024 * 1024)
+        except BaseException:
+            if output_identity is not None and output.exists():
+                current = output.stat()
+                if (current.st_dev, current.st_ino) == (output_identity.st_dev, output_identity.st_ino):
+                    output.unlink()
+            if source_identity is not None and source_directory.exists():
+                current = source_directory.stat()
+                if (current.st_dev, current.st_ino) == (source_identity.st_dev, source_identity.st_ino):
+                    shutil.rmtree(source_directory)
+            raise
     result["executionStatus"] = (
         "failed" if execution["returnCode"] or execution["timedOut"] or execution["collectionErrors"]
         else "succeeded"
