@@ -54,19 +54,22 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertNotEqual(path.parent, tmpfs)
                 return original_compile(recipe_path, path)
 
-            with patch.dict(os.environ, {
+            with (
+                    patch.dict(os.environ, {
                     "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
                     "EXPERIMENT_RUNNER_SANDBOX": "test worker",
                     "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
                         '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(tmpfs),
                     "TMPDIR": str(tmpfs),
-            }), patch("experiment_compiler.runner.tempfile.tempdir", str(tmpfs)), \\
-                    patch("experiment_compiler.runner._require_bounded_tmpfs"), \\
+                    }),
+                    patch("experiment_compiler.runner.tempfile.tempdir", str(tmpfs)),
+                    patch("experiment_compiler.runner._require_bounded_tmpfs"),
                     patch("experiment_compiler.runner.importlib.metadata.version",
-                          return_value="3.2.20260720092025"), \\
-                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen), \\
-                    patch("experiment_compiler.runner.compile_package", side_effect=record_package_path):
+                          return_value="3.2.20260720092025"),
+                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen),
+                    patch("experiment_compiler.runner.compile_package", side_effect=record_package_path),
+            ):
                 run_package(plan, output, expected_sha256=built["packageSha256"],
                             allow_workflow_execution=True)
 
