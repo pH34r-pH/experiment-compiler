@@ -39,9 +39,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                 outdir = Path(command[command.index("--outdir") + 1])
                 provenance = Path(command[command.index("--provenance") + 1])
                 outdir.mkdir(parents=True)
-                (outdir / "result.json").write_text('{"fixture":"result"}\\n')
+                (outdir / "result.json").write_text('{"fixture":"result"}\n')
                 provenance.mkdir(parents=True)
-                (provenance / "workflow-run.json").write_text('{"fixture":"provenance"}\\n')
+                (provenance / "workflow-run.json").write_text('{"fixture":"provenance"}\n')
                 return CompletedProcess()
 
             original_compile = compile_package
