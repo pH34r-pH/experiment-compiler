@@ -1,0 +1,6 @@
+interface:
+  display_name: "Experiment doctor"
+  short_description: "Read-only experiment and environment diagnostics"
+  default_prompt: "Use $experiment-doctor to inspect this recipe and report environment, closure, runtime, and resource findings without changing files."
+policy:
+  allow_implicit_invocation: true
