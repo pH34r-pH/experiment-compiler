@@ -2,6 +2,8 @@
 
 The compiler's core compile/verify path is offline and does not require a private research repository.
 
+For a clean Python install, a first compiled/verified example, and the packaged onboarding/doctor/repair skills, see [Agent-first onboarding](../agent-onboarding.md).
+
 ## Historical compatibility package
 
 ```sh

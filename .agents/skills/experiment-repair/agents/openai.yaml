@@ -1,0 +1,6 @@
+interface:
+  display_name: "Experiment repair"
+  short_description: "Propose a same-byte source-path correction"
+  default_prompt: "Use $experiment-repair to diagnose this issue and propose a scoped repair without modifying any existing artifact."
+policy:
+  allow_implicit_invocation: false

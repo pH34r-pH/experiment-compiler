@@ -10,6 +10,7 @@ Documentation is the durable explanation of package scope and evidence boundarie
 - [`evidence-boundaries.md`](evidence-boundaries.md), [`resources-and-closure.md`](resources-and-closure.md), and [`real-study-walkthrough.md`](real-study-walkthrough.md) explain distinct evidence and disclosure boundaries.
 - [`catalog-projection.md`](catalog-projection.md) documents the derived public projection.
 - [`site-visual-contract.md`](site-visual-contract.md) documents the scoped Portfolio 2071 alignment, theme behavior, accessibility fallbacks, and unchanged data/hosting boundary.
+- [`agent-onboarding.md`](agent-onboarding.md) is the canonical human guide to the packaged onboarding, doctor, and repair skills, including verified client discovery limits.
 - [`wiki/`](wiki/) is the source copied by the existing wiki-sync workflow; keep its pages consistent with repository documents.
 
 Preserve historical/scientific records and their caveats. A later interpretation belongs in a new dated or versioned document with an explicit relationship, not a silent rewrite of a frozen record. Link a superseded plan only to a replacement that exists and is proven by repository evidence.

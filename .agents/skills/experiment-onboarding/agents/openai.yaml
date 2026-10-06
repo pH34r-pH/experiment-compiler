@@ -1,0 +1,6 @@
+interface:
+  display_name: "Experiment onboarding"
+  short_description: "Prepare a recipe from researcher-supplied inputs"
+  default_prompt: "Use $experiment-onboarding to collect my scientific and technical inputs without inventing missing decisions, then prepare a recipe for my review."
+policy:
+  allow_implicit_invocation: true

@@ -44,6 +44,10 @@ verified lifecycle plan
 
 `__main__.py` is the CLI dispatcher. `core.py` owns recipe, package, and lifecycle integrity; `assembly.py` owns source-closure packaging; `runner.py` is the explicit execution boundary; `revision.py` and `finalization.py` create new immutable lifecycle identities; `catalog.py` derives display records. The full trust-boundary model is in [`docs/architecture.md`](docs/architecture.md) and the package contract is in [`docs/build-recipe.md`](docs/build-recipe.md).
 
+## Agent-first onboarding
+
+The onboarding, doctor, and repair skills live under [`.agents/skills/`](.agents/skills/). Keep those files and their bundled template/scripts as the canonical mode definitions. The [agent onboarding guide](docs/agent-onboarding.md) records client-specific installation/discovery paths and scientific/evidence boundaries. Skills guide work; they do not grant permission to execute an experiment, install dependencies, spend money, publish, or change access.
+
 ## Change routing and invariants
 
 - Change recipe semantics or package identity rules in `experiment_compiler/core.py`, then update the relevant profile documentation and tests.
