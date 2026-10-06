@@ -1,4 +1,4 @@
-**Experiment Compiler**
+# Experiment Compiler
 
 - [Home](Home.md)
 - [Architecture](Architecture.md)
