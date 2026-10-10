@@ -3,9 +3,7 @@
 [![Lifecycle](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml/badge.svg)](https://github.com/pH34r-pH/experiment-compiler/actions/workflows/lifecycle.yml)
 [![License](https://img.shields.io/github/license/pH34r-pH/experiment-compiler)](LICENSE)
 
-<p align="center">
-  <img src="docs/assets/hero.webp" alt="Experiment Compiler — portable reproducible experiment packaging" width="100%">
-</p>
+![Experiment Compiler — portable reproducible experiment packaging](docs/assets/hero.png)
 
 **Compile reviewed research inputs into portable, inspectable, integrity-verifiable experiment artifacts.**
 
