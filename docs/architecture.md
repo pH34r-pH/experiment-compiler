@@ -44,13 +44,19 @@ flowchart TB
     DECISION -->|"select attempt"| FINALIZE --> FINAL
   end
 
-  subgraph E["5 · Publish and expose reproduction"]
-    PROMOTE["Reviewed merge to main<br/>publication event"]
-    SITE["experiments.tyharbin.com<br/>static catalog · detail route · exact package"]
+  subgraph E["5 · Publish, reproduce, and archive"]
+    REVIEWPUB["Source-owner disclosure / publication review"]
+    SITE["experiments.tyharbin.com<br/>live static reproduction projection"]
+    ARCHIVE["compiled-experiments<br/>exact reviewed public bytes"]
+    RELEASE["Human-reviewed GitHub Release"]
+    ZENODO["Zenodo archival record + DOI"]
     ARTICLE["Portfolio / MyST article<br/>explanation · intuition · browser interaction"]
-    FINAL --> PROMOTE --> SITE
+    FINAL --> REVIEWPUB
+    REVIEWPUB --> SITE
+    REVIEWPUB --> ARCHIVE --> RELEASE --> ZENODO
     ARTICLE -->|"exact experiment reference"| SITE
     SITE -->|"canonical article backlink"| ARTICLE
+    SITE -.->|"archival citation when released"| ARCHIVE
   end
 
   RECIPE --> COMPILE
@@ -93,9 +99,12 @@ flowchart TB
   subgraph CLOSE["Finalization branch"]
     FIN["finalize selected attempt<br/>attach scientific decision + publication review"]
     F0["Final reviewable artifact F0"]
-    PUB["Reviewed merge to main<br/>publication event"]
-    CAT["Derived catalog + stable detail route"]
+    PUB["Source-owner reviewed public finalization"]
+    CAT["Derived live catalog + stable detail route"]
+    ARC["compiled-experiments<br/>exact-byte archival copy"]
+    REL["Reviewed release → Zenodo DOI"]
     FIN --> F0 --> PUB --> CAT
+    PUB --> ARC --> REL
   end
 
   CHOOSE -->|"method / protocol change"| REV
@@ -220,7 +229,7 @@ Source: [`04-trust-boundaries.mmd`](diagrams/04-trust-boundaries.mmd)
 
 ## 5. Public research ↔ reproduction surface
 
-The publication system has two different responsibilities. Portfolio/MyST owns explanation and bounded browser interaction. Experiment Compiler owns immutable reproduction identity, closure, provenance, verification/execution handoff, and the derived public experiment presentation.
+The publication system has three distinct responsibilities. Portfolio/MyST owns explanation and bounded browser interaction. Experiment Compiler owns immutable reproduction identity, closure, provenance, verification/execution handoff, and the derived live experiment presentation. `pH34r-pH/compiled-experiments` owns the reviewed immutable archival copy and release/DOI lineage after source-owner publication approval.
 
 ```mermaid
 flowchart LR
@@ -249,12 +258,21 @@ flowchart LR
     REC --> PKG
   end
 
+  subgraph A["compiled-experiments · archival citation surface"]
+    ARC["Exact reviewed finalized package bytes"]
+    REL["Human-reviewed GitHub Release"]
+    DOI["Zenodo archival record + DOI"]
+    ARC --> REL --> DOI
+  end
+
   REF -->|"resolve exact experiment"| PROJ
   BACK -.->|"read the explanation"| ARTICLE
+  DETAIL -.->|"immutable archive relation when published"| ARC
 
-  RULE["Boundary<br/>Portfolio owns explanation and browser interaction.<br/>Experiment Compiler owns reproduction identity, closure, provenance,<br/>verification/execution handoff, and derived experiment presentation."]
+  RULE["Boundary<br/>Portfolio owns explanation/browser interaction.<br/>Experiment Compiler owns live reproduction identity and presentation.<br/>compiled-experiments owns exact archival release lineage; Zenodo supplies DOI."]
   ARTICLE -.-> RULE
   DETAIL -.-> RULE
+  ARC -.-> RULE
 ```
 
 Source: [`05-public-surface.mmd`](diagrams/05-public-surface.mmd)
@@ -266,6 +284,8 @@ Source: [`05-public-surface.mmd`](diagrams/05-public-surface.mmd)
 - A process succeeding does not imply scientific acceptance.
 - Finalization carries source-authored interpretation; it does not invent or independently validate a conclusion.
 - Public promotion is a reviewed publication event, not a synonym for independent reproduction.
+- `compiled-experiments` archival releases never rebuild or rerun a finalized package; they preserve exact reviewed public bytes plus release metadata.
+- A GitHub Release/Zenodo DOI is archival/citation provenance, not a scientific-acceptance or independent-reproduction state.
 - The public catalog is derived from authoritative recipes/artifacts rather than a second manually maintained registry.
 - Portfolio articles own explanation and interactive presentation; Experiment Compiler owns exact reproduction identity and evidence.
 - Where an established standard fits, prefer it over a repository-local ontology.
