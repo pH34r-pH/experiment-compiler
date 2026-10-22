@@ -8,11 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from experiment_compiler.core import PackageError, compile_package, json_value, load_recipe, verify_bytes
+from experiment_compiler.core import PackageError, canonical, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
-                                        _require_bounded_tmpfs, _terminate_process_group, run_package)
+from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
+                                        _cleanup_container_journal, _require_bounded_output_tmpfs,
+                                        _require_bounded_tmpfs, _run_command, _terminate_process_group,
+                                        recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
+from runner_fixture_helpers import prepare_container_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -20,6 +23,228 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 
 
 class RunnerBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.process_identity_patch = patch(
+            "experiment_compiler.runner._cwl_process_identity",
+            return_value={"pid": 98765, "bootId": "fixture", "processStartTicks": "1",
+                          "processGroupId": 98765, "sessionId": 98765},
+        )
+        self.process_identity_patch.start()
+        self.addCleanup(self.process_identity_patch.stop)
+        self.process_group_patch = patch("experiment_compiler.runner._process_group_exists", return_value=False)
+        self.process_group_patch.start()
+        self.addCleanup(self.process_group_patch.stop)
+        self.engine_journal_patch = patch(
+            "experiment_compiler.runner._new_container_journal",
+            side_effect=self._fixture_container_journal,
+        )
+        self.engine_journal_patch.start()
+        self.addCleanup(self.engine_journal_patch.stop)
+
+    def _fixture_container_journal(self, attempt_directory, attempt_id, runner):
+        return prepare_container_journal(attempt_directory, attempt_id, runner)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):
+        from experiment_compiler.runner import _persist_attempt_receipt
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            receipt = {
+                "attemptId": "0123456789ab", "status": "failed",
+                "planPackageSha256": "a" * 64,
+                "runner": {"name": "cwltool"},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "executionPhase": "not-started", "executionNeverStarted": True,
+                "launchIntentPersisted": False,
+                "containerCleanup": {"state": "not-started", "engine": "podman",
+                                     "containerCount": 0, "absentCount": 0, "allAbsent": False},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerJournal"], {
+                "availability": "not-applicable-not-started", "storePath": None, "sha256": None,
+            })
+            self.assertTrue(recovered["executionNeverStarted"])
+            receipt["executionNeverStarted"] = False
+            _persist_attempt_receipt(attempt, receipt)
+            with self.assertRaisesRegex(PackageError, "typed preflight"):
+                recover_attempt(attempt)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_rejects_missing_journal_without_typed_no_start_receipt(self):
+        from experiment_compiler.runner import _persist_attempt_receipt
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            _persist_attempt_receipt(attempt, {"attemptId": "0123456789ab", "status": "started"})
+            with self.assertRaisesRegex(PackageError, "typed preflight"):
+                recover_attempt(attempt)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_launch_intent_recovery_without_cid_stays_unknown(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from experiment_compiler.runner import _persist_attempt_receipt
+        attempt_id = "0123456789ab"
+        image_id = "sha256:" + "b" * 64
+        image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": "podman", "enginePath": "/usr/bin/podman",
+                "workerImageRef": image_ref, "workerImageId": image_id,
+                "reportedWorkerImageId": "sha256:" + "e" * 64,
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "running", "launchIntentPersisted": True,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
+            }
+            journal_bytes = canonical(journal)
+            (attempt / "container-journal.json").write_bytes(journal_bytes)
+            receipt = {
+                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
+                "planPackageSha256": "f" * 64,
+                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
+                "collectionErrors": [],
+                "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout=image_id)):
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+
+    def test_cwltool_command_keeps_engine_ids_for_controller_reconciliation(self):
+        temporary = Path("/scratch/run")
+        command = _run_command(_CwlCommandRequest(
+            temporary, temporary / "package", temporary / "outputs", temporary / "provenance",
+            {"executionMode": "cwltool-podman"}, Path("/attempt/engine-cids"),
+            "0123456789ab-", Path("/output/cwl-out-"),
+        ))
+        self.assertIn("--leave-container", command)
+        self.assertEqual(Path(command[command.index("--cidfile-dir") + 1]), Path("/attempt/engine-cids"))
+        self.assertEqual(command[command.index("--cidfile-prefix") + 1], "0123456789ab-")
+        self.assertEqual(Path(command[command.index("--tmp-outdir-prefix") + 1]), Path("/output/cwl-out-"))
+
+    def test_container_cleanup_is_bounded_and_records_proven_absence(self):
+        from types import SimpleNamespace
+        container_id = "a" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value)
+            (attempt / "engine-cids").mkdir()
+            (attempt / "engine-cids/0123456789ab-job.cid").write_text(container_id + "\n")
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": "0123456789ab",
+                "engine": "podman", "enginePath": "/usr/bin/podman", "workerImageRef": "python@sha256:x",
+                "workerImageId": "sha256:" + "b" * 64, "state": "running",
+                "cidfilePrefix": "0123456789ab-", "containers": [],
+            }
+            receipt = {}
+            states = iter(((True, "running"), (True, "exited"), (False, None)))
+            with patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner._engine_call", return_value=SimpleNamespace(returncode=0)) as engine:
+                errors = []
+                _cleanup_container_journal(attempt, journal, receipt, errors)
+            self.assertEqual(errors, [])
+            self.assertEqual(journal["state"], "clean")
+            self.assertEqual(journal["containers"][0]["cleanup"]["absentAfterCleanup"], True)
+            self.assertEqual([entry.args[2] for entry in engine.call_args_list], [
+                ["stop", "--time", "5", container_id], ["rm", container_id],
+            ])
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_hard_loss_recovery_discovers_unjournaled_cidfile_and_binds_receipt(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from experiment_compiler.runner import _persist_attempt_receipt
+        attempt_id = "0123456789ab"
+        container_id = "c" * 64
+        image_id = "sha256:" + "b" * 64
+        image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            cid_directory = attempt / "engine-cids"
+            cid_directory.mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
+            (cid_directory / f"{attempt_id}-timestamp.cid").write_text(container_id + "\n")
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": "podman", "enginePath": "/usr/bin/podman",
+                "workerImageRef": image_ref, "workerImageId": image_id,
+                "reportedWorkerImageId": "sha256:" + "e" * 64,
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "running", "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
+            }
+            journal_bytes = canonical(journal)
+            (attempt / "container-journal.json").write_bytes(journal_bytes)
+            receipt = {
+                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
+                "planPackageSha256": "f" * 64,
+                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
+                "collectionErrors": [],
+                "containerJournal": {"path": "container-journal.json", "sha256": "0" * 64},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            (attempt / "container-journal.pending").write_bytes(canonical({
+                "schema": "cwltool-container-journal-transaction/v1", "attemptId": attempt_id,
+                "fromSha256": "0" * 64, "toSha256": sha256_bytes(journal_bytes),
+            }))
+            states = iter(((True, "exited"), (False, None)))
+            def engine_call(_attempt, _journal, arguments):
+                if arguments[:2] == ["image", "inspect"]:
+                    return SimpleNamespace(returncode=0, stdout=image_id)
+                return SimpleNamespace(returncode=0, stdout="")
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["status"], "failed")
+            self.assertEqual(recovered["containerCleanup"]["state"], "clean")
+            self.assertEqual(recovered["containerCleanup"]["containerCount"], 1)
+            self.assertTrue(recovered["containerCleanup"]["allAbsent"])
+            self.assertEqual(engine.call_args_list[-1].args[2], ["rm", container_id])
+            latest_journal = json.loads((attempt / "container-journal.json").read_text())
+            self.assertTrue(latest_journal["containers"][0]["cleanup"]["absentAfterCleanup"])
+            latest_receipt = json.loads((attempt / "runner-receipt.json").read_text())
+            self.assertEqual(latest_receipt["containerJournal"]["sha256"],
+                             sha256_bytes((attempt / "container-journal.json").read_bytes()))
+
+    @unittest.skipUnless(os.name == "posix", "tmpfs mount contract is Linux-specific")
+    def test_output_cap_requires_exact_dedicated_tmpfs_mount(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as value:
+            root = Path(value)
+            size = 64 * MIB
+            mountinfo = f"20 1 0:1 / {root} rw,relatime - tmpfs tmpfs rw,size={size}"
+            with patch.object(Path, "read_text", return_value=mountinfo), \
+                    patch("experiment_compiler.runner.shutil.disk_usage",
+                          return_value=SimpleNamespace(total=size)):
+                self.assertEqual(_require_bounded_output_tmpfs(root, 64), root.resolve())
+            with patch.object(Path, "read_text", return_value=mountinfo.replace("tmpfs tmpfs", "ext4 /dev/fake")), \
+                    patch("experiment_compiler.runner.shutil.disk_usage",
+                          return_value=SimpleNamespace(total=size)), \
+                    self.assertRaisesRegex(PackageError, "dedicated tmpfs"):
+                _require_bounded_output_tmpfs(root, 64)
+
     def test_result_package_staging_uses_output_storage_not_bounded_tmpfs(self):
         class CompletedProcess:
             pid = 100
@@ -119,6 +344,17 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
 
+    def test_timeout_with_live_orphan_skips_container_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with patch("experiment_compiler.runner._process_group_exists", side_effect=[True, True]), \
+                    patch("experiment_compiler.runner._cleanup_container_journal") as cleanup:
+                self._check_attempt_scenario("timeout-orphan", directory)
+            cleanup.assert_not_called()
+            journal = json.loads((directory / "result.attempt/container-journal.json").read_text())
+            self.assertEqual(journal["state"], "unknown")
+            self.assertTrue(journal["cwlProcessGroupUnresolved"])
+
     def _mock_attempt_launch(self, scenario, directory, scratch):
         class Process:
             pid = 98765
@@ -133,7 +369,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired("fixture cleanup", timeout)
                 if scenario == "cancelled-cleanup-interrupted" and self.calls == 2:
                     raise KeyboardInterrupt()
-                if scenario == "timeout" and self.calls == 1:
+                if scenario in {"timeout", "timeout-orphan"} and self.calls == 1:
                     raise subprocess.TimeoutExpired("fixture", timeout)
                 return self.returncode
 
@@ -227,7 +463,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
             else:
                 run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
-        if scenario == "timeout" or scenario.startswith("cancelled"):
+        if scenario in {"timeout", "timeout-orphan"} or scenario.startswith("cancelled"):
             self.assertEqual([call.args for call in kill_group.call_args_list], [(98765, 15), (98765, 9)])
         receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
         self.assertEqual(receipt["planPackageSha256"], built["packageSha256"])
@@ -237,7 +473,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def _check_attempt_outcome(self, scenario, directory, receipt, terminal_failure):
         statuses = {"terminal-persist": "started",
-                    "success": "succeeded", "timeout": "timed-out"}
+                    "success": "succeeded", "timeout": "timed-out", "timeout-orphan": "timed-out"}
         self.assertEqual(receipt["status"], statuses.get(scenario, "failed"))
         self._check_cancellation_evidence(scenario, directory, receipt)
         rejected = {"symlink", "oversized-output", "aggregate", "missing"}
@@ -292,7 +528,13 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(terminal_failure, [True])
                 self.assertEqual(receipt["collectionErrors"], [])
             else:
-                self.assertEqual(receipt, published)
+                for key, value in receipt.items():
+                    if key not in {"containerJournal", "containerCleanup", "executionPhase",
+                                   "executionNeverStarted", "launchIntentPersisted"}:
+                        self.assertEqual(published.get(key), value)
+                self.assertEqual(published["containerJournal"]["availability"], "private-store")
+                self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
+                self.assertTrue(published["containerCleanup"]["allAbsent"])
 
     def test_process_cleanup_escalates_and_bounds_each_wait(self):
         from unittest.mock import Mock
@@ -303,6 +545,17 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.assertTrue(any("TimeoutExpired" in error for error in errors))
         self.assertEqual([call.args for call in kill_group.call_args_list], [(8123, 15), (8123, 9)])
         self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 5}, {"timeout": 5}])
+
+    def test_process_cleanup_records_signal_errors_without_masking_them(self):
+        from unittest.mock import Mock
+        process = Mock(pid=8124)
+        process.wait.return_value = -9
+        with patch("experiment_compiler.runner.os.killpg", side_effect=OSError("permission denied")), \
+                patch("experiment_compiler.runner._process_group_exists", return_value=False):
+            errors = _terminate_process_group(process)
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("signal " in error and "OSError" in error for error in errors))
+        self.assertEqual(process.wait.call_count, 2)
 
     def test_runner_requires_explicit_execution_opt_in_before_opening_package(self):
         with self.assertRaisesRegex(PackageError, "explicit opt-in"):
@@ -584,8 +837,10 @@ class: CommandLineTool
                         patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                         patch("experiment_compiler.runner.subprocess.Popen") as popen:
                     popen.return_value.wait.return_value = 0
-                    _execute_cwl(directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
-                                 {"tmpdirMiB": 64}, temporary)
+                    _execute_cwl(_CwlExecutionRequest(
+                        directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
+                        {"tmpdirMiB": 64}, temporary, None,
+                    ))
                 client_environment = popen.call_args.kwargs["env"]
                 for name in names:
                     self.assertNotIn(name, client_environment)
@@ -603,6 +858,14 @@ class: CommandLineTool
             collected = _collect_execution_tree(root, "output", errors)
             self.assertEqual(collected, {})
             self.assertTrue(any("symlink" in error for error in errors))
+
+    def _assert_private_container_reference(self, receipt, result):
+        reference = receipt["containerJournal"]
+        self.assertEqual(reference["availability"], "private-store")
+        self.assertRegex(reference["sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(reference["storePath"], f"container-journal-history/{reference['sha256']}.json")
+        private_snapshot = result.with_name(result.stem + ".attempt") / reference["storePath"]
+        self.assertEqual(sha256_bytes(private_snapshot.read_bytes()), reference["sha256"])
 
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
@@ -669,6 +932,10 @@ class: CommandLineTool
             self.assertEqual(archived_plan, plan_bytes)
             self.assertEqual(receipt["status"], "succeeded")
             self.assertEqual(receipt["workflowRunCrateFiles"], ["workflow-run.json"])
+            self._assert_private_container_reference(receipt, result)
+            self.assertTrue(receipt["containerCleanup"]["allAbsent"])
+            self.assertNotIn("containerIds", receipt["containerCleanup"])
+            self.assertFalse(any(name.endswith("/container-journal.json") for name in names))
             self.assertTrue(any(node.get("@type") == "CreateAction" for node in crate["@graph"]))
 
 

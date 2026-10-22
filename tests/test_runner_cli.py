@@ -37,6 +37,8 @@ CONTROLLER = textwrap.dedent("""\
     import json, os, sys
     from pathlib import Path
     from unittest.mock import patch
+    sys.path.insert(0, str(Path.cwd() / "tests"))
+    from runner_fixture_helpers import prepare_container_journal
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     worker = sys.argv[2]
@@ -63,6 +65,7 @@ CONTROLLER = textwrap.dedent("""\
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
             patch.object(runner, "_require_bounded_tmpfs"), \\
             patch.object(runner, "_runner_config", side_effect=configure), \\
+            patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(runner, "_run_command", side_effect=native_command), \\
             patch.object(runner.os, "killpg", side_effect=record_signal):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
@@ -71,11 +74,14 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     import json, os, sys, time
     from pathlib import Path
     from unittest.mock import patch
+    sys.path.insert(0, str(Path.cwd() / "tests"))
+    from runner_fixture_helpers import prepare_container_journal
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
     replace = Path.replace
-    def execute(temporary, *args):
+    def execute(request, *args):
+        temporary = request.temporary
         (directory / "scratch").write_text(str(temporary))
         (temporary / "stdout.log").write_bytes(b"retained native diagnostic")
         (temporary / "stderr.log").write_bytes(b"retained native stderr")
@@ -108,6 +114,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
             "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
             patch.object(runner, "_execute_cwl", side_effect=execute), \\
+            patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(Path, "replace", new=pause_receipt):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)
@@ -334,7 +341,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
         if published:
             with zipfile.ZipFile(directory / "result.zip") as archive:
                 member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                self.assertEqual(archive.read(member), receipt_path.read_bytes())
+                archived_receipt = json.loads(archive.read(member))
+                self.assertEqual(archived_receipt["containerJournal"]["availability"], "private-store")
+                self.assertEqual(archived_receipt["containerJournal"]["sha256"],
+                                 receipt["containerJournal"]["sha256"])
         else:
             original = "ordinary execution failure" if mode == "failure" else "earlier runner interruption"
             self.assertTrue(any(original in error for error in receipt["collectionErrors"]))
@@ -344,7 +354,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
     def _wait_for(self, path, process):
         deadline = time.monotonic() + 10
         while not path.exists():
-            self.assertIsNone(process.poll(), "controller exited before native fixture readiness")
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                self.fail("controller exited before native fixture readiness "
+                          f"(exit={process.returncode}, stdout={stdout!r}, stderr={stderr!r})")
             if time.monotonic() >= deadline:
                 self.fail(f"native fixture did not create {path.name}")
             time.sleep(0.01)
@@ -406,7 +419,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
         if timeout_cleanup:
             with zipfile.ZipFile(directory / "result.zip") as archive:
                 member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                self.assertEqual(json.loads(archive.read(member)), receipt)
+                archived_receipt = json.loads(archive.read(member))
+                self.assertEqual(archived_receipt["containerJournal"]["availability"], "private-store")
+                self.assertEqual(archived_receipt["containerJournal"]["sha256"],
+                                 receipt["containerJournal"]["sha256"])
         self.assertFalse(Path((directory / "scratch").read_text()).exists())
         with self.assertRaises(ProcessLookupError):
             os.kill(worker_pid, 0)

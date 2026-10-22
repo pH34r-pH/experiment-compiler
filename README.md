@@ -60,7 +60,16 @@ before launch, using the packaged attempt receipt schema. The terminal receipt a
 bounded logs remain there even if result compilation fails. A receipt still marked
 `started` records an incomplete attempt after interruption; it does not establish
 completion. Existing result ZIP and `.source` evidence remain available for
-successfully packaged attempts. Attempt directories are never overwritten.
+successfully packaged attempts. Attempt directories are never overwritten. The
+attempt receipt binds a `container-journal.json` sidecar by SHA-256; exact CWL
+container IDs and cleanup outcomes are retained under the same private attempt
+directory. The result ZIP receipt carries the journal digest and its retained
+private-store path; a matching immutable journal snapshot remains available even
+if later recovery updates the live journal. The ZIP contains a sanitized cleanup
+summary without host process IDs or paths. After a hard controller loss, `experiment-runner
+recover <attempt-dir>` can reconcile those IDs without re-running the workflow.
+It fails closed when the journal is stale, mismatched, or cannot prove the exact
+containers are absent.
 
 Artifact packaging has no project-invented per-file or total-byte ceiling. Large
 third-party models/datasets may remain at their canonical immutable distribution

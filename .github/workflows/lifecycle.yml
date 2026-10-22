@@ -41,9 +41,13 @@ jobs:
         run: |
           set -euo pipefail
           TMPFS_ROOT=/mnt/experiment-compiler-cwl
+          OUTPUT_TMPFS_ROOT=/mnt/experiment-compiler-output
           sudo mkdir -p "$TMPFS_ROOT"
           sudo mount -t tmpfs -o size=64m,mode=1777 tmpfs "$TMPFS_ROOT"
           sudo chown "$(id -u):$(id -g)" "$TMPFS_ROOT"
+          sudo mkdir -p "$OUTPUT_TMPFS_ROOT"
+          sudo mount -t tmpfs -o size=64m,mode=1777 tmpfs "$OUTPUT_TMPFS_ROOT"
+          sudo chown "$(id -u):$(id -g)" "$OUTPUT_TMPFS_ROOT"
           TOOL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3')"
           for experiment_id in linear-regression-plan-v1 linear-regression-frozen-lifecycle-v1; do
             output_dir="$RUNNER_TEMP/runner-output/$experiment_id"
@@ -53,6 +57,7 @@ jobs:
             EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
             EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
             EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
+            EXPERIMENT_RUNNER_OUTPUT_TMPFS_ROOT="$OUTPUT_TMPFS_ROOT" \
             TMPDIR="$TMPFS_ROOT" \
               python -m experiment_compiler.runner_cli run "$RUNNER_TEMP/$experiment_id.plan.zip" \
                 --output "$output_dir/result.zip" --expected-sha256 "$PLAN_SHA256" --allow-workflow-execution
@@ -72,6 +77,12 @@ jobs:
               assert details["outputs"]
               assert details["workerContext"]["reportedImageId"].startswith("sha256:")
               assert "NetworkAccess=false" in details["workerContext"]["reportedSandbox"]
+              assert details["containerJournal"]["availability"] == "private-store"
+              assert len(details["containerJournal"]["sha256"]) == 64
+              assert details["containerJournal"]["storePath"].endswith(details["containerJournal"]["sha256"] + ".json")
+              assert details["containerCleanup"]["state"] == "clean"
+              assert details["containerCleanup"]["allAbsent"] is True
+              assert "containerIds" not in details["containerCleanup"]
           catalog = json.loads(Path(os.environ["CATALOG_PATH"]).read_text())
           assert catalog["experiments"][0]["lifecycle"]["attemptCount"] == 1
           assert catalog["experiments"][0]["lifecycle"]["processRunCrate"] is True
