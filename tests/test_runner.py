@@ -15,6 +15,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
+from runner_fixture_helpers import prepare_container_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -41,19 +42,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.addCleanup(self.engine_journal_patch.stop)
 
     def _fixture_container_journal(self, attempt_directory, attempt_id, runner):
-        cid_directory = attempt_directory / "engine-cids"
-        cid_directory.mkdir(mode=0o700)
-        now = "2026-01-01T00:00:00+00:00"
-        return {
-            "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
-            "engine": "podman" if runner["executionMode"] == "cwltool-podman" else "docker",
-            "enginePath": "/usr/bin/podman" if runner["executionMode"] == "cwltool-podman" else "/usr/bin/docker",
-            "workerImageRef": runner.get("workerImageBase"), "workerImageId": "sha256:" + "a" * 64,
-            "reportedWorkerImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-            "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
-            "state": "prepared", "createdAt": now, "updatedAt": now,
-            "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
-        }
+        return prepare_container_journal(attempt_directory, attempt_id, runner)
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):

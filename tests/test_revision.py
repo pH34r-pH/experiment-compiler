@@ -14,7 +14,7 @@ from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
 from experiment_compiler.runner import run_package
-from experiment_compiler.runner import _CONTAINER_JOURNAL_SCHEMA
+from runner_fixture_helpers import prepare_container_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,19 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class RevisionTests(unittest.TestCase):
     @staticmethod
     def _fixture_container_journal(attempt_directory, attempt_id, runner):
-        (attempt_directory / "engine-cids").mkdir(mode=0o700)
-        return {
-            "schema": _CONTAINER_JOURNAL_SCHEMA, "attemptId": attempt_id,
-            "engine": "podman" if runner["executionMode"] == "cwltool-podman" else "docker",
-            "enginePath": "/usr/bin/podman" if runner["executionMode"] == "cwltool-podman" else "/usr/bin/docker",
-            "workerImageRef": runner.get("workerImageBase"),
-            "workerImageId": "sha256:" + "a" * 64,
-            "reportedWorkerImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-            "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
-            "state": "prepared", "createdAt": "2026-01-01T00:00:00+00:00",
-            "updatedAt": "2026-01-01T00:00:00+00:00", "cidfilePrefix": f"{attempt_id}-",
-            "containers": [], "cancellation": None,
-        }
+        return prepare_container_journal(attempt_directory, attempt_id, runner)
 
     def _attempt(self, directory: Path) -> tuple[Path, str, bytes, str]:
         plan = directory / "plan.zip"
