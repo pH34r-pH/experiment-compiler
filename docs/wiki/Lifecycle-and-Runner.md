@@ -71,5 +71,10 @@ that digest, a relative snapshot path under the sibling `.attempt` private store
 `private-store` availability, and a sanitized cleanup/absence summary; it does
 not include the host-specific journal. The filesystem and
 container journal improve controller evidence, but do not by themselves prove
-that task containers cannot access the host or enforce other isolation. Fixture success does not satisfy
-Fleet #678 or authorize its gated real execution.
+that task containers cannot access the host or enforce other isolation. A valid
+different kernel boot ID proves that the old cwltool process group cannot still
+exist, so recovery does not inspect or signal its potentially reused numeric
+PID and continues only with exact journaled container IDs. A distro or PID
+namespace restart that retains the same kernel boot ID remains conservative:
+ambiguous PID or process-group identity fails closed. Fixture success does not
+satisfy Fleet #678 or authorize its gated real execution.

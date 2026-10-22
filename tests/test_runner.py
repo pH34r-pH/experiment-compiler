@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,7 +21,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
-from runner_fixture_helpers import prepare_container_journal
+from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -304,40 +305,19 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_launch_intent_recovery_without_cid_stays_unknown(self):
-        from datetime import datetime, timezone
         from types import SimpleNamespace
-        from experiment_compiler.runner import _persist_attempt_receipt
         attempt_id = "0123456789ab"
         image_id = "sha256:" + "b" * 64
         image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
-            attempt.mkdir(mode=0o700)
-            (attempt / "engine-cids").mkdir(mode=0o700)
-            (attempt / "runner-home").mkdir(mode=0o700)
-            journal = {
-                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
-                "engine": "podman", "enginePath": "/usr/bin/podman",
-                "workerImageRef": image_ref, "workerImageId": image_id,
-                "reportedWorkerImageId": "sha256:" + "e" * 64,
-                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
-                "state": "running", "launchIntentPersisted": True,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "updatedAt": datetime.now(timezone.utc).isoformat(),
-                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
-            }
-            journal_bytes = canonical(journal)
-            (attempt / "container-journal.json").write_bytes(journal_bytes)
-            receipt = {
-                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
-                "planPackageSha256": "f" * 64,
-                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
-                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
-                "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
-                "collectionErrors": [],
-                "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
-            }
-            _persist_attempt_receipt(attempt, receipt)
+            prepare_recovery_attempt(
+                attempt, {
+                    "attempt_id": attempt_id, "image_ref": image_ref, "image_id": image_id,
+                    "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                },
+            )
             with patch("experiment_compiler.runner._controller_is_alive"), \
                     patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
                     patch("experiment_compiler.runner._engine_call",
@@ -345,6 +325,101 @@ class RunnerBoundaryTests(unittest.TestCase):
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
             self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_after_kernel_reboot_never_signals_reused_pid_and_cleans_exact_cid(self):
+        from types import SimpleNamespace
+
+        container_id = "c" * 64
+        image_id = "sha256:" + "b" * 64
+        image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
+
+        current_boot = uuid.uuid4()
+        old_boot = uuid.uuid4()
+        while current_boot == old_boot:
+            old_boot = uuid.uuid4()
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            prepare_recovery_attempt(
+                attempt, {
+                    "attempt_id": "0123456789ab", "image_ref": image_ref,
+                    "image_id": image_id, "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": 1234, "bootId": str(old_boot), "processStartTicks": "10"},
+                    "cwl_boot_id": str(old_boot), "container_id": container_id,
+                },
+            )
+            container_inspect_count = 0
+
+            def engine_call(_attempt, _journal, arguments):
+                nonlocal container_inspect_count
+                if arguments[:2] == ["image", "inspect"]:
+                    return SimpleNamespace(returncode=0, stdout=image_id)
+                if arguments[0] == "inspect":
+                    container_inspect_count += 1
+                    if container_inspect_count == 1:
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=f"{container_id} exited {image_id} {image_ref}",
+                        )
+                    return SimpleNamespace(returncode=1, stdout="")
+                if arguments[0] == "ps":
+                    return SimpleNamespace(returncode=0, stdout="")
+                return SimpleNamespace(returncode=0, stdout="")
+
+            with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=current_boot), \
+                    patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._current_cwl_process_fields",
+                          side_effect=AssertionError("must not inspect a potentially reused PID")), \
+                    patch("experiment_compiler.runner._signal_retained_cwl_group",
+                          side_effect=AssertionError("must not signal a potentially reused process group")), \
+                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+                recovered = recover_attempt(attempt)
+
+            self.assertEqual(recovered["containerCleanup"]["state"], "clean")
+            self.assertTrue(recovered["containerCleanup"]["allAbsent"])
+            self.assertIn(["rm", container_id], [call.args[2] for call in engine.call_args_list])
+            self.assertTrue(any(call.args[2][-1] == container_id for call in engine.call_args_list
+                                if call.args[2][0] == "inspect"))
+
+    def test_same_boot_cwl_pid_reuse_still_refuses_to_signal(self):
+        from experiment_compiler.runner import _reconcile_cwl_process_group
+
+        boot_id = uuid.uuid4()
+        journal = {"cwlProcessIdentity": {
+            "pid": 2345, "bootId": str(boot_id), "processStartTicks": "20",
+            "processGroupId": 2345, "sessionId": 2345,
+        }}
+        fields = ["S", "1", "2345", "2345"] + ["0"] * 15 + ["21"]
+        with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=boot_id), \
+                patch("experiment_compiler.runner._current_cwl_process_fields", return_value=fields), \
+                patch("experiment_compiler.runner._signal_retained_cwl_group") as signal_group, \
+                self.assertRaisesRegex(PackageError, "PID has been reused"):
+            _reconcile_cwl_process_group(journal)
+        signal_group.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_invalid_process_boot_identity_stays_unknown_and_does_not_cleanup(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            prepare_recovery_attempt(
+                attempt, {
+                    "attempt_id": "0123456789ab",
+                    "image_ref": "python:3.13.13-slim@sha256:" + "d" * 64,
+                    "image_id": "sha256:" + "b" * 64,
+                    "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": 1234, "bootId": str(uuid.uuid4()), "processStartTicks": "10"},
+                    "cwl_boot_id": "not-a-uuid", "container_id": "c" * 64,
+                },
+            )
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout="sha256:" + "b" * 64)) as engine:
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+            self.assertEqual(engine.call_args.args[2][:2], ["image", "inspect"])
 
     def test_cwltool_command_keeps_engine_ids_for_controller_reconciliation(self):
         temporary = Path("/scratch/run")
