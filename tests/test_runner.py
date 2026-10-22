@@ -17,6 +17,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _engine_image_reference_matches,
                                         _admit_container_requirement, _persist_attempt_receipt,
                                         _write_container_journal, _journal_receipt_reference,
+                                        _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
 from runner_fixture_helpers import prepare_container_journal
@@ -519,6 +520,71 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertEqual(len(staged_package_paths), 1)
             self.assertTrue(output.is_file())
             self.assertFalse(list(tmpfs.glob("compiled-experiment-run-*")))
+
+    def test_attempt_result_upgrades_file_only_workflow_in_completed_and_failed_crates(self):
+        from datetime import datetime, timezone
+        from experiment_compiler.runner import _read_package
+
+        for return_code, expected_status in ((0, "https://schema.org/CompletedActionStatus"),
+                                             (9, "https://schema.org/FailedActionStatus")):
+            with self.subTest(return_code=return_code), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                plan_path = directory / "plan.zip"
+                plan_build = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan_path)
+                manifest, payload = _read_package(plan_path.read_bytes(), plan_build["packageSha256"])
+                crate = json_value(payload["ro-crate-metadata.json"])
+                workflow = next(node for node in crate["@graph"]
+                                if node.get("@id") == "experiment/workflow.cwl")
+                initial_types = "File" if return_code == 0 else ["File", "CreativeWork"]
+                workflow["@type"] = initial_types
+                workflow_digest = sha256_bytes(payload["experiment/workflow.cwl"])
+                workflow.update({"sha256": workflow_digest,
+                                 "contentSize": len(payload["experiment/workflow.cwl"])})
+                original_properties = {key: value for key, value in workflow.items() if key != "@type"}
+                payload["ro-crate-metadata.json"] = canonical(crate)
+                augmented = dict(payload)
+                attempt_member = "evidence/attempts/fixture/output.json"
+                augmented[attempt_member] = b'{"fixture":"retained"}\n'
+                created = datetime(2026, 10, 22, tzinfo=timezone.utc)
+                execution = {"returnCode": return_code, "timedOut": False, "collectionErrors": []}
+                experiment_id, title = _augment_result_crate(
+                    augmented, plan_build["packageSha256"], "fixture", [attempt_member],
+                    created, created, execution,
+                )
+                result_crate = json_value(augmented["ro-crate-metadata.json"])
+                result_workflow = next(node for node in result_crate["@graph"]
+                                       if node.get("@id") == "experiment/workflow.cwl")
+                expected_types = ([initial_types] if isinstance(initial_types, str) else list(initial_types))
+                self.assertEqual(result_workflow["@type"], expected_types + ["SoftwareSourceCode"])
+                for key, value in original_properties.items():
+                    self.assertEqual(result_workflow[key], value)
+                action = next(node for node in result_crate["@graph"]
+                              if node.get("@id") == "#attempt-fixture")
+                self.assertEqual(action["actionStatus"], expected_status)
+
+                source = directory / "source"
+                members = []
+                for name, content in sorted(augmented.items()):
+                    member_path = source / name
+                    member_path.parent.mkdir(parents=True, exist_ok=True)
+                    member_path.write_bytes(content)
+                    members.append({"source": name, "path": name,
+                                    "sha256": sha256_bytes(content), "size": len(content)})
+                recipe = {
+                    "buildRecipeVersion": 1,
+                    "id": f"{experiment_id}-attempt-fixture-{return_code}",
+                    "title": f"{title} — attempt fixture {return_code}",
+                    "profile": "compiled-experiment-lifecycle-v1",
+                    "manifest": {"schemaVersion": 2, "packageType": "compiled-experiment",
+                                 "profile": "compiled-experiment-lifecycle-v1",
+                                 "source": manifest["source"], "standards": manifest["standards"],
+                                 "evidence": {"planPackageSha256": plan_build["packageSha256"],
+                                              "attemptId": "fixture"}},
+                    "members": members,
+                }
+                recipe_path = source / "experiment.json"
+                recipe_path.write_bytes(canonical(recipe))
+                compile_package(recipe_path, directory / "result.zip")
 
     def test_nonfinite_resource_limits_are_rejected(self):
         import copy

@@ -1543,6 +1543,12 @@ def _augment_result_crate(augmented: dict[str, bytes], expected_sha256: str, run
             "programmingLanguage": "Common Workflow Language", "name": "CWL execution workflow",
         })
         root["hasPart"].append({"@id": "experiment/workflow.cwl"})
+    else:
+        existing_types = workflow_node.get("@type")
+        workflow_types = existing_types if isinstance(existing_types, list) else [existing_types]
+        if ("SoftwareApplication" not in workflow_types and "SoftwareSourceCode" not in workflow_types
+                and "File" in workflow_types and "experiment/workflow.cwl" in augmented):
+            workflow_node["@type"] = [*workflow_types, "SoftwareSourceCode"]
     graph.append({
         "@id": f"#attempt-{run_id}",
         "@type": "CreateAction",
