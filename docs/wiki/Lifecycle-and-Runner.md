@@ -58,5 +58,18 @@ qualification. Fleet owns those physical boundaries. The temporary-directory
 check establishes containment within the declared root and a backing-capacity
 floor only. It does not prove a tmpfs mount or enforce a storage quota. CWL
 `tmpdirMin` is a requested minimum; the separately declared worker `tmpdirMiB`
-requires physical enforcement by the worker. Fixture success does not satisfy
+requires physical enforcement by the worker. When the optional
+`EXPERIMENT_RUNNER_OUTPUT_TMPFS_ROOT` is set, the adapter verifies a dedicated
+tmpfs mount sized exactly to `outdirMiB`; cwltool's output staging and final
+output directory share that mount. The controller records a persistent CID
+journal beside the attempt receipt and retains containers until exact-ID cleanup
+is verified. `experiment-runner recover <attempt-dir>` rescans protected CID
+files and reconciles a matching incomplete attempt without re-running its
+workflow; stale or unverifiable identities fail closed. The private attempt
+receipt binds the complete sidecar journal by digest. The result ZIP exposes only
+that digest, a relative snapshot path under the sibling `.attempt` private store,
+`private-store` availability, and a sanitized cleanup/absence summary; it does
+not include the host-specific journal. The filesystem and
+container journal improve controller evidence, but do not by themselves prove
+that task containers cannot access the host or enforce other isolation. Fixture success does not satisfy
 Fleet #678 or authorize its gated real execution.

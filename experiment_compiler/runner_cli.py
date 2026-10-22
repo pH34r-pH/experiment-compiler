@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .core import PackageError, canonical, write_once
-from .runner import run_package
+from .runner import recover_attempt, run_package
 
 
 @contextmanager
@@ -60,12 +60,20 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--expected-sha256", required=True, help="exact reviewed plan package digest")
     run.add_argument("--allow-workflow-execution", action="store_true",
                      help="confirm that the packaged CWL workflow and its tool code may execute")
+    recover = commands.add_parser("recover", help="reconcile retained container evidence after an interrupted attempt")
+    recover.add_argument("attempt_directory", type=Path,
+                         help="existing .attempt directory; recovery never re-executes the workflow")
     args = parser.parse_args(argv)
     try:
         with _operator_cancellation():
-            result = run_package(args.package, args.output, expected_sha256=args.expected_sha256,
-                                 allow_workflow_execution=args.allow_workflow_execution)
+            if args.command == "recover":
+                result = recover_attempt(args.attempt_directory)
+            else:
+                result = run_package(args.package, args.output, expected_sha256=args.expected_sha256,
+                                     allow_workflow_execution=args.allow_workflow_execution)
         sys.stdout.buffer.write(canonical(result))
+        if args.command == "recover":
+            return 0 if result.get("containerCleanup", {}).get("state") == "clean" else 2
         return 0 if result["executionStatus"] == "succeeded" else 2
     except KeyboardInterrupt as exc:
         print(f"experiment-runner: {exc or 'Operator cancellation requested'}", file=sys.stderr)
