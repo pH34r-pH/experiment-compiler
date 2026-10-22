@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, canonical, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import (_admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
+from experiment_compiler.runner import (_CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
                                         _cleanup_container_journal, _require_bounded_output_tmpfs,
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
                                         recover_attempt, run_package)
@@ -23,6 +23,16 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 
 class RunnerBoundaryTests(unittest.TestCase):
     def setUp(self):
+        self.process_identity_patch = patch(
+            "experiment_compiler.runner._cwl_process_identity",
+            return_value={"pid": 98765, "bootId": "fixture", "processStartTicks": "1",
+                          "processGroupId": 98765, "sessionId": 98765},
+        )
+        self.process_identity_patch.start()
+        self.addCleanup(self.process_identity_patch.stop)
+        self.process_group_patch = patch("experiment_compiler.runner._process_group_exists", return_value=False)
+        self.process_group_patch.start()
+        self.addCleanup(self.process_group_patch.stop)
         self.engine_journal_patch = patch(
             "experiment_compiler.runner._new_container_journal",
             side_effect=self._fixture_container_journal,
@@ -45,6 +55,42 @@ class RunnerBoundaryTests(unittest.TestCase):
             "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
         }
 
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):
+        from experiment_compiler.runner import _persist_attempt_receipt
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            receipt = {
+                "attemptId": "0123456789ab", "status": "failed",
+                "executionPhase": "not-started", "executionNeverStarted": True,
+                "launchIntentPersisted": False,
+                "containerCleanup": {"state": "not-started", "engine": "podman",
+                                     "containerCount": 0, "absentCount": 0, "allAbsent": False},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerJournal"], {
+                "availability": "not-applicable-not-started", "storePath": None, "sha256": None,
+            })
+            self.assertTrue(recovered["executionNeverStarted"])
+            receipt["executionNeverStarted"] = False
+            _persist_attempt_receipt(attempt, receipt)
+            with self.assertRaisesRegex(PackageError, "typed preflight"):
+                recover_attempt(attempt)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_rejects_missing_journal_without_typed_no_start_receipt(self):
+        from experiment_compiler.runner import _persist_attempt_receipt
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            _persist_attempt_receipt(attempt, {"attemptId": "0123456789ab", "status": "started"})
+            with self.assertRaisesRegex(PackageError, "typed preflight"):
+                recover_attempt(attempt)
+
     def test_cwltool_command_keeps_engine_ids_for_controller_reconciliation(self):
         temporary = Path("/scratch/run")
         command = _run_command(
@@ -59,7 +105,6 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def test_container_cleanup_is_bounded_and_records_proven_absence(self):
         from types import SimpleNamespace
-        from unittest.mock import call
         container_id = "a" * 64
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value)
@@ -132,6 +177,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout=image_id)
                 return SimpleNamespace(returncode=0, stdout="")
             with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
                     patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
                     patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
@@ -732,8 +778,10 @@ class: CommandLineTool
                         patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                         patch("experiment_compiler.runner.subprocess.Popen") as popen:
                     popen.return_value.wait.return_value = 0
-                    _execute_cwl(directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
-                                 {"tmpdirMiB": 64}, temporary)
+                    _execute_cwl(_CwlExecutionRequest(
+                        directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
+                        {"tmpdirMiB": 64}, temporary, None,
+                    ))
                 client_environment = popen.call_args.kwargs["env"]
                 for name in names:
                     self.assertNotIn(name, client_environment)
@@ -751,6 +799,14 @@ class: CommandLineTool
             collected = _collect_execution_tree(root, "output", errors)
             self.assertEqual(collected, {})
             self.assertTrue(any("symlink" in error for error in errors))
+
+    def _assert_private_container_reference(self, receipt, result):
+        reference = receipt["containerJournal"]
+        self.assertEqual(reference["availability"], "private-store")
+        self.assertRegex(reference["sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(reference["storePath"], f"container-journal-history/{reference['sha256']}.json")
+        private_snapshot = result.with_name(result.stem + ".attempt") / reference["storePath"]
+        self.assertEqual(sha256_bytes(private_snapshot.read_bytes()), reference["sha256"])
 
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
@@ -817,12 +873,7 @@ class: CommandLineTool
             self.assertEqual(archived_plan, plan_bytes)
             self.assertEqual(receipt["status"], "succeeded")
             self.assertEqual(receipt["workflowRunCrateFiles"], ["workflow-run.json"])
-            self.assertEqual(receipt["containerJournal"]["availability"], "private-store")
-            self.assertRegex(receipt["containerJournal"]["sha256"], r"^[0-9a-f]{64}$")
-            self.assertEqual(receipt["containerJournal"]["storePath"],
-                             f"container-journal-history/{receipt['containerJournal']['sha256']}.json")
-            private_snapshot = result.with_name(result.stem + ".attempt") / receipt["containerJournal"]["storePath"]
-            self.assertEqual(sha256_bytes(private_snapshot.read_bytes()), receipt["containerJournal"]["sha256"])
+            self._assert_private_container_reference(receipt, result)
             self.assertTrue(receipt["containerCleanup"]["allAbsent"])
             self.assertNotIn("containerIds", receipt["containerCleanup"])
             self.assertFalse(any(name.endswith("/container-journal.json") for name in names))

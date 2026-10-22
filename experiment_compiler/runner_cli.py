@@ -8,7 +8,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-from .core import PackageError, canonical, write_once
+from .core import PackageError, canonical
 from .runner import recover_attempt, run_package
 
 
@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
                                      allow_workflow_execution=args.allow_workflow_execution)
         sys.stdout.buffer.write(canonical(result))
         if args.command == "recover":
-            return 0 if result.get("containerCleanup", {}).get("state") == "clean" else 2
+            return 0 if result.get("containerCleanup", {}).get("state") in {"clean", "not-started"} else 2
         return 0 if result["executionStatus"] == "succeeded" else 2
     except KeyboardInterrupt as exc:
         print(f"experiment-runner: {exc or 'Operator cancellation requested'}", file=sys.stderr)
