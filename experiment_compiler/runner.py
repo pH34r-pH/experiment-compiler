@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1186,11 +1187,10 @@ def _load_recovery_state(attempt_directory: Path) -> tuple[dict, dict, str]:
         raise PackageError("Recovery attempt directory must not be accessible to group or other users")
     receipt_path = attempt_directory / "runner-receipt.json"
     journal_path = attempt_directory / "container-journal.json"
-    if (receipt_path.is_symlink() or journal_path.is_symlink() or
-            (attempt_directory / "runner-receipt.json.tmp").exists() or
-            (attempt_directory / "runner-receipt.json.tmp").is_symlink()):
+    if receipt_path.is_symlink() or journal_path.is_symlink():
         raise PackageError("Recovery receipt and journal must be regular owned files")
     _validate_private_receipt_file(receipt_path, "Recovery receipt")
+    _validate_receipt_staging_files(attempt_directory)
     receipt_bytes = bounded_read(receipt_path, 1024 * 1024)
     journal_bytes = bounded_read(journal_path, 1024 * 1024)
     receipt = json_value(receipt_bytes)
@@ -1250,10 +1250,10 @@ def _load_not_started_receipt(attempt_directory: Path) -> dict:
         raise PackageError("Recovery requires an owned private attempt directory")
     receipt_path = attempt_directory / "runner-receipt.json"
     _validate_private_receipt_file(receipt_path, "Preflight recovery receipt")
-    if (any((attempt_directory / name).exists() for name in
-            ("container-journal.json", "container-journal.pending", "container-journal.json.tmp")) or
-            any(path.name.startswith("runner-receipt.json.tmp") for path in attempt_directory.iterdir())):
+    if any((attempt_directory / name).exists() for name in
+           ("container-journal.json", "container-journal.pending", "container-journal.json.tmp")):
         raise PackageError("Preflight no-start receipt conflicts with container journal state")
+    _validate_receipt_staging_files(attempt_directory)
     receipt = json_value(bounded_read(receipt_path, 1024 * 1024))
     _validate_not_started_receipt(receipt)
     _require_empty_preflight_cid_directory(attempt_directory)
@@ -1610,6 +1610,19 @@ def _validate_private_receipt_file(path: Path, description: str) -> os.stat_resu
     return info
 
 
+def _validate_receipt_staging_files(attempt_directory: Path) -> None:
+    """Retain interrupted private staging files while rejecting unsafe entries."""
+    staging = [path for path in attempt_directory.iterdir()
+               if path.name == "runner-receipt.json.tmp" or
+               path.name.startswith("runner-receipt.json.tmp.")]
+    if len(staging) > 64:
+        raise PackageError("Attempt has too many retained receipt staging files")
+    for path in staging:
+        info = _validate_private_receipt_file(path, "Retained attempt receipt staging file")
+        if info.st_size > 1024 * 1024:
+            raise PackageError("Retained attempt receipt staging file exceeds its size limit")
+
+
 def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
     if attempt_directory.is_symlink() or not attempt_directory.is_dir():
         raise PackageError("Attempt receipt directory is missing or unsafe")
@@ -1617,10 +1630,9 @@ def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
         directory_info = attempt_directory.stat()
         if (directory_info.st_uid != os.getuid() or directory_info.st_mode & 0o077):
             raise PackageError("Attempt receipt directory is not private to the current runner")
-    pending = attempt_directory / "runner-receipt.json.tmp"
+    _validate_receipt_staging_files(attempt_directory)
+    pending = attempt_directory / f"runner-receipt.json.tmp.{uuid.uuid4().hex}"
     target = attempt_directory / "runner-receipt.json"
-    if pending.exists() or pending.is_symlink():
-        raise PackageError("Attempt receipt has a pre-existing pending file; refusing to overwrite it")
     try:
         existing = target.lstat()
     except FileNotFoundError:

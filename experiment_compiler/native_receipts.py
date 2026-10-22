@@ -154,7 +154,7 @@ def start_native_attempt(directory: Path, identity: dict, *, started_at: str) ->
     validate_native_receipt(receipt)
     if any(part.is_symlink() for part in (directory, *directory.parents)):
         raise PackageError("native attempt directory must not contain symlinks")
-    directory.mkdir(exist_ok=False)
+    directory.mkdir(mode=0o700, exist_ok=False)
     descriptor = os.open(directory.parent, os.O_RDONLY)
     try:
         os.fsync(descriptor)

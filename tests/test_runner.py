@@ -15,6 +15,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
                                         _new_container_journal, _container_present, _validate_recovery_worker,
                                         _admit_container_requirement, _persist_attempt_receipt,
+                                        _write_container_journal, _journal_receipt_reference,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
 from runner_fixture_helpers import prepare_container_journal
@@ -149,7 +150,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             outside = root / "outside.json"
             outside.write_text("foreign", encoding="utf-8")
             (attempt / "runner-receipt.json.tmp").symlink_to(outside)
-            with self.assertRaisesRegex(PackageError, "pending file"):
+            with self.assertRaisesRegex(PackageError, "not a regular file"):
                 _persist_attempt_receipt(attempt, {"status": "failed"})
             self.assertEqual(outside.read_text(encoding="utf-8"), "foreign")
 
@@ -164,6 +165,78 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(PackageError, "mode 0600"):
                 _persist_attempt_receipt(attempt, {"status": "failed"})
             self.assertEqual(receipt.read_text(encoding="utf-8"), '{"status":"old"}')
+
+    @unittest.skipUnless(os.name == "posix", "attempt recovery and private files are POSIX worker contracts")
+    def test_receipt_fsync_before_rename_is_recoverable_with_exact_journal_transaction(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        attempt_id = "0123456789ab"
+        image_ref = "registry.example/tool@sha256:" + "d" * 64
+        image_id = "sha256:" + "a" * 64
+        reported_id = "sha256:" + "e" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": "podman", "enginePath": sys.executable,
+                "workerImageRef": image_ref, "workerImageId": image_id,
+                "reportedWorkerImageId": reported_id,
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "prepared", "launchIntentPersisted": False,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
+            }
+            journal_digest = _write_container_journal(attempt, journal)
+            receipt = {
+                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
+                "planPackageSha256": "f" * 64,
+                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "workerContext": {"reportedImageId": reported_id}, "collectionErrors": [],
+                "containerJournal": {"path": "container-journal.json", "sha256": journal_digest},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            original_replace = Path.replace
+
+            def fail_receipt_rename(source, target):
+                if source.name.startswith("runner-receipt.json.tmp."):
+                    raise OSError("fixture crash after receipt fsync, before atomic rename")
+                return original_replace(source, target)
+
+            journal.update(state="running", launchIntentPersisted=True)
+            with patch.object(Path, "replace", new=fail_receipt_rename):
+                with self.assertRaisesRegex(OSError, "after receipt fsync"):
+                    _journal_receipt_reference(attempt, journal, receipt)
+            abandoned = list(attempt.glob("runner-receipt.json.tmp.*"))
+            self.assertEqual(len(abandoned), 1)
+            self.assertEqual((attempt / "runner-receipt.json").stat().st_mode & 0o777, 0o600)
+            self.assertNotEqual(
+                json.loads((attempt / "runner-receipt.json").read_text())["containerJournal"]["sha256"],
+                sha256_bytes((attempt / "container-journal.json").read_bytes()),
+            )
+
+            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertEqual(len(list(attempt.glob("runner-receipt.json.tmp.*"))), 1)
+            latest_journal = (attempt / "container-journal.json").read_bytes()
+            latest_receipt = json.loads((attempt / "runner-receipt.json").read_text())
+            self.assertEqual(latest_receipt["containerJournal"]["sha256"], sha256_bytes(latest_journal))
+            self.assertEqual((attempt / "runner-receipt.json").stat().st_mode & 0o777, 0o600)
+
+            outside = Path(value) / "outside.json"
+            outside.write_text("preserved", encoding="utf-8")
+            (attempt / "runner-receipt.json.tmp.foreign").symlink_to(outside)
+            with self.assertRaisesRegex(PackageError, "not a regular file"):
+                recover_attempt(attempt)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserved")
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):
@@ -542,7 +615,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
         def replace_receipt(path, target):
             if (scenario == "terminal-persist" and output.exists() and
-                    path.name == "runner-receipt.json.tmp" and not terminal_failure):
+                    path.name.startswith("runner-receipt.json.tmp.") and not terminal_failure):
                 terminal_failure.append(True)
                 raise OSError("fixture terminal persistence failure")
             return original_replace(path, target)
