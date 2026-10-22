@@ -21,7 +21,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
-from runner_fixture_helpers import prepare_container_journal
+from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -49,50 +49,6 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def _fixture_container_journal(self, attempt_directory, attempt_id, runner):
         return prepare_container_journal(attempt_directory, attempt_id, runner)
-
-    def _make_kernel_reboot_attempt(self, root, process_boot_id, cwl_process_boot_id=None):
-        from datetime import datetime, timezone
-        from experiment_compiler.runner import _persist_attempt_receipt
-
-        attempt_id = "0123456789ab"
-        image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
-        if cwl_process_boot_id is None:
-            cwl_process_boot_id = process_boot_id
-        attempt = Path(root) / "result.attempt"
-        attempt.mkdir(mode=0o700)
-        (attempt / "engine-cids").mkdir(mode=0o700)
-        (attempt / "runner-home").mkdir(mode=0o700)
-        (attempt / "engine-cids" / f"{attempt_id}--old.cid").write_text("c" * 64 + "\n")
-        journal = {
-            "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
-            "engine": "podman", "enginePath": "/usr/bin/podman",
-            "workerImageRef": image_ref, "workerImageId": "sha256:" + "b" * 64,
-            "reportedWorkerImageId": "sha256:" + "e" * 64,
-            "controller": {"pid": 1234, "bootId": process_boot_id, "processStartTicks": "10"},
-            "cwlProcessIdentity": {
-                "pid": 2345, "bootId": cwl_process_boot_id, "processStartTicks": "20",
-                "processGroupId": 2345, "sessionId": 2345,
-            },
-            "state": "running", "launchIntentPersisted": True,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
-            "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
-        }
-        journal_bytes = canonical(journal)
-        (attempt / "container-journal.json").write_bytes(journal_bytes)
-        receipt = {
-            "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
-            "planPackageSha256": "f" * 64,
-            "runner": {"name": "cwltool", "version": "3.2.20260720092025",
-                       "workerImageBase": image_ref},
-            "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
-            "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
-            "collectionErrors": [],
-            "containerJournal": {"path": "container-journal.json",
-                                 "sha256": sha256_bytes(journal_bytes)},
-        }
-        _persist_attempt_receipt(attempt, receipt)
-        return attempt
 
     def test_engine_image_ids_accept_only_complete_sha256_and_canonicalize_podman_output(self):
         from experiment_compiler.runner import _normalize_engine_image_id
@@ -349,40 +305,17 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_launch_intent_recovery_without_cid_stays_unknown(self):
-        from datetime import datetime, timezone
         from types import SimpleNamespace
-        from experiment_compiler.runner import _persist_attempt_receipt
         attempt_id = "0123456789ab"
         image_id = "sha256:" + "b" * 64
         image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
-            attempt.mkdir(mode=0o700)
-            (attempt / "engine-cids").mkdir(mode=0o700)
-            (attempt / "runner-home").mkdir(mode=0o700)
-            journal = {
-                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
-                "engine": "podman", "enginePath": "/usr/bin/podman",
-                "workerImageRef": image_ref, "workerImageId": image_id,
-                "reportedWorkerImageId": "sha256:" + "e" * 64,
-                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
-                "state": "running", "launchIntentPersisted": True,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "updatedAt": datetime.now(timezone.utc).isoformat(),
-                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
-            }
-            journal_bytes = canonical(journal)
-            (attempt / "container-journal.json").write_bytes(journal_bytes)
-            receipt = {
-                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
-                "planPackageSha256": "f" * 64,
-                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
-                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
-                "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
-                "collectionErrors": [],
-                "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
-            }
-            _persist_attempt_receipt(attempt, receipt)
+            prepare_recovery_attempt(
+                attempt, attempt_id=attempt_id, image_ref=image_ref, image_id=image_id,
+                reported_image_id="sha256:" + "e" * 64,
+                controller={"pid": -1, "bootId": None, "processStartTicks": None},
+            )
             with patch("experiment_compiler.runner._controller_is_alive"), \
                     patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
                     patch("experiment_compiler.runner._engine_call",
@@ -404,7 +337,13 @@ class RunnerBoundaryTests(unittest.TestCase):
         while current_boot == old_boot:
             old_boot = uuid.uuid4()
         with tempfile.TemporaryDirectory() as value:
-            attempt = self._make_kernel_reboot_attempt(value, str(old_boot))
+            attempt = Path(value) / "result.attempt"
+            prepare_recovery_attempt(
+                attempt, attempt_id="0123456789ab", image_ref=image_ref,
+                image_id=image_id, reported_image_id="sha256:" + "e" * 64,
+                controller={"pid": 1234, "bootId": str(old_boot), "processStartTicks": "10"},
+                cwl_boot_id=str(old_boot), container_id=container_id,
+            )
             container_inspect_count = 0
 
             def engine_call(_attempt, _journal, arguments):
@@ -459,8 +398,13 @@ class RunnerBoundaryTests(unittest.TestCase):
         from types import SimpleNamespace
 
         with tempfile.TemporaryDirectory() as value:
-            attempt = self._make_kernel_reboot_attempt(
-                value, str(uuid.uuid4()), cwl_process_boot_id="not-a-uuid",
+            attempt = Path(value) / "result.attempt"
+            prepare_recovery_attempt(
+                attempt, attempt_id="0123456789ab",
+                image_ref="python:3.13.13-slim@sha256:" + "d" * 64,
+                image_id="sha256:" + "b" * 64, reported_image_id="sha256:" + "e" * 64,
+                controller={"pid": 1234, "bootId": str(uuid.uuid4()), "processStartTicks": "10"},
+                cwl_boot_id="not-a-uuid", container_id="c" * 64,
             )
             with patch("experiment_compiler.runner._controller_is_alive"), \
                     patch("experiment_compiler.runner._engine_call",
