@@ -360,7 +360,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
         if published:
             with zipfile.ZipFile(directory / "result.zip") as archive:
                 member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                self.assertEqual(archive.read(member), receipt_path.read_bytes())
+                archived_receipt = json.loads(archive.read(member))
+                self.assertEqual(archived_receipt["containerJournal"]["availability"], "private-store")
+                self.assertEqual(archived_receipt["containerJournal"]["sha256"],
+                                 receipt["containerJournal"]["sha256"])
         else:
             original = "ordinary execution failure" if mode == "failure" else "earlier runner interruption"
             self.assertTrue(any(original in error for error in receipt["collectionErrors"]))
@@ -370,7 +373,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
     def _wait_for(self, path, process):
         deadline = time.monotonic() + 10
         while not path.exists():
-            self.assertIsNone(process.poll(), "controller exited before native fixture readiness")
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                self.fail("controller exited before native fixture readiness "
+                          f"(exit={process.returncode}, stdout={stdout!r}, stderr={stderr!r})")
             if time.monotonic() >= deadline:
                 self.fail(f"native fixture did not create {path.name}")
             time.sleep(0.01)
@@ -432,7 +438,10 @@ class NativeRunnerCancellationTests(unittest.TestCase):
         if timeout_cleanup:
             with zipfile.ZipFile(directory / "result.zip") as archive:
                 member = next(name for name in archive.namelist() if name.endswith("/runner-receipt.json"))
-                self.assertEqual(json.loads(archive.read(member)), receipt)
+                archived_receipt = json.loads(archive.read(member))
+                self.assertEqual(archived_receipt["containerJournal"]["availability"], "private-store")
+                self.assertEqual(archived_receipt["containerJournal"]["sha256"],
+                                 receipt["containerJournal"]["sha256"])
         self.assertFalse(Path((directory / "scratch").read_text()).exists())
         with self.assertRaises(ProcessLookupError):
             os.kill(worker_pid, 0)

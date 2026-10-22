@@ -661,7 +661,8 @@ def _container_cleanup_summary(journal: dict) -> dict:
         "state": journal.get("state", "unknown"),
         "containerCount": len(containers) if isinstance(containers, list) else 0,
         "absentCount": absent,
-        "allAbsent": isinstance(containers, list) and absent == len(containers),
+        "allAbsent": (journal.get("state") == "clean" and
+                      isinstance(containers, list) and absent == len(containers)),
     }
 
 
@@ -988,7 +989,11 @@ def recover_attempt(attempt_directory: Path) -> dict:
     errors: list[str] = []
     # A CID file may have been written by the engine immediately before a hard
     # controller loss, before the controller appended it to the journal.
-    original_journal_sha = reference["sha256"]
+    # `journal_digest` is the digest of the current sidecar. If recovery
+    # completed a pending journal/receipt transaction above, `reference`
+    # still points at the old JSON object while the validated journal has
+    # already been adopted into the receipt.
+    original_journal_sha = journal_digest
     _retain_journal_snapshot(attempt_directory, original_journal_sha)
     _cleanup_container_journal(attempt_directory, journal, receipt, errors)
     receipt["status"] = "failed"
@@ -1004,8 +1009,9 @@ def recover_attempt(attempt_directory: Path) -> dict:
         "containerCount": len(journal["containers"]),
         "absentCount": sum(1 for entry in journal["containers"]
                             if entry["cleanup"].get("absentAfterCleanup") is True),
-        "allAbsent": all(entry["cleanup"].get("absentAfterCleanup") is True
-                          for entry in journal["containers"]),
+        "allAbsent": (journal["state"] == "clean" and
+                      all(entry["cleanup"].get("absentAfterCleanup") is True
+                          for entry in journal["containers"])),
     }
     final_digest = _journal_receipt_reference(attempt_directory, journal, receipt)
     _retain_journal_snapshot(attempt_directory, final_digest)
