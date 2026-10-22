@@ -91,6 +91,50 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(PackageError, "typed preflight"):
                 recover_attempt(attempt)
 
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_launch_intent_recovery_without_cid_stays_unknown(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from experiment_compiler.runner import _persist_attempt_receipt
+        attempt_id = "0123456789ab"
+        image_id = "sha256:" + "b" * 64
+        image_ref = "python:3.13.13-slim@sha256:" + "d" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "result.attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": "podman", "enginePath": "/usr/bin/podman",
+                "workerImageRef": image_ref, "workerImageId": image_id,
+                "reportedWorkerImageId": "sha256:" + "e" * 64,
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "running", "launchIntentPersisted": True,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
+            }
+            journal_bytes = canonical(journal)
+            (attempt / "container-journal.json").write_bytes(journal_bytes)
+            receipt = {
+                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
+                "planPackageSha256": "f" * 64,
+                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
+                "collectionErrors": [],
+                "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout=image_id)):
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+
     def test_cwltool_command_keeps_engine_ids_for_controller_reconciliation(self):
         temporary = Path("/scratch/run")
         command = _run_command(_CwlCommandRequest(
