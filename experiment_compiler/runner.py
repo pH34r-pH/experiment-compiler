@@ -335,9 +335,11 @@ def _materialize(root: Path, payload: dict[str, bytes]) -> None:
         target.write_bytes(data)
 
 
-def _run_command(temporary: Path, work: Path, attempt_out: Path, provenance: Path,
-                 runner: dict, *, cidfile_dir: Path, cidfile_prefix: str,
-                 tmp_outdir_prefix: Path | None = None) -> list[str]:
+def _run_command(request: _CwlCommandRequest) -> list[str]:
+    temporary, work = request.temporary, request.work
+    attempt_out, provenance, runner = request.attempt_out, request.provenance, request.runner
+    cidfile_dir, cidfile_prefix = request.cidfile_dir, request.cidfile_prefix
+    tmp_outdir_prefix = request.tmp_outdir_prefix
     runtime_args = ["--podman"] if runner["executionMode"] == "cwltool-podman" else []
     command = [
         sys.executable, "-m", "cwltool", *runtime_args, "--disable-pull",
@@ -478,6 +480,18 @@ class _CwlExecutionRequest:
     limits: dict
     tmpfs_root: str
     context: tuple[Path, dict, dict] | None
+
+
+@dataclass
+class _CwlCommandRequest:
+    temporary: Path
+    work: Path
+    attempt_out: Path
+    provenance: Path
+    runner: dict
+    cidfile_dir: Path
+    cidfile_prefix: str
+    tmp_outdir_prefix: Path | None = None
 
 
 @dataclass
@@ -667,11 +681,10 @@ def _prepare_cwl_paths(request: _CwlExecutionRequest) -> _CwlExecutionPaths:
     attempt_out = output_attempt / "outputs" if output_attempt else temporary / "outputs"
     prefix = output_attempt / "cwl-out-" if output_attempt else None
     provenance = temporary / "cwlprov"
-    command = _run_command(
+    command = _run_command(_CwlCommandRequest(
         temporary, work, attempt_out, provenance, runner,
-        cidfile_dir=attempt_directory / "engine-cids",
-        cidfile_prefix=journal["cidfilePrefix"], tmp_outdir_prefix=prefix,
-    )
+        attempt_directory / "engine-cids", journal["cidfilePrefix"], prefix,
+    ))
     return _CwlExecutionPaths(
         attempt_directory, journal, receipt, output_attempt, attempt_out, provenance,
         temporary / "stdout.log", temporary / "stderr.log", command, work,

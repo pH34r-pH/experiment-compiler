@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, canonical, compile_package, json_value, load_recipe, verify_bytes
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import (_CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
+from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
                                         _cleanup_container_journal, _require_bounded_output_tmpfs,
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
                                         recover_attempt, run_package)
@@ -93,11 +93,11 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def test_cwltool_command_keeps_engine_ids_for_controller_reconciliation(self):
         temporary = Path("/scratch/run")
-        command = _run_command(
+        command = _run_command(_CwlCommandRequest(
             temporary, temporary / "package", temporary / "outputs", temporary / "provenance",
-            {"executionMode": "cwltool-podman"}, cidfile_dir=Path("/attempt/engine-cids"),
-            cidfile_prefix="0123456789ab-", tmp_outdir_prefix=Path("/output/cwl-out-"),
-        )
+            {"executionMode": "cwltool-podman"}, Path("/attempt/engine-cids"),
+            "0123456789ab-", Path("/output/cwl-out-"),
+        ))
         self.assertIn("--leave-container", command)
         self.assertEqual(Path(command[command.index("--cidfile-dir") + 1]), Path("/attempt/engine-cids"))
         self.assertEqual(command[command.index("--cidfile-prefix") + 1], "0123456789ab-")
