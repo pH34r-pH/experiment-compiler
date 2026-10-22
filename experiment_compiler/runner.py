@@ -412,17 +412,34 @@ def _process_group_exists(group_id: int) -> bool:
     return False
 
 
-def _validated_cwl_process_identity(identity: Any) -> tuple[int, int]:
+def _kernel_boot_uuid() -> uuid.UUID:
+    try:
+        value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        parsed = uuid.UUID(value)
+    except (OSError, ValueError, AttributeError) as exc:
+        raise PackageError("Current Linux kernel boot ID is invalid or unavailable") from exc
+    if str(parsed) != value.lower():
+        raise PackageError("Current Linux kernel boot ID is not canonical")
+    return parsed
+
+
+def _validated_cwl_process_identity(identity: Any) -> tuple[int, int, bool]:
     if not isinstance(identity, dict):
         raise PackageError("Launch-intent recovery has no durable cwltool process identity")
     pid, pgid = identity.get("pid"), identity.get("processGroupId")
     session = identity.get("sessionId")
-    if (type(pid) is not int or pid <= 0 or pgid != pid or session != pid or
-            identity.get("bootId") != Path("/proc/sys/kernel/random/boot_id").read_text().strip() or
+    saved_boot_id = identity.get("bootId")
+    try:
+        saved_boot = uuid.UUID(saved_boot_id) if isinstance(saved_boot_id, str) else None
+    except (ValueError, AttributeError) as exc:
+        raise PackageError("Retained cwltool process identity has an invalid boot ID") from exc
+    current_boot = _kernel_boot_uuid()
+    if (saved_boot is None or str(saved_boot) != saved_boot_id.lower() or
+            type(pid) is not int or pid <= 0 or pgid != pid or session != pid or
             not isinstance(identity.get("processStartTicks"), str) or
             not identity["processStartTicks"].isdigit()):
-        raise PackageError("Retained cwltool process identity is invalid or belongs to another boot")
-    return pid, pgid
+        raise PackageError("Retained cwltool process identity is malformed")
+    return pid, pgid, saved_boot != current_boot
 
 
 def _current_cwl_process_fields(pid: int) -> list[str] | None:
@@ -453,7 +470,11 @@ def _signal_retained_cwl_group(pgid: int) -> None:
 
 def _reconcile_cwl_process_group(journal: dict) -> None:
     identity = journal.get("cwlProcessIdentity")
-    pid, pgid = _validated_cwl_process_identity(identity)
+    pid, pgid, previous_boot = _validated_cwl_process_identity(identity)
+    if previous_boot:
+        # A process group cannot survive a kernel reboot. Numeric PIDs may have
+        # been reused since then, so do not inspect or signal the old PID/PGID.
+        return
     fields = _current_cwl_process_fields(pid)
     if fields is None:
         if _process_group_exists(pgid):
