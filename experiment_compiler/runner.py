@@ -488,8 +488,12 @@ def _execute_cwl(temporary: Path, payload: dict[str, bytes], runner: dict,
         if output_attempt is not None and output_attempt.exists():
             shutil.rmtree(output_attempt)
         cleanup_errors = process_errors + container_errors
-        detail = f"; cleanup: {'; '.join(cleanup_errors)}" if cleanup_errors else ""
-        raise PackageError(f"CWL runner could not complete its controller handoff: {exc}{detail}") from exc
+        for error in cleanup_errors:
+            if hasattr(exc, "add_note"):
+                exc.add_note(error)
+        if isinstance(exc, (OSError, subprocess.SubprocessError, PackageError)):
+            raise
+        raise PackageError(f"CWL runner could not complete its controller handoff: {exc}") from exc
     collection_errors: list[str] = cleanup_errors
     _cleanup_container_journal(attempt_directory, journal, receipt, collection_errors)
     receipt["containerCleanup"] = _container_cleanup_summary(journal)
@@ -587,10 +591,32 @@ def _fsync_directory(directory: Path) -> None:
         os.close(directory_fd)
 
 
-def _journal_receipt_reference(attempt_directory: Path, journal: dict, receipt: dict) -> None:
+def _journal_receipt_reference(attempt_directory: Path, journal: dict, receipt: dict) -> str:
+    encoded = canonical(journal)
+    digest = sha256_bytes(encoded)
+    previous = receipt.get("containerJournal")
+    previous_digest = previous.get("sha256") if isinstance(previous, dict) else None
+    marker = {
+        "schema": "cwltool-container-journal-transaction/v1",
+        "attemptId": journal.get("attemptId"),
+        "fromSha256": previous_digest,
+        "toSha256": digest,
+    }
+    marker_path = attempt_directory / "container-journal.pending"
+    marker_tmp = attempt_directory / "container-journal.pending.tmp"
+    fd = os.open(marker_tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(canonical(marker))
+        stream.flush()
+        os.fsync(stream.fileno())
+    marker_tmp.replace(marker_path)
+    _fsync_directory(attempt_directory)
     digest = _write_container_journal(attempt_directory, journal)
     receipt["containerJournal"] = {"path": "container-journal.json", "sha256": digest}
     _persist_attempt_receipt(attempt_directory, receipt)
+    marker_path.unlink(missing_ok=True)
+    _fsync_directory(attempt_directory)
+    return digest
 
 
 def _retain_journal_snapshot(attempt_directory: Path, digest: str) -> str:
@@ -868,16 +894,50 @@ def recover_attempt(attempt_directory: Path) -> dict:
     journal_bytes = bounded_read(journal_path, 1024 * 1024)
     receipt = json_value(receipt_bytes)
     journal = json_value(journal_bytes)
-    reference = receipt.get("containerJournal") if isinstance(receipt, dict) else None
-    if (not isinstance(reference, dict) or reference.get("path") != "container-journal.json" or
-            reference.get("sha256") != sha256_bytes(journal_bytes)):
-        raise PackageError("Container journal is not bound by the retained runner receipt")
-    if not isinstance(journal, dict) or journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA:
+    if not isinstance(receipt, dict) or not isinstance(journal, dict):
+        raise PackageError("Recovery receipt and journal must be JSON objects")
+    if journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA:
         raise PackageError("Unsupported container journal schema")
     attempt_id = receipt.get("attemptId")
     if (not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{12}", attempt_id) or
             journal.get("attemptId") != attempt_id or journal.get("cidfilePrefix") != f"{attempt_id}-"):
         raise PackageError("Container journal belongs to a different attempt")
+    reference = receipt.get("containerJournal") if isinstance(receipt, dict) else None
+    journal_digest = sha256_bytes(journal_bytes)
+    if (not isinstance(reference, dict) or reference.get("path") != "container-journal.json" or
+            not isinstance(reference.get("sha256"), str) or
+            not re.fullmatch(r"[0-9a-f]{64}", reference["sha256"])):
+        raise PackageError("Container journal is not bound by the retained runner receipt")
+    marker_path = attempt_directory / "container-journal.pending"
+    if marker_path.is_symlink():
+        raise PackageError("Container journal transaction marker is not a regular owned file")
+    marker = json_value(bounded_read(marker_path, 4096)) if marker_path.exists() else None
+    if journal_digest != reference["sha256"]:
+        if (not isinstance(marker, dict) or
+                marker.get("schema") != "cwltool-container-journal-transaction/v1" or
+                marker.get("attemptId") != receipt.get("attemptId") or
+                marker.get("fromSha256") != reference["sha256"] or
+                marker.get("toSha256") != journal_digest):
+            raise PackageError("Journal/receipt mismatch has no matching durable update marker")
+        # The process stopped after replacing the journal and before replacing
+        # its receipt. Accept only this exact durable two-file transaction.
+        receipt["containerJournal"] = {"path": "container-journal.json", "sha256": journal_digest}
+        _persist_attempt_receipt(attempt_directory, receipt)
+    elif marker is not None:
+        marker_from = marker.get("fromSha256") if isinstance(marker, dict) else None
+        marker_to = marker.get("toSha256") if isinstance(marker, dict) else None
+        marker_is_valid = (
+            isinstance(marker, dict) and
+            marker.get("schema") == "cwltool-container-journal-transaction/v1" and
+            marker.get("attemptId") == receipt.get("attemptId") and
+            isinstance(marker_to, str) and re.fullmatch(r"[0-9a-f]{64}", marker_to) and
+            (marker_to == journal_digest or marker_from == journal_digest)
+        )
+        if not marker_is_valid:
+            raise PackageError("Journal transaction marker does not match the retained journal")
+    if marker_path.exists():
+        marker_path.unlink()
+        _fsync_directory(attempt_directory)
     if receipt.get("status") not in {"started", "failed"}:
         raise PackageError("Only incomplete or failed attempts can be recovered")
     plan_digest = receipt.get("planPackageSha256")
@@ -947,7 +1007,8 @@ def recover_attempt(attempt_directory: Path) -> dict:
         "allAbsent": all(entry["cleanup"].get("absentAfterCleanup") is True
                           for entry in journal["containers"]),
     }
-    _journal_receipt_reference(attempt_directory, journal, receipt)
+    final_digest = _journal_receipt_reference(attempt_directory, journal, receipt)
+    _retain_journal_snapshot(attempt_directory, final_digest)
     return receipt
 
 
@@ -1295,6 +1356,8 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
         try:
             execution = _execute_cwl(temporary, payload, runner, limits, tmpfs_root,
                                      attempt_directory, journal, receipt)
+            execution.setdefault("containerJournal", receipt.get("containerJournal"))
+            execution.setdefault("containerCleanup", _container_cleanup_summary(journal))
             execution["containerJournalStorePath"] = _retain_journal_snapshot(
                 attempt_directory, execution["containerJournal"]["sha256"]
             )

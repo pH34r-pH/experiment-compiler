@@ -47,6 +47,18 @@ CONTROLLER = textwrap.dedent("""\
         if sys.argv[4] == "timeout":
             config["maxWallSeconds"] = 1
         return config
+    def prepare_journal(attempt_directory, attempt_id, config):
+        (attempt_directory / "engine-cids").mkdir(mode=0o700)
+        engine = "podman" if config["executionMode"] == "cwltool-podman" else "docker"
+        return {"schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": engine, "enginePath": "/usr/bin/" + engine,
+                "workerImageRef": config.get("workerImageBase"),
+                "workerImageId": "sha256:" + "a" * 64,
+                "reportedWorkerImageId": "sha256:fixture",
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "prepared", "createdAt": "2026-01-01T00:00:00+00:00",
+                "updatedAt": "2026-01-01T00:00:00+00:00",
+                "cidfilePrefix": attempt_id + "-", "containers": [], "cancellation": None}
     def record_signal(pid, number):
         with (directory / "signals").open("a") as stream:
             stream.write(str(number) + "\\n")
@@ -63,6 +75,7 @@ CONTROLLER = textwrap.dedent("""\
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
             patch.object(runner, "_require_bounded_tmpfs"), \\
             patch.object(runner, "_runner_config", side_effect=configure), \\
+            patch.object(runner, "_new_container_journal", side_effect=prepare_journal), \\
             patch.object(runner, "_run_command", side_effect=native_command), \\
             patch.object(runner.os, "killpg", side_effect=record_signal):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
@@ -88,6 +101,18 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
         return {"returnCode": 0, "timedOut": False, "stdout": b"retained native diagnostic",
                 "stderr": b"retained native stderr", "outputs": {"result.txt": b"fixture"},
                 "provenance": {}, "collectionErrors": []}
+    def prepare_journal(attempt_directory, attempt_id, config):
+        (attempt_directory / "engine-cids").mkdir(mode=0o700)
+        engine = "podman" if config["executionMode"] == "cwltool-podman" else "docker"
+        return {"schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": engine, "enginePath": "/usr/bin/" + engine,
+                "workerImageRef": config.get("workerImageBase"),
+                "workerImageId": "sha256:" + "a" * 64,
+                "reportedWorkerImageId": "sha256:fixture",
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "prepared", "createdAt": "2026-01-01T00:00:00+00:00",
+                "updatedAt": "2026-01-01T00:00:00+00:00",
+                "cidfilePrefix": attempt_id + "-", "containers": [], "cancellation": None}
     def pause_receipt(path, target):
         if path.name == "runner-receipt.json.tmp":
             value = json.loads(path.read_bytes())
@@ -108,6 +133,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
             "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
             patch.object(runner, "_execute_cwl", side_effect=execute), \\
+            patch.object(runner, "_new_container_journal", side_effect=prepare_journal), \\
             patch.object(Path, "replace", new=pause_receipt):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)

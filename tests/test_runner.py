@@ -98,6 +98,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             attempt.mkdir(mode=0o700)
             cid_directory = attempt / "engine-cids"
             cid_directory.mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
             (cid_directory / f"{attempt_id}-timestamp.cid").write_text(container_id + "\n")
             journal = {
                 "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
@@ -118,9 +119,13 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
                 "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
                 "collectionErrors": [],
-                "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
+                "containerJournal": {"path": "container-journal.json", "sha256": "0" * 64},
             }
             _persist_attempt_receipt(attempt, receipt)
+            (attempt / "container-journal.pending").write_bytes(canonical({
+                "schema": "cwltool-container-journal-transaction/v1", "attemptId": attempt_id,
+                "fromSha256": "0" * 64, "toSha256": sha256_bytes(journal_bytes),
+            }))
             states = iter(((True, "exited"), (False, None)))
             def engine_call(_attempt, _journal, arguments):
                 if arguments[:2] == ["image", "inspect"]:
@@ -430,7 +435,12 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(terminal_failure, [True])
                 self.assertEqual(receipt["collectionErrors"], [])
             else:
-                self.assertEqual(receipt, published)
+                for key, value in receipt.items():
+                    if key not in {"containerJournal", "containerCleanup"}:
+                        self.assertEqual(published.get(key), value)
+                self.assertEqual(published["containerJournal"]["availability"], "private-store")
+                self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
+                self.assertTrue(published["containerCleanup"]["allAbsent"])
 
     def test_process_cleanup_escalates_and_bounds_each_wait(self):
         from unittest.mock import Mock

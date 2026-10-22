@@ -14,11 +14,28 @@ from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
 from experiment_compiler.runner import run_package
+from experiment_compiler.runner import _CONTAINER_JOURNAL_SCHEMA
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class RevisionTests(unittest.TestCase):
+    @staticmethod
+    def _fixture_container_journal(attempt_directory, attempt_id, runner):
+        (attempt_directory / "engine-cids").mkdir(mode=0o700)
+        return {
+            "schema": _CONTAINER_JOURNAL_SCHEMA, "attemptId": attempt_id,
+            "engine": "podman" if runner["executionMode"] == "cwltool-podman" else "docker",
+            "enginePath": "/usr/bin/podman" if runner["executionMode"] == "cwltool-podman" else "/usr/bin/docker",
+            "workerImageRef": runner.get("workerImageBase"),
+            "workerImageId": "sha256:" + "a" * 64,
+            "reportedWorkerImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
+            "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+            "state": "prepared", "createdAt": "2026-01-01T00:00:00+00:00",
+            "updatedAt": "2026-01-01T00:00:00+00:00", "cidfilePrefix": f"{attempt_id}-",
+            "containers": [], "cancellation": None,
+        }
+
     def _attempt(self, directory: Path) -> tuple[Path, str, bytes, str]:
         plan = directory / "plan.zip"
         built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
@@ -51,6 +68,8 @@ class RevisionTests(unittest.TestCase):
         }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                 patch("experiment_compiler.runner.importlib.metadata.version",
                       return_value="3.2.20260720092025"), \
+                patch("experiment_compiler.runner._new_container_journal",
+                      side_effect=self._fixture_container_journal), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
             run_package(plan, attempt, expected_sha256=built["packageSha256"],
                         allow_workflow_execution=True)
