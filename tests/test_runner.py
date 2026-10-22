@@ -14,6 +14,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _cleanup_container_journal, _require_bounded_output_tmpfs,
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
                                         _new_container_journal, _container_present, _validate_recovery_worker,
+                                        _engine_image_reference_matches,
                                         _admit_container_requirement, _persist_attempt_receipt,
                                         _write_container_journal, _journal_receipt_reference,
                                         recover_attempt, run_package)
@@ -57,6 +58,25 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 self.assertIsNone(_normalize_engine_image_id(invalid))
 
+    def test_engine_config_reference_allows_only_same_digest_repo_with_tag_elision(self):
+        pinned = "docker.io/pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:" + "d" * 64
+        elided = "docker.io/pytorch/pytorch@sha256:" + "d" * 64
+        self.assertTrue(_engine_image_reference_matches(pinned, pinned))
+        self.assertTrue(_engine_image_reference_matches(elided, pinned))
+        rejected = (
+            "docker.io/other/pytorch@sha256:" + "d" * 64,
+            "docker.io/pytorch/pytorch@sha256:" + "e" * 64,
+            "docker.io/pytorch/pytorch:latest@sha256:" + "d" * 64,
+            "docker.io/pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime",
+            "docker.io/pytorch/pytorch@sha512:" + "d" * 64,
+            "docker.io/pytorch/pytorch@sha256:short",
+        )
+        for observed in rejected:
+            with self.subTest(observed=observed):
+                self.assertFalse(_engine_image_reference_matches(observed, pinned))
+        mutable = "docker.io/pytorch/pytorch:latest"
+        self.assertFalse(_engine_image_reference_matches(mutable, mutable))
+
     def test_container_journal_normalizes_podman_bare_image_id_and_rejects_invalid_ids(self):
         from types import SimpleNamespace
         image_ref = "registry.example/tool@sha256:" + "d" * 64
@@ -94,6 +114,10 @@ class RunnerBoundaryTests(unittest.TestCase):
             bare_inspect = f"{cid} running {'a' * 64} {image_ref}\n"
             with patch("experiment_compiler.runner._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=bare_inspect)):
+                self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
+            tag_elided_inspect = f"{cid} running {'a' * 64} registry.example/tool@sha256:{'d' * 64}\n"
+            with patch("experiment_compiler.runner._engine_call",
+                       return_value=SimpleNamespace(returncode=0, stdout=tag_elided_inspect)):
                 self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
             wrong_inspect = f"{cid} running {'c' * 64} {image_ref}\n"
             with patch("experiment_compiler.runner._engine_call",
