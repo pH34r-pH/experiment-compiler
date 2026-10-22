@@ -88,7 +88,8 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
     replace = Path.replace
-    def execute(temporary, *args):
+    def execute(request, *args):
+        temporary = request.temporary
         (directory / "scratch").write_text(str(temporary))
         (temporary / "stdout.log").write_bytes(b"retained native diagnostic")
         (temporary / "stderr.log").write_bytes(b"retained native stderr")

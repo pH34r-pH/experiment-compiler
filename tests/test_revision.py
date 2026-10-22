@@ -70,6 +70,10 @@ class RevisionTests(unittest.TestCase):
                       return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._new_container_journal",
                       side_effect=self._fixture_container_journal), \
+                patch("experiment_compiler.runner._cwl_process_identity", return_value={
+                    "pid": 101, "bootId": "fixture", "processStartTicks": "1",
+                    "processGroupId": 101, "sessionId": 101,
+                }), patch("experiment_compiler.runner._process_group_exists", return_value=False), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
             run_package(plan, attempt, expected_sha256=built["packageSha256"],
                         allow_workflow_execution=True)

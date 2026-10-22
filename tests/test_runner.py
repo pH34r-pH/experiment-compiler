@@ -64,6 +64,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             (attempt / "engine-cids").mkdir(mode=0o700)
             receipt = {
                 "attemptId": "0123456789ab", "status": "failed",
+                "planPackageSha256": "a" * 64,
+                "runner": {"name": "cwltool"},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
                 "executionPhase": "not-started", "executionNeverStarted": True,
                 "launchIntentPersisted": False,
                 "containerCleanup": {"state": "not-started", "engine": "podman",
@@ -537,7 +540,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(receipt["collectionErrors"], [])
             else:
                 for key, value in receipt.items():
-                    if key not in {"containerJournal", "containerCleanup"}:
+                    if key not in {"containerJournal", "containerCleanup", "executionPhase",
+                                   "executionNeverStarted", "launchIntentPersisted"}:
                         self.assertEqual(published.get(key), value)
                 self.assertEqual(published["containerJournal"]["availability"], "private-store")
                 self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
