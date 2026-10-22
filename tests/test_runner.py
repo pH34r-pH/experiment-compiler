@@ -352,6 +352,17 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
 
+    def test_timeout_with_live_orphan_skips_container_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with patch("experiment_compiler.runner._process_group_exists", side_effect=[True, True]), \
+                    patch("experiment_compiler.runner._cleanup_container_journal") as cleanup:
+                self._check_attempt_scenario("timeout-orphan", directory)
+            cleanup.assert_not_called()
+            journal = json.loads((directory / "result.attempt/container-journal.json").read_text())
+            self.assertEqual(journal["state"], "unknown")
+            self.assertTrue(journal["cwlProcessGroupUnresolved"])
+
     def _mock_attempt_launch(self, scenario, directory, scratch):
         class Process:
             pid = 98765
@@ -366,7 +377,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired("fixture cleanup", timeout)
                 if scenario == "cancelled-cleanup-interrupted" and self.calls == 2:
                     raise KeyboardInterrupt()
-                if scenario == "timeout" and self.calls == 1:
+                if scenario in {"timeout", "timeout-orphan"} and self.calls == 1:
                     raise subprocess.TimeoutExpired("fixture", timeout)
                 return self.returncode
 
@@ -460,7 +471,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
             else:
                 run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
-        if scenario == "timeout" or scenario.startswith("cancelled"):
+        if scenario in {"timeout", "timeout-orphan"} or scenario.startswith("cancelled"):
             self.assertEqual([call.args for call in kill_group.call_args_list], [(98765, 15), (98765, 9)])
         receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
         self.assertEqual(receipt["planPackageSha256"], built["packageSha256"])
@@ -470,7 +481,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def _check_attempt_outcome(self, scenario, directory, receipt, terminal_failure):
         statuses = {"terminal-persist": "started",
-                    "success": "succeeded", "timeout": "timed-out"}
+                    "success": "succeeded", "timeout": "timed-out", "timeout-orphan": "timed-out"}
         self.assertEqual(receipt["status"], statuses.get(scenario, "failed"))
         self._check_cancellation_evidence(scenario, directory, receipt)
         rejected = {"symlink", "oversized-output", "aggregate", "missing"}
@@ -541,6 +552,17 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.assertTrue(any("TimeoutExpired" in error for error in errors))
         self.assertEqual([call.args for call in kill_group.call_args_list], [(8123, 15), (8123, 9)])
         self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 5}, {"timeout": 5}])
+
+    def test_process_cleanup_records_signal_errors_without_masking_them(self):
+        from unittest.mock import Mock
+        process = Mock(pid=8124)
+        process.wait.return_value = -9
+        with patch("experiment_compiler.runner.os.killpg", side_effect=OSError("permission denied")), \
+                patch("experiment_compiler.runner._process_group_exists", return_value=False):
+            errors = _terminate_process_group(process)
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("signal " in error and "OSError" in error for error in errors))
+        self.assertEqual(process.wait.call_count, 2)
 
     def test_runner_requires_explicit_execution_opt_in_before_opening_package(self):
         with self.assertRaisesRegex(PackageError, "explicit opt-in"):

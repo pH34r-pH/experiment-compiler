@@ -365,11 +365,11 @@ def _terminate_process_group(process: Any) -> list[str]:
         except ProcessLookupError:
             pass
         except (OSError, KeyboardInterrupt) as exc:
-            errors.append(f"Process group signal {signal} failed: {type(exc).__name__}: {str(exc)[:1024]}")
+            errors.append(f"Process group signal {signal_number} failed: {type(exc).__name__}: {str(exc)[:1024]}")
         try:
             process.wait(timeout=5)
         except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
-            errors.append(f"Process cleanup wait after signal {signal} failed: {type(exc).__name__}: {str(exc)[:1024]}")
+            errors.append(f"Process cleanup wait after signal {signal_number} failed: {type(exc).__name__}: {str(exc)[:1024]}")
     # A failed wait is evidence of incomplete cleanup, not proof of termination.
     if _process_group_exists(process.pid):
         errors.append("CWL orchestrator process group remains after bounded TERM/KILL")
@@ -391,13 +391,22 @@ def _cwl_process_identity(pid: int) -> dict:
 
 
 def _process_group_exists(group_id: int) -> bool:
-    try:
-        os.killpg(group_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+    proc = Path("/proc")
+    if not proc.is_dir():
         return True
-    return True
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        fields = stat[stat.rfind(")") + 2:].split()
+        if len(fields) > 2 and fields[0] != "Z" and fields[2].isdigit() and int(fields[2]) == group_id:
+            return True
+    return False
 
 
 def _validated_cwl_process_identity(identity: Any) -> tuple[int, int]:
@@ -610,6 +619,13 @@ def _launch_cwl_process(paths: _CwlExecutionPaths, timeout: int) -> tuple[int, b
                 return return_code, False, []
             except subprocess.TimeoutExpired:
                 errors = _terminate_process_group(process)
+                if _process_group_exists(process.pid):
+                    paths.journal["cwlProcessGroupUnresolved"] = True
+                    _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
+                                    state="unknown")
+                else:
+                    paths.journal["cwlProcessExit"] = {"returnCode": process.returncode}
+                    _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
                 return process.returncode if process.returncode else 124, True, errors
             except KeyboardInterrupt:
                 paths.journal["cancellation"] = {"requestedAt": datetime.now(timezone.utc).isoformat()}
@@ -1103,16 +1119,18 @@ def _validate_current_journal_marker(marker: Any, attempt_id: str, journal_diges
         raise PackageError("Journal transaction marker does not match the retained journal")
 
 
-def _adopt_recovery_journal(attempt_directory: Path, receipt: dict, journal: dict,
-                            journal_bytes: bytes) -> str:
-    """Bind a pending journal update to its receipt and return the current digest."""
+def _validate_recovery_journal_identity(receipt: dict, journal: dict) -> str:
     attempt_id = receipt.get("attemptId")
     if (journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA or
             not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{12}", attempt_id) or
             journal.get("attemptId") != attempt_id or journal.get("cidfilePrefix") != f"{attempt_id}-"):
         raise PackageError("Container journal belongs to a different attempt")
+    return attempt_id
+
+
+def _adopt_pending_journal_update(attempt_directory: Path, receipt: dict, attempt_id: str,
+                                  journal_digest: str) -> None:
     reference = receipt.get("containerJournal")
-    journal_digest = sha256_bytes(journal_bytes)
     if (not isinstance(reference, dict) or reference.get("path") != "container-journal.json" or
             not isinstance(reference.get("sha256"), str) or
             not re.fullmatch(r"[0-9a-f]{64}", reference["sha256"])):
@@ -1134,6 +1152,14 @@ def _adopt_recovery_journal(attempt_directory: Path, receipt: dict, journal: dic
     if marker_path.exists():
         marker_path.unlink()
         _fsync_directory(attempt_directory)
+
+
+def _adopt_recovery_journal(attempt_directory: Path, receipt: dict, journal: dict,
+                            journal_bytes: bytes) -> str:
+    """Bind a pending journal update to its receipt and return the current digest."""
+    attempt_id = _validate_recovery_journal_identity(receipt, journal)
+    journal_digest = sha256_bytes(journal_bytes)
+    _adopt_pending_journal_update(attempt_directory, receipt, attempt_id, journal_digest)
     return journal_digest
 
 
@@ -1159,6 +1185,47 @@ def _load_recovery_state(attempt_directory: Path) -> tuple[dict, dict, str]:
     return receipt, journal, journal_digest
 
 
+def _preflight_receipt_engine(receipt: dict) -> str:
+    expected_modes = {
+        "podman": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+        "docker": "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime",
+    }
+    engine = "podman" if receipt.get("executionMode") == expected_modes["podman"] else "docker"
+    if (receipt.get("executionMode") != expected_modes[engine] or
+            not isinstance(receipt.get("attemptId"), str) or
+            not re.fullmatch(r"[0-9a-f]{12}", receipt["attemptId"]) or
+            not isinstance(receipt.get("planPackageSha256"), str) or
+            not re.fullmatch(r"[0-9a-f]{64}", receipt["planPackageSha256"]) or
+            not isinstance(receipt.get("runner"), dict) or receipt["runner"].get("name") != "cwltool"):
+        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
+    return engine
+
+
+def _validate_not_started_cleanup(receipt: dict, engine: str) -> None:
+    cleanup = receipt.get("containerCleanup")
+    expected = {"state": "not-started", "engine": engine, "containerCount": 0,
+                "absentCount": 0, "allAbsent": False}
+    if (receipt.get("status") != "failed" or receipt.get("executionPhase") != "not-started" or
+            receipt.get("executionNeverStarted") is not True or
+            receipt.get("launchIntentPersisted") is not False or cleanup != expected):
+        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
+
+
+def _validate_not_started_receipt(receipt: Any) -> None:
+    if not isinstance(receipt, dict):
+        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
+    engine = _preflight_receipt_engine(receipt)
+    _validate_not_started_cleanup(receipt, engine)
+
+
+def _require_empty_preflight_cid_directory(attempt_directory: Path) -> None:
+    cid_directory = attempt_directory / "engine-cids"
+    if (cid_directory.is_symlink() or not cid_directory.is_dir() or cid_directory.stat().st_mode & 0o077
+            or (hasattr(os, "getuid") and cid_directory.stat().st_uid != os.getuid())
+            or any(cid_directory.iterdir())):
+        raise PackageError("Preflight CID directory is unsafe or contains possible container evidence")
+
+
 def _load_not_started_receipt(attempt_directory: Path) -> dict:
     """Accept only the durable typed preflight outcome, never missing state alone."""
     if (attempt_directory.is_symlink() or not attempt_directory.is_dir() or
@@ -1169,35 +1236,11 @@ def _load_not_started_receipt(attempt_directory: Path) -> dict:
     if receipt_path.is_symlink() or not receipt_path.is_file():
         raise PackageError("Preflight recovery receipt is absent or unsafe")
     if any((attempt_directory / name).exists() for name in
-           ("container-journal.json", "container-journal.pending")):
+           ("container-journal.json", "container-journal.pending", "container-journal.json.tmp")):
         raise PackageError("Preflight no-start receipt conflicts with container journal state")
     receipt = json_value(bounded_read(receipt_path, 1024 * 1024))
-    cleanup = receipt.get("containerCleanup") if isinstance(receipt, dict) else None
-    execution_mode = receipt.get("executionMode") if isinstance(receipt, dict) else None
-    expected_engine = "podman" if isinstance(execution_mode, str) and execution_mode.endswith("Podman runtime") else "docker"
-    if (not isinstance(receipt, dict) or
-            not isinstance(receipt.get("attemptId"), str) or
-            not re.fullmatch(r"[0-9a-f]{12}", receipt["attemptId"]) or
-            not isinstance(receipt.get("planPackageSha256"), str) or
-            not re.fullmatch(r"[0-9a-f]{64}", receipt["planPackageSha256"]) or
-            not isinstance(receipt.get("runner"), dict) or receipt["runner"].get("name") != "cwltool" or
-            execution_mode not in {
-                "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
-                "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime",
-            } or
-            receipt.get("status") != "failed" or
-            receipt.get("executionPhase") != "not-started" or
-            receipt.get("executionNeverStarted") is not True or
-            receipt.get("launchIntentPersisted") is not False or
-            not isinstance(cleanup, dict) or cleanup != {
-                "state": "not-started", "engine": expected_engine, "containerCount": 0,
-                "absentCount": 0, "allAbsent": False,
-            } or cleanup.get("engine") not in {"podman", "docker"}):
-        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
-    cid_directory = attempt_directory / "engine-cids"
-    if (cid_directory.is_symlink() or not cid_directory.is_dir() or
-            cid_directory.stat().st_mode & 0o077 or any(cid_directory.iterdir())):
-        raise PackageError("Preflight CID directory is unsafe or contains possible container evidence")
+    _validate_not_started_receipt(receipt)
+    _require_empty_preflight_cid_directory(attempt_directory)
     receipt["containerJournal"] = {
         "availability": "not-applicable-not-started", "storePath": None, "sha256": None,
     }
@@ -1239,8 +1282,7 @@ def _validate_recovery_container_inventory(attempt_directory: Path, journal: dic
     _validate_recovery_directories(attempt_directory)
 
 
-def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: dict) -> None:
-    """Require the retained plan identity, worker image, and container inventory to match."""
+def _validate_recovery_receipt_worker(receipt: dict, journal: dict) -> None:
     if receipt.get("status") not in {"started", "failed"}:
         raise PackageError("Only incomplete or failed attempts can be recovered")
     plan_digest = receipt.get("planPackageSha256")
@@ -1258,6 +1300,11 @@ def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: d
             not isinstance(journal.get("workerImageId"), str) or
             not re.fullmatch(r"sha256:[0-9a-f]{64}", journal["workerImageId"])):
         raise PackageError("Recovery engine or pinned image identity differs from the retained receipt")
+
+
+def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: dict) -> None:
+    """Require the retained plan identity, worker image, and container inventory to match."""
+    _validate_recovery_receipt_worker(receipt, journal)
     _validate_recovery_age_and_controller(journal)
     _validate_recovery_container_inventory(attempt_directory, journal)
     image = _engine_call(attempt_directory, journal,
