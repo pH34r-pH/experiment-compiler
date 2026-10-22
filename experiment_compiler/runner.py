@@ -799,6 +799,33 @@ def _normalize_engine_image_id(value: str) -> str | None:
     return f"sha256:{match.group(1).lower()}"
 
 
+def _engine_image_reference_matches(observed: str, pinned: str) -> bool:
+    """Allow Podman to omit a tag while preserving the pinned repository and digest."""
+    if not isinstance(observed, str) or not isinstance(pinned, str):
+        return False
+    digest_pattern = re.compile(r"^(.+)@(sha256:[0-9a-f]{64})$")
+    observed_match = digest_pattern.fullmatch(observed)
+    pinned_match = digest_pattern.fullmatch(pinned)
+    if observed_match is None or pinned_match is None:
+        return False
+    if observed == pinned:
+        return True
+    pinned_name, pinned_digest = pinned_match.groups()
+    observed_name, observed_digest = observed_match.groups()
+    if observed_digest != pinned_digest:
+        return False
+    # A registry port is before the final slash; only a colon in the final
+    # path component can be the optional image tag.
+    last_slash = pinned_name.rfind("/")
+    tag_separator = pinned_name.rfind(":")
+    if tag_separator <= last_slash:
+        return False
+    tag = pinned_name[tag_separator + 1:]
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):
+        return False
+    return observed_name == pinned_name[:tag_separator]
+
+
 def _write_container_journal(attempt_directory: Path, journal: dict) -> str:
     """Durably replace the controller-owned journal and return its digest."""
     if journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA:
@@ -1066,7 +1093,8 @@ def _container_present(attempt_directory: Path, journal: dict, container_id: str
         if len(fields) != 4 or fields[0].lower() != container_id:
             raise PackageError("Container inspect returned a different or malformed ID")
         inspected_image_id = _normalize_engine_image_id(fields[2])
-        if inspected_image_id != journal["workerImageId"] or fields[3] != journal["workerImageRef"]:
+        if (inspected_image_id != journal["workerImageId"]
+                or not _engine_image_reference_matches(fields[3], journal["workerImageRef"])):
             raise PackageError("Journaled container image differs from the pinned and receipt-bound worker image")
         return True, fields[1].lower()
     listing = _engine_call(attempt_directory, journal, ["ps", "--all", "--no-trunc", "--format", "{{.ID}}"])
