@@ -312,9 +312,11 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
             prepare_recovery_attempt(
-                attempt, attempt_id=attempt_id, image_ref=image_ref, image_id=image_id,
-                reported_image_id="sha256:" + "e" * 64,
-                controller={"pid": -1, "bootId": None, "processStartTicks": None},
+                attempt, {
+                    "attempt_id": attempt_id, "image_ref": image_ref, "image_id": image_id,
+                    "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                },
             )
             with patch("experiment_compiler.runner._controller_is_alive"), \
                     patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
@@ -339,10 +341,12 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
             prepare_recovery_attempt(
-                attempt, attempt_id="0123456789ab", image_ref=image_ref,
-                image_id=image_id, reported_image_id="sha256:" + "e" * 64,
-                controller={"pid": 1234, "bootId": str(old_boot), "processStartTicks": "10"},
-                cwl_boot_id=str(old_boot), container_id=container_id,
+                attempt, {
+                    "attempt_id": "0123456789ab", "image_ref": image_ref,
+                    "image_id": image_id, "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": 1234, "bootId": str(old_boot), "processStartTicks": "10"},
+                    "cwl_boot_id": str(old_boot), "container_id": container_id,
+                },
             )
             container_inspect_count = 0
 
@@ -400,11 +404,14 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
             prepare_recovery_attempt(
-                attempt, attempt_id="0123456789ab",
-                image_ref="python:3.13.13-slim@sha256:" + "d" * 64,
-                image_id="sha256:" + "b" * 64, reported_image_id="sha256:" + "e" * 64,
-                controller={"pid": 1234, "bootId": str(uuid.uuid4()), "processStartTicks": "10"},
-                cwl_boot_id="not-a-uuid", container_id="c" * 64,
+                attempt, {
+                    "attempt_id": "0123456789ab",
+                    "image_ref": "python:3.13.13-slim@sha256:" + "d" * 64,
+                    "image_id": "sha256:" + "b" * 64,
+                    "reported_image_id": "sha256:" + "e" * 64,
+                    "controller": {"pid": 1234, "bootId": str(uuid.uuid4()), "processStartTicks": "10"},
+                    "cwl_boot_id": "not-a-uuid", "container_id": "c" * 64,
+                },
             )
             with patch("experiment_compiler.runner._controller_is_alive"), \
                     patch("experiment_compiler.runner._engine_call",

@@ -20,11 +20,17 @@ def prepare_container_journal(attempt_directory, attempt_id, config):
     }
 
 
-def prepare_recovery_attempt(attempt_directory, *, attempt_id, image_ref, image_id,
-                             reported_image_id, controller, cwl_boot_id=None, container_id=None):
+def prepare_recovery_attempt(attempt_directory, identity):
     """Build a private retained attempt fixture without contacting a container engine."""
     from datetime import datetime, timezone
 
+    attempt_id = identity["attempt_id"]
+    image_ref = identity["image_ref"]
+    image_id = identity["image_id"]
+    reported_image_id = identity["reported_image_id"]
+    controller = identity["controller"]
+    cwl_boot_id = identity.get("cwl_boot_id")
+    container_id = identity.get("container_id")
     attempt_directory.mkdir(mode=0o700)
     (attempt_directory / "engine-cids").mkdir(mode=0o700)
     (attempt_directory / "runner-home").mkdir(mode=0o700)
