@@ -1367,6 +1367,36 @@ def recover_attempt(attempt_directory: Path) -> dict:
     return receipt
 
 
+def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
+    journal = execution.get("containerJournal")
+    container_journal = (
+        {"availability": "private-store", "storePath": execution.get("containerJournalStorePath"),
+         "sha256": journal["sha256"]}
+        if isinstance(journal, dict) and isinstance(journal.get("sha256"), str)
+        else {"availability": "unavailable"}
+    )
+    return {
+        "runner": {"name": "cwltool", "version": runner["version"],
+                   "python": platform.python_version(), "workerImageBase": runner.get("workerImageBase")},
+        "executionMode": (
+            "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"
+            if runner["executionMode"] == "cwltool-podman"
+            else "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime"
+        ),
+        "workerContext": {
+            "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
+            "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
+            "attestation": "caller-reported; not independently verified by the adapter",
+        },
+        "status": ("timed-out" if execution["timedOut"] else
+                   "failed" if execution["returnCode"] != 0 or execution["collectionErrors"] else "succeeded"),
+        "collectionErrors": execution["collectionErrors"],
+        "containerJournal": container_journal,
+        "containerCleanup": execution.get("containerCleanup", {"state": "unknown", "allAbsent": False}),
+        "outputStorage": execution.get("outputStorage", {"enforcement": "worker-tmpfs-only", "hardCap": False}),
+    }
+
+
 def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_sha256: str,
                       closure: dict, runner: dict, execution: dict,
                       timing: dict) -> tuple[dict[str, bytes], str, list[str]]:
@@ -1400,35 +1430,8 @@ def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_
         },
         "workflowSha256": sha256_bytes(payload["experiment/workflow.cwl"]),
         "jobSha256": sha256_bytes(payload["experiment/job.yml"]),
-        "runner": {
-            "name": "cwltool", "version": runner["version"],
-            "python": platform.python_version(), "workerImageBase": runner.get("workerImageBase"),
-        },
-        "executionMode": (
-            "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"
-            if runner["executionMode"] == "cwltool-podman"
-            else "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime"
-        ),
         "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
-        "workerContext": {
-            "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
-            "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-            "attestation": "caller-reported; not independently verified by the adapter",
-        },
-        "status": (
-            "timed-out" if execution["timedOut"]
-            else "failed" if execution["returnCode"] != 0 or execution["collectionErrors"]
-            else "succeeded"
-        ),
-        "collectionErrors": execution["collectionErrors"],
-        "containerJournal": ({"availability": "private-store",
-                              "storePath": execution.get("containerJournalStorePath"),
-                              "sha256": execution["containerJournal"]["sha256"]}
-                             if isinstance(execution.get("containerJournal"), dict) and
-                             isinstance(execution["containerJournal"].get("sha256"), str)
-                             else {"availability": "unavailable"}),
-        "containerCleanup": execution.get("containerCleanup", {"state": "unknown", "allAbsent": False}),
-        "outputStorage": execution.get("outputStorage", {"enforcement": "worker-tmpfs-only", "hardCap": False}),
+        **_attempt_receipt_runtime(runner, execution),
         "exitCode": execution["returnCode"],
         "timedOut": execution["timedOut"],
         "startedAt": created.isoformat(),
