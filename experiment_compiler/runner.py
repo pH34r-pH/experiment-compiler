@@ -14,11 +14,13 @@ import platform
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,6 +34,7 @@ from .core import (MANIFEST, PackageError, bounded_read, canonical, compile_pack
 
 _CONTAINER_JOURNAL_SCHEMA = "cwltool-container-journal/v1"
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_ENGINE_IMAGE_ID = re.compile(r"(?:sha256:)?([0-9a-fA-F]{64})\Z")
 _MAX_ATTEMPT_CONTAINERS = 64
 _MAX_RECOVERY_AGE_SECONDS = 7 * 24 * 60 * 60
 
@@ -786,6 +789,16 @@ def _container_engine(runner: dict) -> str:
     raise PackageError("unsupported container engine in runner configuration")
 
 
+def _normalize_engine_image_id(value: str) -> str | None:
+    """Canonicalize a complete engine image ID; never accept a short ID."""
+    if not isinstance(value, str):
+        return None
+    match = _ENGINE_IMAGE_ID.fullmatch(value.strip())
+    if not match:
+        return None
+    return f"sha256:{match.group(1).lower()}"
+
+
 def _write_container_journal(attempt_directory: Path, journal: dict) -> str:
     """Durably replace the controller-owned journal and return its digest."""
     if journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA:
@@ -922,8 +935,8 @@ def _new_container_journal(attempt_directory: Path, attempt_id: str, runner: dic
     }
     image = _engine_call(attempt_directory, journal,
                          ["image", "inspect", "--format", "{{.Id}}", str(journal["workerImageRef"])])
-    image_id = image.stdout.strip().lower()
-    if image.returncode != 0 or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+    image_id = _normalize_engine_image_id(image.stdout)
+    if image.returncode != 0 or image_id is None:
         raise PackageError("Pinned workflow image could not be verified by the configured engine")
     journal["workerImageId"] = image_id
     return journal
@@ -1052,7 +1065,8 @@ def _container_present(attempt_directory: Path, journal: dict, container_id: str
         fields = inspected.stdout.strip().split()
         if len(fields) != 4 or fields[0].lower() != container_id:
             raise PackageError("Container inspect returned a different or malformed ID")
-        if fields[2].lower() != journal["workerImageId"] or fields[3] != journal["workerImageRef"]:
+        inspected_image_id = _normalize_engine_image_id(fields[2])
+        if inspected_image_id != journal["workerImageId"] or fields[3] != journal["workerImageRef"]:
             raise PackageError("Journaled container image differs from the pinned and receipt-bound worker image")
         return True, fields[1].lower()
     listing = _engine_call(attempt_directory, journal, ["ps", "--all", "--no-trunc", "--format", "{{.ID}}"])
@@ -1175,6 +1189,8 @@ def _load_recovery_state(attempt_directory: Path) -> tuple[dict, dict, str]:
     journal_path = attempt_directory / "container-journal.json"
     if receipt_path.is_symlink() or journal_path.is_symlink():
         raise PackageError("Recovery receipt and journal must be regular owned files")
+    _validate_private_receipt_file(receipt_path, "Recovery receipt")
+    _validate_receipt_staging_files(attempt_directory)
     receipt_bytes = bounded_read(receipt_path, 1024 * 1024)
     journal_bytes = bounded_read(journal_path, 1024 * 1024)
     receipt = json_value(receipt_bytes)
@@ -1233,11 +1249,11 @@ def _load_not_started_receipt(attempt_directory: Path) -> dict:
             attempt_directory.stat().st_mode & 0o077):
         raise PackageError("Recovery requires an owned private attempt directory")
     receipt_path = attempt_directory / "runner-receipt.json"
-    if receipt_path.is_symlink() or not receipt_path.is_file():
-        raise PackageError("Preflight recovery receipt is absent or unsafe")
+    _validate_private_receipt_file(receipt_path, "Preflight recovery receipt")
     if any((attempt_directory / name).exists() for name in
            ("container-journal.json", "container-journal.pending", "container-journal.json.tmp")):
         raise PackageError("Preflight no-start receipt conflicts with container journal state")
+    _validate_receipt_staging_files(attempt_directory)
     receipt = json_value(bounded_read(receipt_path, 1024 * 1024))
     _validate_not_started_receipt(receipt)
     _require_empty_preflight_cid_directory(attempt_directory)
@@ -1309,7 +1325,8 @@ def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: d
     _validate_recovery_container_inventory(attempt_directory, journal)
     image = _engine_call(attempt_directory, journal,
                          ["image", "inspect", "--format", "{{.Id}}", journal["workerImageRef"]])
-    if image.returncode != 0 or image.stdout.strip().lower() != journal["workerImageId"]:
+    if (image.returncode != 0 or
+            _normalize_engine_image_id(image.stdout) != journal["workerImageId"]):
         raise PackageError("Recovery engine no longer resolves the exact retained workflow image ID")
 
 
@@ -1581,13 +1598,69 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
     return result
 
 
+def _validate_private_receipt_file(path: Path, description: str) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except FileNotFoundError as exc:
+        raise PackageError(f"{description} is absent") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink():
+        raise PackageError(f"{description} is not a regular file")
+    if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600):
+        raise PackageError(f"{description} is not owned by the current runner with mode 0600")
+    return info
+
+
+def _validate_receipt_staging_files(attempt_directory: Path) -> None:
+    """Retain interrupted private staging files while rejecting unsafe entries."""
+    staging = [path for path in attempt_directory.iterdir()
+               if path.name == "runner-receipt.json.tmp" or
+               path.name.startswith("runner-receipt.json.tmp.")]
+    if len(staging) > 64:
+        raise PackageError("Attempt has too many retained receipt staging files")
+    for path in staging:
+        info = _validate_private_receipt_file(path, "Retained attempt receipt staging file")
+        if info.st_size > 1024 * 1024:
+            raise PackageError("Retained attempt receipt staging file exceeds its size limit")
+
+
 def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
-    pending = attempt_directory / "runner-receipt.json.tmp"
-    with pending.open("wb") as stream:
-        stream.write(canonical(value))
-        stream.flush()
-        os.fsync(stream.fileno())
-    pending.replace(attempt_directory / "runner-receipt.json")
+    if attempt_directory.is_symlink() or not attempt_directory.is_dir():
+        raise PackageError("Attempt receipt directory is missing or unsafe")
+    if os.name == "posix":
+        directory_info = attempt_directory.stat()
+        if (directory_info.st_uid != os.getuid() or directory_info.st_mode & 0o077):
+            raise PackageError("Attempt receipt directory is not private to the current runner")
+    _validate_receipt_staging_files(attempt_directory)
+    pending = attempt_directory / f"runner-receipt.json.tmp.{uuid.uuid4().hex}"
+    target = attempt_directory / "runner-receipt.json"
+    try:
+        existing = target.lstat()
+    except FileNotFoundError:
+        existing = None
+    if existing is not None:
+        _validate_private_receipt_file(target, "Existing attempt receipt")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(pending, flags, 0o600)
+    except FileExistsError as exc:
+        raise PackageError("Attempt receipt pending file already exists; refusing to overwrite it") from exc
+    try:
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
+            created = os.fstat(descriptor)
+            if (not stat.S_ISREG(created.st_mode) or created.st_uid != os.getuid() or
+                    stat.S_IMODE(created.st_mode) != 0o600):
+                raise PackageError("Attempt receipt staging file is not a private regular file")
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            stream.write(canonical(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    _validate_private_receipt_file(pending, "Attempt receipt staging file")
+    pending.replace(target)
     _fsync_directory(attempt_directory)
 
 

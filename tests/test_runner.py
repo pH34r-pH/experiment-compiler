@@ -13,6 +13,9 @@ from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
                                         _cleanup_container_journal, _require_bounded_output_tmpfs,
                                         _require_bounded_tmpfs, _run_command, _terminate_process_group,
+                                        _new_container_journal, _container_present, _validate_recovery_worker,
+                                        _admit_container_requirement, _persist_attempt_receipt,
+                                        _write_container_journal, _journal_receipt_reference,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
 from runner_fixture_helpers import prepare_container_journal
@@ -43,6 +46,197 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def _fixture_container_journal(self, attempt_directory, attempt_id, runner):
         return prepare_container_journal(attempt_directory, attempt_id, runner)
+
+    def test_engine_image_ids_accept_only_complete_sha256_and_canonicalize_podman_output(self):
+        from experiment_compiler.runner import _normalize_engine_image_id
+        image_id = "a" * 64
+        self.assertEqual(_normalize_engine_image_id(image_id), "sha256:" + image_id)
+        self.assertEqual(_normalize_engine_image_id("sha256:" + image_id.upper()), "sha256:" + image_id)
+        for invalid in ("a" * 63, "a" * 65, "sha256:" + "a" * 63,
+                        "sha512:" + "a" * 64, "sha256:" + "g" * 64, "shortid"):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(_normalize_engine_image_id(invalid))
+
+    def test_container_journal_normalizes_podman_bare_image_id_and_rejects_invalid_ids(self):
+        from types import SimpleNamespace
+        image_ref = "registry.example/tool@sha256:" + "d" * 64
+        runner = {"executionMode": "cwltool-podman", "workerImageBase": image_ref}
+        image_id = "a" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            attempt.mkdir(mode=0o700)
+            with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout=image_id + "\n")):
+                journal = _new_container_journal(attempt, "0123456789ab", runner)
+            self.assertEqual(journal["workerImageRef"], image_ref)
+            self.assertEqual(journal["workerImageId"], "sha256:" + image_id)
+        for invalid in ("a" * 63, "sha512:" + image_id):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as value:
+                attempt = Path(value) / "attempt"
+                attempt.mkdir(mode=0o700)
+                with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
+                        patch("experiment_compiler.runner._engine_call",
+                              return_value=SimpleNamespace(returncode=0, stdout=invalid)):
+                    with self.assertRaisesRegex(PackageError, "Pinned workflow image"):
+                        _new_container_journal(attempt, "0123456789ab", runner)
+
+    def test_container_inspect_and_recovery_compare_canonical_image_id(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        image_ref = "registry.example/tool@sha256:" + "d" * 64
+        image_id = "sha256:" + "a" * 64
+        cid = "b" * 64
+        journal = {"engine": "podman", "enginePath": sys.executable,
+                   "workerImageRef": image_ref, "workerImageId": image_id}
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value)
+            bare_inspect = f"{cid} running {'a' * 64} {image_ref}\n"
+            with patch("experiment_compiler.runner._engine_call",
+                       return_value=SimpleNamespace(returncode=0, stdout=bare_inspect)):
+                self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
+            wrong_inspect = f"{cid} running {'c' * 64} {image_ref}\n"
+            with patch("experiment_compiler.runner._engine_call",
+                       return_value=SimpleNamespace(returncode=0, stdout=wrong_inspect)):
+                with self.assertRaisesRegex(PackageError, "differs from the pinned"):
+                    _container_present(attempt, journal, cid)
+
+            journal.update({"schema": "cwltool-container-journal/v1", "attemptId": "0123456789ab",
+                            "reportedWorkerImageId": "sha256:" + "e" * 64, "state": "running",
+                            "createdAt": datetime.now(timezone.utc).isoformat(), "containers": []})
+            receipt = {"status": "started", "planPackageSha256": "f" * 64,
+                       "runner": {"name": "cwltool", "workerImageBase": image_ref},
+                       "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
+                       "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"}
+            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
+                _validate_recovery_worker(attempt, receipt, journal)
+            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout="c" * 64 + "\n")):
+                with self.assertRaisesRegex(PackageError, "exact retained workflow image ID"):
+                    _validate_recovery_worker(attempt, receipt, journal)
+
+    def test_wrong_digest_reference_is_still_rejected(self):
+        wrong = "registry.example/tool@sha256:" + "b" * 64
+        expected = "registry.example/tool@sha256:" + "a" * 64
+        with self.assertRaisesRegex(PackageError, "digest-pinned Docker image"):
+            _admit_container_requirement({"DockerRequirement": {"dockerPull": wrong}}, expected, False)
+
+    @unittest.skipUnless(os.name == "posix", "private receipt mode is a POSIX worker contract")
+    def test_attempt_receipt_is_private_even_under_permissive_umask(self):
+        import stat
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            attempt.mkdir(mode=0o700)
+            original = os.umask(0)
+            try:
+                _persist_attempt_receipt(attempt, {"status": "started"})
+            finally:
+                os.umask(original)
+            receipt = attempt / "runner-receipt.json"
+            self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+            self.assertEqual(json.loads(receipt.read_text()), {"status": "started"})
+
+    @unittest.skipUnless(os.name == "posix", "private receipt ownership is a POSIX worker contract")
+    def test_attempt_receipt_refuses_preexisting_pending_symlink_without_overwriting_target(self):
+        with tempfile.TemporaryDirectory() as value:
+            root = Path(value)
+            attempt = root / "attempt"
+            attempt.mkdir(mode=0o700)
+            outside = root / "outside.json"
+            outside.write_text("foreign", encoding="utf-8")
+            (attempt / "runner-receipt.json.tmp").symlink_to(outside)
+            with self.assertRaisesRegex(PackageError, "not a regular file"):
+                _persist_attempt_receipt(attempt, {"status": "failed"})
+            self.assertEqual(outside.read_text(encoding="utf-8"), "foreign")
+
+    @unittest.skipUnless(os.name == "posix", "private receipt ownership is a POSIX worker contract")
+    def test_attempt_receipt_refuses_permissive_existing_target(self):
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            attempt.mkdir(mode=0o700)
+            receipt = attempt / "runner-receipt.json"
+            receipt.write_text('{"status":"old"}', encoding="utf-8")
+            receipt.chmod(0o644)
+            with self.assertRaisesRegex(PackageError, "mode 0600"):
+                _persist_attempt_receipt(attempt, {"status": "failed"})
+            self.assertEqual(receipt.read_text(encoding="utf-8"), '{"status":"old"}')
+
+    @unittest.skipUnless(os.name == "posix", "attempt recovery and private files are POSIX worker contracts")
+    def test_receipt_fsync_before_rename_is_recoverable_with_exact_journal_transaction(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        attempt_id = "0123456789ab"
+        image_ref = "registry.example/tool@sha256:" + "d" * 64
+        image_id = "sha256:" + "a" * 64
+        reported_id = "sha256:" + "e" * 64
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            attempt.mkdir(mode=0o700)
+            (attempt / "engine-cids").mkdir(mode=0o700)
+            (attempt / "runner-home").mkdir(mode=0o700)
+            journal = {
+                "schema": "cwltool-container-journal/v1", "attemptId": attempt_id,
+                "engine": "podman", "enginePath": sys.executable,
+                "workerImageRef": image_ref, "workerImageId": image_id,
+                "reportedWorkerImageId": reported_id,
+                "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+                "state": "prepared", "launchIntentPersisted": False,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
+            }
+            journal_digest = _write_container_journal(attempt, journal)
+            receipt = {
+                "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
+                "planPackageSha256": "f" * 64,
+                "runner": {"name": "cwltool", "version": "3.2.20260720092025", "workerImageBase": image_ref},
+                "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
+                "workerContext": {"reportedImageId": reported_id}, "collectionErrors": [],
+                "containerJournal": {"path": "container-journal.json", "sha256": journal_digest},
+            }
+            _persist_attempt_receipt(attempt, receipt)
+            original_replace = Path.replace
+
+            def fail_receipt_rename(source, target):
+                if source.name.startswith("runner-receipt.json.tmp."):
+                    raise OSError("fixture crash after receipt fsync, before atomic rename")
+                return original_replace(source, target)
+
+            journal.update(state="running", launchIntentPersisted=True)
+            with patch.object(Path, "replace", new=fail_receipt_rename):
+                with self.assertRaisesRegex(OSError, "after receipt fsync"):
+                    _journal_receipt_reference(attempt, journal, receipt)
+            abandoned = list(attempt.glob("runner-receipt.json.tmp.*"))
+            self.assertEqual(len(abandoned), 1)
+            self.assertEqual((attempt / "runner-receipt.json").stat().st_mode & 0o777, 0o600)
+            self.assertNotEqual(
+                json.loads((attempt / "runner-receipt.json").read_text())["containerJournal"]["sha256"],
+                sha256_bytes((attempt / "container-journal.json").read_bytes()),
+            )
+
+            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertEqual(len(list(attempt.glob("runner-receipt.json.tmp.*"))), 1)
+            latest_journal = (attempt / "container-journal.json").read_bytes()
+            latest_receipt = json.loads((attempt / "runner-receipt.json").read_text())
+            self.assertEqual(latest_receipt["containerJournal"]["sha256"], sha256_bytes(latest_journal))
+            self.assertEqual((attempt / "runner-receipt.json").stat().st_mode & 0o777, 0o600)
+
+            outside = Path(value) / "outside.json"
+            outside.write_text("preserved", encoding="utf-8")
+            (attempt / "runner-receipt.json.tmp.foreign").symlink_to(outside)
+            with self.assertRaisesRegex(PackageError, "not a regular file"):
+                recover_attempt(attempt)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserved")
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):
@@ -421,7 +615,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
         def replace_receipt(path, target):
             if (scenario == "terminal-persist" and output.exists() and
-                    path.name == "runner-receipt.json.tmp" and not terminal_failure):
+                    path.name.startswith("runner-receipt.json.tmp.") and not terminal_failure):
                 terminal_failure.append(True)
                 raise OSError("fixture terminal persistence failure")
             return original_replace(path, target)

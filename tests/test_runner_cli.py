@@ -95,7 +95,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
                 "stderr": b"retained native stderr", "outputs": {"result.txt": b"fixture"},
                 "provenance": {}, "collectionErrors": []}
     def pause_receipt(path, target):
-        if path.name == "runner-receipt.json.tmp":
+        if path.name.startswith("runner-receipt.json.tmp."):
             value = json.loads(path.read_bytes())
             selected = (value["status"] == "failed" or (directory / "result.zip").exists())
             if selected:
