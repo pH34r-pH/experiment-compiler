@@ -517,11 +517,20 @@ class CompilerTests(unittest.TestCase):
         published = catalog["experiments"][4]
         self.assertEqual(published["package"]["sha256"],
                          "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4")
-        self.assertEqual(published["backlinks"], [{
+        self.assertIn({
             "title": "Milestone 005 — The unit-hypersphere anomaly (later comparison, not a replay)",
             "url": "https://tyharbin.com/articles/005-unit-hypersphere-anomaly/",
             "sourceCommit": "bb92366a67d1fb433b979b65b9036ecc26f3795e",
-        }])
+        }, published["backlinks"])
+        self.assertIn({
+            "title": "Milestone 005 — The unit-hypersphere anomaly (later comparison, not a replay)",
+            "url": "https://tyharbin.com/articles/005-unit-hypersphere-anomaly/",
+            "sourceCommit": "15a95fdf22d5b19968e0490ae4f801b2f25d548e",
+        }, published["backlinks"])
+        self.assertEqual(len(published["backlinks"]), 2)
+        self.assertEqual(published["backlinks"], json.loads(
+            (ROOT / "examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/experiment.json").read_text(encoding="utf-8")
+        )["relatedArticles"])
         self.assertEqual(published["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(len(published["scientificInterpretation"]), 1)
         attempt = published["executionAttempts"][0]
