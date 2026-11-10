@@ -46,7 +46,7 @@ def _check_no_js(browser, base: str, experiments: list[dict], evidence: Path | N
     assert page.locator(".catalog-links a[href^='/experiments/']").count() == len(experiments)
     assert page.locator(".catalog-links a.download-link").count() == len(experiments)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    assert page.locator(".table-scroll").evaluate("el => el.scrollWidth > el.clientWidth")
+    assert page.locator(".table-scroll").evaluate("el => el.scrollWidth <= el.clientWidth")
     if evidence:
         page.screenshot(path=str(evidence / "catalog-mobile-no-js.png"), full_page=True)
     context.close()
@@ -224,12 +224,21 @@ def _check_mobile(browser, base: str, experiments: list[dict], protocol: str,
         mobile.goto(base + "/")
         scroll = mobile.locator(".table-scroll")
         assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), width
-        assert scroll.evaluate("el => el.scrollWidth > el.clientWidth"), width
+        assert scroll.evaluate("el => el.scrollWidth <= el.clientWidth"), width
         assert mobile.get_by_role("region", name="Scrollable compiled experiment catalog").count() == 1
         assert mobile.locator("#catalog-filter").evaluate("el => el.getBoundingClientRect().height >= 48")
         mobile.locator(".table-scroll").focus()
         mobile.evaluate("document.querySelector('.table-scroll').scrollLeft = document.querySelector('.table-scroll').scrollWidth")
-        assert scroll.evaluate("el => el.scrollLeft > 0"), width
+        assert scroll.evaluate("el => el.scrollLeft == 0"), width
+        for action in mobile.locator('.catalog-links a').all():
+            box = action.bounding_box()
+            assert box and box['x'] >= 0 and box['x'] + box['width'] <= width, (width, box)
+        for experiment in experiments:
+            mobile.goto(base + experiment['detailUrl'])
+            assert mobile.locator('.result-summary').is_visible()
+            assert mobile.locator('.result-summary .actions a[download]').is_visible()
+            assert mobile.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), width
+        mobile.goto(base + '/')
         _capture_mobile_evidence(mobile, scroll, width, evidence)
         _check_mobile_protocol(mobile, base, protocol, width)
         assert not mobile_errors, mobile_errors
