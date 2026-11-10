@@ -306,6 +306,12 @@ def render_protocol(protocol: object) -> str:
             f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
 
 
+def render_prerequisites(experiment: dict) -> str:
+    unavailable = experiment.get('unavailablePrerequisites')
+    return ('<pre>' + html.escape(json.dumps(unavailable, indent=2)) + '</pre>'
+                     if unavailable else '<p>No separate unavailable-prerequisite list is declared. Inspect the packaged protocol and dependency closure before attempting a replay.</p>')
+
+
 def render_detail(experiment: dict) -> str:
     """Render a static package detail route from Compiler-derived metadata."""
     title = html.escape(experiment["title"])
@@ -326,9 +332,7 @@ def render_detail(experiment: dict) -> str:
     result_html, _, _ = _catalog_result_html(experiment)
     status_html, _, attempt_display = _catalog_status_values(experiment)
     verification = (f'<pre><code>python -m experiment_compiler verify {html.escape(package_hash)}.zip --expected-sha256 {html.escape(package_hash)}</code></pre>' if package_hash else '<p>No package is available to verify.</p>')
-    unavailable = experiment.get('unavailablePrerequisites')
-    prerequisites = ('<pre>' + html.escape(json.dumps(unavailable, indent=2)) + '</pre>'
-                     if unavailable else '<p>No separate unavailable-prerequisite list is declared. Inspect the packaged protocol and dependency closure before attempting a replay.</p>')
+    prerequisites = render_prerequisites(experiment)
     protocol_html = render_protocol(experiment.get("protocol"))
     profile = html.escape(experiment.get("profile", ""))
     package_identity = (f"SHA-256 {html.escape(package_hash)} · {package.get('size', 0):,} bytes"
