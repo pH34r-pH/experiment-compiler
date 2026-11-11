@@ -136,11 +136,13 @@ jobs:
         shell: bash
         run: |
           set +e
+          # These three scientific members must remain exact frozen-parent copies;
+          # test_podman_reuse_plan_preserves_frozen_science_and_exact_parent checks them.
           npx --yes jscpd@5.0.12 . \
             --min-lines 8 \
             --min-tokens 60 \
             --format python,javascript,typescript,rust \
-            --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**" \
+            --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**,**/examples/linear-regression-podman-lifecycle-v1/source/reproduce.py,**/examples/linear-regression-podman-lifecycle-v1/source/run_experiment.py,**/examples/linear-regression-podman-lifecycle-v1/source/test_experiment.py" \
             --reporters console,json \
             --output quality-audit/jscpd \
             > quality-audit/jscpd-console.txt 2>&1
@@ -177,7 +179,7 @@ jobs:
             npx --yes jscpd@5.0.12 . \
               --min-lines 8 --min-tokens 60 \
               --format python,javascript,typescript,rust \
-              --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**" \
+              --ignore "**/.git/**,**/.venv/**,**/node_modules/**,**/artifacts/**,**/dist/**,**/build/**,**/*-lock.json,**/examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/**,**/examples/linear-regression-podman-lifecycle-v1/source/reproduce.py,**/examples/linear-regression-podman-lifecycle-v1/source/run_experiment.py,**/examples/linear-regression-podman-lifecycle-v1/source/test_experiment.py" \
               --reporters console \
               > "$GITHUB_WORKSPACE/quality-audit/base/jscpd.txt" 2>&1
             true

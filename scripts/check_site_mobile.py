@@ -97,6 +97,7 @@ def _check_desktop_interactions(page) -> None:
     family_id = "https://experiments.tyharbin.com/#family-stdlib-linear-regression"
     group = page.locator(f'tbody.catalog-group[data-family-id="{family_id}"]')
     expected_ids = ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+                    "linear-regression-podman-lifecycle-v1",
                     "stdlib-linear-regression-v1-compiled-experiment"]
     assert _record_ids(group) == expected_ids
     package_sort = page.get_by_role("button", name="Sort within each family by Package size")
@@ -104,7 +105,8 @@ def _check_desktop_interactions(page) -> None:
     page.keyboard.press("Enter")
     assert page.get_by_role("columnheader", name="Package size").get_attribute("aria-sort") == "ascending"
     expected_by_size = ["linear-regression-plan-v1", "linear-regression-frozen-lifecycle-v1",
-                        "stdlib-linear-regression-v1-compiled-experiment"]
+                        "stdlib-linear-regression-v1-compiled-experiment",
+                        "linear-regression-podman-lifecycle-v1"]
     assert _record_ids(group) == expected_by_size
     page.keyboard.press("Enter")
     assert page.get_by_role("columnheader", name="Package size").get_attribute("aria-sort") == "descending"
@@ -117,7 +119,8 @@ def _check_desktop_interactions(page) -> None:
     page.get_by_role("button", name="Sort within each family by Eval MSE").click()
     assert page.locator('thead th[data-sort-key="eval-mse"]').get_attribute("aria-sort") == "ascending"
     assert _record_ids(group) == ["stdlib-linear-regression-v1-compiled-experiment",
-                                  "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1"]
+                                  "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+                                  "linear-regression-podman-lifecycle-v1"]
 
 def _check_desktop_filter(page, experiments: list[dict]) -> None:
     filter_box = page.get_by_role("searchbox", name="Filter records")
@@ -125,7 +128,7 @@ def _check_desktop_filter(page, experiments: list[dict]) -> None:
     page.keyboard.type("Muon versus historical AdamW")
     assert page.locator("tr.catalog-record:visible").count() == 2
     assert page.locator("tbody.catalog-group:visible").count() == 1
-    assert page.locator("#catalog-status").inner_text().startswith("Showing 2 of 5 records")
+    assert page.locator("#catalog-status").inner_text().startswith(f"Showing 2 of {len(experiments)} records")
     filter_box.fill("muon-unit-hypersphere-depth3-multiseed-v1-final-87409154")
     assert page.locator("tr.catalog-record:visible").count() == 1
     filter_box.fill("")
@@ -133,6 +136,7 @@ def _check_desktop_filter(page, experiments: list[dict]) -> None:
     group = page.locator('tbody.catalog-group[data-family-id="https://experiments.tyharbin.com/#family-stdlib-linear-regression"]')
     page.get_by_role("button", name="Sort within each family by Experiment record").click()
     assert _record_ids(group) == ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+                                  "linear-regression-podman-lifecycle-v1",
                                   "stdlib-linear-regression-v1-compiled-experiment"]
     _check_search_normalization(page, filter_box, group)
 
@@ -185,14 +189,16 @@ def _check_mse_sort(page) -> None:
         "mse-a-negative-float", "mse-b-negative-rational", "mse-negative-quarter", "mse-zero",
         "stdlib-linear-regression-v1-compiled-experiment", "mse-half-float", "mse-half-rational",
         "mse-large-below-one", "mse-one-float", "mse-large-above-one", "mse-two-float",
-        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1", "mse-missing-a", "mse-missing-b",
+        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+        "linear-regression-podman-lifecycle-v1", "mse-missing-a", "mse-missing-b",
     ]
     page.get_by_role("button", name="Sort within each family by Eval MSE, ascending").click()
     assert _record_ids(group) == [
         "mse-two-float", "mse-large-above-one", "mse-one-float", "mse-large-below-one",
         "mse-half-float", "mse-half-rational", "stdlib-linear-regression-v1-compiled-experiment",
         "mse-zero", "mse-negative-quarter", "mse-a-negative-float", "mse-b-negative-rational",
-        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1", "mse-missing-a", "mse-missing-b",
+        "linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+        "linear-regression-podman-lifecycle-v1", "mse-missing-a", "mse-missing-b",
     ]
 
 
