@@ -1,0 +1,248 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context"
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "conformsTo": [
+        {
+          "@id": "https://w3id.org/ro/crate/1.3"
+        }
+      ],
+      "description": "Prospective operational revision of the existing frozen linear-regression lifecycle plan. Only the declared container backend changes from Docker to Podman; scientific protocol and evidence remain byte-identical. No execution or qualification is claimed.",
+      "hasPart": [
+        {
+          "@id": "experiment/README.md"
+        },
+        {
+          "@id": "experiment/DATA-LICENSE.md"
+        },
+        {
+          "@id": "experiment/acceptance.json"
+        },
+        {
+          "@id": "experiment/data.csv"
+        },
+        {
+          "@id": "experiment/environment.json"
+        },
+        {
+          "@id": "experiment/expected-result.json"
+        },
+        {
+          "@id": "experiment/experiment-config.json"
+        },
+        {
+          "@id": "experiment/protocol.md"
+        },
+        {
+          "@id": "experiment/reproduce.py"
+        },
+        {
+          "@id": "experiment/run_experiment.py"
+        },
+        {
+          "@id": "experiment/test_experiment.py"
+        },
+        {
+          "@id": "experiment/runner.json"
+        },
+        {
+          "@id": "experiment/workflow.cwl"
+        },
+        {
+          "@id": "experiment/job.yml"
+        },
+        {
+          "@id": "dependency-closure.json"
+        },
+        {
+          "@id": "evidence/revisions/ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20/parent-plan-package.zip"
+        },
+        {
+          "@id": "experiment/operational-handoff.md"
+        }
+      ],
+      "https://www.w3.org/ns/prov#wasRevisionOf": {
+        "@id": "evidence/revisions/ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20/parent-plan-package.zip"
+      },
+      "identifier": "linear-regression-frozen-lifecycle-v1",
+      "license": {
+        "@id": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "mainEntity": {
+        "@id": "experiment/protocol.md"
+      },
+      "name": "Podman handoff for the frozen linear-regression fixture",
+      "variableMeasured": [
+        {
+          "@id": "#ram-unknown"
+        },
+        {
+          "@id": "#wall-unknown"
+        }
+      ]
+    },
+    {
+      "@id": "experiment/protocol.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "creativeWorkStatus": "Draft",
+      "name": "Frozen linear-regression reproduction protocol",
+      "potentialAction": {
+        "@id": "#planned-run"
+      }
+    },
+    {
+      "@id": "#planned-run",
+      "@type": "CreateAction",
+      "actionStatus": "https://schema.org/PotentialActionStatus",
+      "instrument": {
+        "@id": "experiment/workflow.cwl"
+      },
+      "name": "Reproduce the frozen study through the separately admitted Podman boundary"
+    },
+    {
+      "@id": "experiment/workflow.cwl",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "CWL v1.2 execution workflow",
+      "programmingLanguage": "Common Workflow Language"
+    },
+    {
+      "@id": "experiment/reproduce.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "Frozen source-owned reproduction entrypoint",
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/run_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/test_experiment.py",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "programmingLanguage": "Python"
+    },
+    {
+      "@id": "experiment/data.csv",
+      "@type": "File",
+      "encodingFormat": "text/csv"
+    },
+    {
+      "@id": "experiment/expected-result.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "dependency-closure.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "#ram-unknown",
+      "@type": "PropertyValue",
+      "measurementTechnique": "not measured through the lifecycle runner",
+      "propertyID": "peak process memory",
+      "value": "unknown"
+    },
+    {
+      "@id": "#wall-unknown",
+      "@type": "PropertyValue",
+      "measurementTechnique": "not measured through the lifecycle runner",
+      "propertyID": "wall-clock duration",
+      "value": "unknown"
+    },
+    {
+      "@id": "experiment/README.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown"
+    },
+    {
+      "@id": "experiment/DATA-LICENSE.md",
+      "@type": "File",
+      "encodingFormat": "text/markdown"
+    },
+    {
+      "@id": "experiment/acceptance.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/environment.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/experiment-config.json",
+      "@type": "File",
+      "encodingFormat": "application/json"
+    },
+    {
+      "@id": "experiment/runner.json",
+      "@type": "File",
+      "encodingFormat": "application/json",
+      "https://www.w3.org/ns/prov#wasRevisionOf": {
+        "@id": "urn:sha256:cb14ce96f3fb5551ab116feceea5d966801280fa4cfae2058761bfc0c3fb7bb9"
+      }
+    },
+    {
+      "@id": "experiment/job.yml",
+      "@type": "File",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@id": "evidence/revisions/ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20/parent-plan-package.zip",
+      "@type": "File",
+      "contentSize": 11316,
+      "encodingFormat": "application/zip",
+      "name": "Exact original Docker lifecycle plan",
+      "sha256": "ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20"
+    },
+    {
+      "@id": "urn:sha256:cb14ce96f3fb5551ab116feceea5d966801280fa4cfae2058761bfc0c3fb7bb9",
+      "@type": "CreativeWork",
+      "contentSize": 239,
+      "https://www.w3.org/ns/prov#wasDerivedFrom": {
+        "@id": "evidence/revisions/ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20/parent-plan-package.zip"
+      },
+      "name": "Original Docker runner declaration",
+      "sha256": "cb14ce96f3fb5551ab116feceea5d966801280fa4cfae2058761bfc0c3fb7bb9"
+    },
+    {
+      "@id": "experiment/operational-handoff.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "encodingFormat": "text/markdown",
+      "name": "Operational handoff and qualification gate"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ Examples are source-owned research/package fixtures, not generic test data. Read
 - `issue-164/` is the historical #164/AdamW compatibility package. Its member bytes, reference manifest, terminology, dates, and hashes are immutable regression evidence. Do not “repair” it or add new execution claims.
 - `linear-regression-v1/` is the self-contained reproducibility package used by compiler and independent-reproduction checks.
 - `linear-regression-plan-v1/` and `linear-regression-frozen-lifecycle-v1/` are reviewed plan/attempt lifecycle fixtures used by CI.
+- `linear-regression-podman-lifecycle-v1/` prepares #87's same-study Podman reuse; preserve its frozen scientific members and embedded exact parent plan. Compilation does not qualify or authorize its worker.
 - `muon-comparison-plan-v1/` is a prospective comparison plan with explicit external prerequisites; its missing inputs must remain documented as unavailable.
 - `muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/` is a retained published artifact and evidence boundary; preserve its package and receipts.
 - `pipeline-finalization-fixture/` and `resource-profile/` support synthetic lifecycle/resource validation only.
