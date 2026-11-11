@@ -22,9 +22,12 @@ flowchart TB
   subgraph CLOSE["Finalization branch"]
     FIN["finalize selected attempt<br/>attach scientific decision + publication review"]
     F0["Final reviewable artifact F0"]
-    PUB["Reviewed merge to main<br/>publication event"]
-    CAT["Derived catalog + stable detail route"]
+    PUB["Source-owner reviewed public finalization"]
+    CAT["Derived live catalog + stable detail route"]
+    ARC["compiled-experiments<br/>exact-byte archival copy"]
+    REL["Reviewed release → Zenodo DOI"]
     FIN --> F0 --> PUB --> CAT
+    PUB --> ARC --> REL
   end
 
   CHOOSE -->|"method / protocol change"| REV

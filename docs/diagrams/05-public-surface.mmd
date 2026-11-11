@@ -24,9 +24,18 @@ flowchart LR
     REC --> PKG
   end
 
+  subgraph A["compiled-experiments · archival citation surface"]
+    ARC["Exact reviewed finalized package bytes"]
+    REL["Human-reviewed GitHub Release"]
+    DOI["Zenodo archival record + DOI"]
+    ARC --> REL --> DOI
+  end
+
   REF -->|"resolve exact experiment"| PROJ
   BACK -.->|"read the explanation"| ARTICLE
+  DETAIL -.->|"immutable archive relation when published"| ARC
 
-  RULE["Boundary<br/>Portfolio owns explanation and browser interaction.<br/>Experiment Compiler owns reproduction identity, closure, provenance,<br/>verification/execution handoff, and derived experiment presentation."]
+  RULE["Boundary<br/>Portfolio owns explanation/browser interaction.<br/>Experiment Compiler owns live reproduction identity and presentation.<br/>compiled-experiments owns exact archival release lineage; Zenodo supplies DOI."]
   ARTICLE -.-> RULE
   DETAIL -.-> RULE
+  ARC -.-> RULE
