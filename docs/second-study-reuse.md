@@ -86,7 +86,7 @@ parent bytes and stable scientific identity, proves all frozen scientific member
 are unchanged, and verifies that the new plan is Draft with no actual attempts.
 It does not launch either plan.
 
-#87 remains open until an actual same-boundary attempt retains truthful success or
+Issue #87 remains open until an actual same-boundary attempt retains truthful success or
 failure, the source-owned comparison and interpretation bind the exact new outputs,
 and the existing packaging/presentation path consumes the retained record. Public
 release requires its own reviewed shareable closure. This prepared plan makes the
