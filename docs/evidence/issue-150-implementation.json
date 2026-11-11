@@ -1,0 +1,111 @@
+{
+  "baselineCommit": "4b0816e6b10d7d92d8c69ae47f1910ff41a5bfdb",
+  "checks": {
+    "Lizard 1.24.0 / jscpd 5.0.12": "no structural regression; counts retained below",
+    "Ruff changed source and structural lint": "passed; no new structural findings",
+    "bash -n scripts/check_lifecycle_pipeline.sh": "passed",
+    "git diff --cached --check": "passed",
+    "historical POC compile + verify": "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341; 15296 bytes",
+    "markdownlint-cli2 0.18.1 changed Markdown": "0 errors",
+    "pip wheel --no-deps .": "wheel includes all 5 pinned schemas and source-pin.json",
+    "python -m unittest discover -s tests -q": "185 tests passed; 24.316 seconds; includes prior 168 tests",
+    "python scripts/build_pages_site.py --output /tmp/compiler150-site": "6 exact catalog candidates generated",
+    "python scripts/check_clean_rebuilds.py --source-commit 4b0816e6b10d7d92d8c69ae47f1910ff41a5bfdb --site /tmp/compiler150-site --output /tmp/compiler150-clean-evidence": "6 exact-source independent package rebuilds passed",
+    "python scripts/docs_hygiene.py --paths <31 changed paths>": "passed",
+    "python scripts/test_docs_hygiene.py": "4 tests passed"
+  },
+  "cleanRebuildReceipts": {
+    "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544.clean-rebuild.json": "8b889ede7f16b1a6d82a9b27dde7385b7e02d1a49b85e5a99e8881df1e0701e7",
+    "279caf239c6e27dcf78093c29c7dd54a5df9c1ff8c906f02c14a42f1b737dcec.clean-rebuild.json": "c84db8152b3cc587a32557aed4503b3a837968093d836a941073b3992677e8e4",
+    "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4.clean-rebuild.json": "8fef8023ca3dae4f2ac859f1dcc4b501f7e47196273708954516e2b103033d99",
+    "aa329756e5fe4debfc79176d8f807a1457d0345205859b6a091aad152b71be7d.clean-rebuild.json": "5434194d927d013bc815d689fe24b109d88ee9885733c6f7cc0dae9504b721f8",
+    "b8598574e52492da702f7d4fd8bee9ae7fd54195e125ac8a869dc1d0da6e9d41.clean-rebuild.json": "7730c057cb88f165a4e6c92002554b375f0a25b8c778c5843cc5175fa86b22c5",
+    "ce2c5582c3d0ddf1b9d48041694a72360a7492436513914c85d985faa0744d20.clean-rebuild.json": "613d035530ae3ecc2f77d00d7106ae91f6db4ac012264bb90eae80926538204a"
+  },
+  "controlIssue": "pH34r-pH/long-haul#252",
+  "environment": {
+    "packages": {
+      "PyYAML": "6.0.2",
+      "jsonschema": "4.25.1",
+      "lizard": "1.24.0",
+      "ruff": "0.16.9"
+    },
+    "python": "3.12.14"
+  },
+  "issue": 150,
+  "longHaulContracts": {
+    "pinFile": "experiment_compiler/profiles/source-pin.json",
+    "source": "458bc2f1ec669392963b7fe29e4c252e2e70776c"
+  },
+  "negativeCases": [
+    "unclassified/hidden package payload",
+    "sealed/public inventory crossing",
+    "raw legacy commands/diagnostics/extra fields",
+    "stale context/candidate/check identity",
+    "private source classification",
+    "low-entropy private evaluator commitment default-denial",
+    "execution opt-in absent or wrong type",
+    "shell injection treated as data",
+    "caller-CWD module shadow",
+    "wrong clean source/candidate digest",
+    "native signature verification failure with retained failure receipt"
+  ],
+  "schemaVersion": 1,
+  "scope": "Existing lifecycle mechanisms, identity/disclosure admission, clean rebuild and native provenance verification; no unrelated feature, scheduler, store, deployment or training.",
+  "sourceSha256": {
+    ".github/actions/compile/action.yml": "c3b1f4f16a30d01fd03f3e3da34bf50f63b5b4c9f46c58ab35758ec8eb0a2124",
+    ".github/actions/execute/action.yml": "b1aaeb9658b3592aead894ed42b9c9cfb70599844f86a809ab1f306a764f2e59",
+    ".github/actions/finalize/action.yml": "efc06c8bffa0709e3a92714ca703261d1711a0df51b11ac20b3eb06c649e0b8c",
+    ".github/actions/publication/action.yml": "7488066cceb2b8d8bcf41dd0f24a594e1b57160bc4b91eb0fc8335558845013a",
+    ".github/actions/verify/action.yml": "bfc99d365d8418469353f655f8d7af51dbc2653bc6b61b51bbddafc98f91c590",
+    ".github/workflows/lifecycle.yml": "cf08717f0eb62bd8179e3709cf656217084b1adbe28dbc105523ac5a31832123",
+    "README.md": "50040db60e1cc619622e40b1d844000434a5f1b9fb32e43184418e79a67b4371",
+    "docs/repository-agent-profiles.md": "f45760c07cdbb44ca8af440adbbae1dcbe4522881cc13ab3a629e7db9e2eb9d7",
+    "experiment_compiler/agent_disclosure.py": "fdcaab23df4bdb2a9a2b05bf679a964377be135f9f8ff0b474efe3cde3b78b9d",
+    "experiment_compiler/agent_profiles.py": "d47c2f0c6a7cd5ceb150bd9ef04c394ef2a249a6840aeebae8e0a7df8cd73910",
+    "experiment_compiler/attestation.py": "c125c40bb3f985d7dd06e0eaa0213f230b9aa98543e7944f10381946106efd7e",
+    "experiment_compiler/clean_rebuild.py": "c76af8c34cd78f0b747c91cbcbb2dcc599a455a330b70b6b26b3cf4df58f102a",
+    "experiment_compiler/core.py": "4fff778c9246db278f41dfdc1eff3490792b1326095cc382709cd401edcdb16b",
+    "experiment_compiler/lifecycle_components.py": "869a65c6f1ae64d8f3246e0946a5be548386186bab22685502c4049949b89ee5",
+    "experiment_compiler/profiles/frozen-repository-candidate-v1.schema.json": "466d777242b4f453e82d134497ce5e7fd8400f6b38e8df764d386a085bde3ae2",
+    "experiment_compiler/profiles/repository-context-v1.schema.json": "6b600e4572ba22c9e255e5c5e7a317b8e0b64a507d175674b30472e433bb9d2b",
+    "experiment_compiler/profiles/repository-evaluation-v1.schema.json": "316e77b9ddcca306471215354a024f534c849ad8728ea9a0da1f19a78d42a139",
+    "experiment_compiler/profiles/repository-evidence-v1.schema.json": "b377046771eaeb0ee511252f383b3e6109adce39cd2e36ca128ba611c06b1354",
+    "experiment_compiler/profiles/repository-work-v1.schema.json": "99dcfb7334f57c05d2cc7ff7f16d467d63fac2e16ca06aa5d5d169a12b243002",
+    "experiment_compiler/profiles/source-pin.json": "c5d7bc050c87c81212ab75451f4fdb5ea717fbe9bdbc4c1a304b02b7c1648be7",
+    "pyproject.toml": "09f791872b7b6d199797c8214d25a123d5bb8eb84dee880a6976e85ceddf5680",
+    "scripts/check_clean_rebuilds.py": "e433354c52cdff03e8b93c905cb787d95311a01a0fd65375ad85472bdd150aa0",
+    "scripts/check_lifecycle_pipeline.sh": "3326166804aabb92d11c42690ed271bcc5b86280ecc3f539abe39107762c7852",
+    "scripts/lifecycle_component.py": "521c9e99b18d8a3f4e417df6dfa232a3668b2aacc9179e3216941a127d0ad680",
+    "scripts/verify_publication_attestations.py": "89b9011ce52a6edf7171d7de53e511cd0db77e736ea2419eb6a83cd43c4aba50",
+    "tests/fixtures/repository-evaluator-environment.json": "8aa3da160c49373d66b05981996ca09a06c29f6c576f36584b0048a8dd603c2d",
+    "tests/fixtures/repository-evidence-v1.json": "8ca8a7c7d5ac7c5a48798233038106c173842a2a568124364de32702bb7f9585",
+    "tests/repository_profile_helpers.py": "365fc709c946ee54b580a255953583d4221cec5ec5d327fba88ee50c3d663067",
+    "tests/test_agent_profiles.py": "0d68371b4b7c26887e5b1cddf0fe6d8cde983b64e8c0bc0c87d99bba2fb8995a",
+    "tests/test_clean_rebuild.py": "14fd6695f478307d001fab82de62e9fa596861db4c20aaa79c91e12d5870e5be",
+    "tests/test_lifecycle_components.py": "733be660cb4c4b4723e70be50b6158ba393bcc0fbb1098e09cc4364999176db8"
+  },
+  "states": {
+    "liveSignedAttestation": "staged at existing manual protected gate; not asserted by unit fixtures",
+    "privateEvaluatorPublicDisclosure": "denied pending qualified upstream #245 projection",
+    "protectedPublication": "not invoked",
+    "repositoryCI": "required on exact PR head before merge",
+    "scientificAcceptance": "not evaluated by Compiler",
+    "sourceTests": "passed",
+    "trajectoryAndCorpusQualification": "exact upstream references only; #244/#248 gates remain"
+  },
+  "structuralRatchet": {
+    "jscpd": [
+      8,
+      8
+    ],
+    "lizard": [
+      11,
+      11
+    ],
+    "ruff": [
+      20,
+      20
+    ]
+  }
+}

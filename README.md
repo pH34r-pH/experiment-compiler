@@ -88,6 +88,11 @@ None of those steps alone proves that a scientific conclusion is correct.
 
 Historical artifacts remain immutable; new semantics require a new versioned identity.
 
+Repository-agent evidence projections and reusable lifecycle actions are documented in
+[repository-agent package profiles](docs/repository-agent-profiles.md). Their verification
+preserves exact identities and disclosure boundaries without granting scientific acceptance,
+training eligibility, or publication authority.
+
 For the first real-study path from an authorized Muon attempt through retained raw results, source-owned interpretation and reviewed public promotion, see [the real-study walkthrough](docs/real-study-walkthrough.md). Its scientific compatibility and independent reproduction limits remain explicit.
 
 The [second-study reuse handoff](docs/second-study-reuse.md) prepares the existing
