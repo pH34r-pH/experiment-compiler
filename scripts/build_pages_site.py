@@ -188,11 +188,13 @@ def _catalog_result_html(experiment: dict) -> tuple[str, str | None, str]:
     summaries = [item.get("summary") for item in interpretations if isinstance(item.get("summary"), str)]
     if summaries:
         result_html = "".join(
-            "<details class=\"row-interpretation\"><summary>Source interpretation on record</summary>"
-            f"<p>{html.escape(summary)}</p></details>" for summary in summaries
+            '<p class="source-interpretation"><strong>Source interpretation:</strong> '
+            f"{html.escape(summary)}</p>" for summary in summaries
         )
         return result_html, eval_value, eval_display
-    return "<span>Not reported</span>", eval_value, eval_display
+    attempts = experiment.get('executionAttempts') or []
+    message = 'No scientific interpretation reported.' if attempts else 'No execution result reported; this record is not a completed scientific result.'
+    return f'<span>{message}</span>', eval_value, eval_display
 
 
 def _catalog_status_values(experiment: dict) -> tuple[str, str, str]:
@@ -201,13 +203,16 @@ def _catalog_status_values(experiment: dict) -> tuple[str, str, str]:
     if not lifecycle:
         return "No lifecycle record", "", "Not applicable"
 
-    status_text = html.escape(lifecycle.get("creativeWorkStatus") or "Not declared")
+    status_text = 'Protocol: ' + html.escape(lifecycle.get("creativeWorkStatus") or "Not declared")
+    status_text += '<br><span class="status-explanation">The protocol document’s declared status.</span>'
     action_states = ", ".join(
         html.escape(item.get("actionStatus", "Not declared").rsplit("/", 1)[-1])
         for item in attempts
     )
     if action_states:
-        status_text += "<br><span>Action status: " + action_states + "</span>"
+        status_text += "<br><span>Execution: " + action_states + "</span><br><span class=\"status-explanation\">Process outcome; not scientific acceptance.</span>"
+    else:
+        status_text += '<br><span>Execution: no recorded attempt.</span>'
     attempt_count = lifecycle.get("attemptCount")
     attempt_display = html.escape(str(attempt_count)) if type(attempt_count) is int else "Not reported"
     attempts_sort = "" if attempt_count is None else str(attempt_count)
@@ -242,13 +247,13 @@ def _catalog_row(experiment: dict) -> str:
         f'data-sort-id="{escaped_id}" '
         f'data-sort-package-bytes="{size_sort}" data-sort-attempts="{attempts_sort}" '
         f'data-sort-eval-mse="{eval_sort}">'
-        f'{title_cell}'
-        f'<td>{result_html}</td><td>{status_text}</td>'
-        f'<td data-value="{size_sort}">{package_size_value}</td>'
-        f'<td data-value="{attempts_sort}">{attempt_display}</td>'
-        f'<td data-value="{eval_sort}">{html.escape(eval_display)}</td>'
-        f'<td class="provenance">{source_link}</td><td class="package-id">{package_hash_value}</td>'
-        f'<td class="catalog-links">{detail_link}<br>{download_link}</td></tr>'
+        f'{title_cell}<td class="catalog-links" data-label="Actions">{detail_link}<br>{download_link}</td>'
+        f'<td data-label="Result / interpretation">{result_html}</td><td data-label="Status">{status_text}</td>'
+        f'<td data-label="Package size" data-value="{size_sort}">{package_size_value}</td>'
+        f'<td data-label="Attempts" data-value="{attempts_sort}">{attempt_display}</td>'
+        f'<td data-label="Eval MSE (reference only)" data-value="{eval_sort}">{html.escape(eval_display) if eval_value is not None else "Not applicable / not declared for this record"}</td>'
+        f'<td class="provenance" data-label="Provenance"><details><summary>Source identity</summary>{source_link}</details></td>'
+        f'<td class="package-id" data-label="Package SHA-256"><details><summary>Exact digest</summary>{package_hash_value}</details></td></tr>'
     )
 
 
@@ -260,10 +265,10 @@ def render_catalog(experiments: list[dict]) -> str:
         '<caption>Each row is one compiled experiment record. A declared family is navigation metadata, not a provenance or scientific verdict.</caption>',
         '<thead><tr>',
     ]
-    for label, key in (("Experiment record", "id"), ("Result / interpretation", None),
+    for label, key in (("Experiment record", "id"), ("Links", None), ("Result / interpretation", None),
                        ("Status", None), ("Package size", "package-bytes"),
-                       ("Attempts", "attempts"), ("Eval MSE", "eval-mse"),
-                       ("Provenance", None), ("Package SHA-256", None), ("Links", None)):
+                       ("Attempts", "attempts"), ("Eval MSE (reference only)", "eval-mse"),
+                       ("Provenance", None), ("Package SHA-256", None)):
         sortable = f' data-sort-key="{key}"' if key else ""
         parts.append(f'<th scope="col"{sortable}>{label}</th>')
     parts.append('</tr></thead>')
@@ -301,6 +306,12 @@ def render_protocol(protocol: object) -> str:
             f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
 
 
+def render_prerequisites(experiment: dict) -> str:
+    unavailable = experiment.get('unavailablePrerequisites')
+    return ('<pre>' + html.escape(json.dumps(unavailable, indent=2)) + '</pre>'
+                     if unavailable else '<p>No separate unavailable-prerequisite list is declared. Inspect the packaged protocol and dependency closure before attempting a replay.</p>')
+
+
 def render_detail(experiment: dict) -> str:
     """Render a static package detail route from Compiler-derived metadata."""
     title = html.escape(experiment["title"])
@@ -315,8 +326,13 @@ def render_detail(experiment: dict) -> str:
     package_action = (f'<a class="primary" href="{package_url}" download>Download this exact package</a>'
                       if package_url else '<span class="not-available">No compiled ZIP is published.</span>')
     summary = html.escape(experiment.get("hypothesis") or experiment.get("question") or "")
-    question = html.escape(experiment.get("question") or "Not declared.")
-    method = html.escape(experiment.get("method") or "Not declared.")
+    missing = 'Not declared. No separate summary is available; inspect the authoritative protocol below. Missing metadata is not a negative scientific result.'
+    question = html.escape(experiment.get("question") or missing)
+    method = html.escape(experiment.get("method") or missing)
+    result_html, _, _ = _catalog_result_html(experiment)
+    status_html, _, attempt_display = _catalog_status_values(experiment)
+    verification = (f'<pre><code>python -m experiment_compiler verify {html.escape(package_hash)}.zip --expected-sha256 {html.escape(package_hash)}</code></pre>' if package_hash else '<p>No package is available to verify.</p>')
+    prerequisites = render_prerequisites(experiment)
     protocol_html = render_protocol(experiment.get("protocol"))
     profile = html.escape(experiment.get("profile", ""))
     package_identity = (f"SHA-256 {html.escape(package_hash)} · {package.get('size', 0):,} bytes"
@@ -338,9 +354,11 @@ def render_detail(experiment: dict) -> str:
 <title>{title} — Experiment Compiler</title><link rel="preload" href="/assets/fonts/long-measure/NimbusSansNarrow-Regular.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/site.css"><script src="/assets/instrument.js" defer></script></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a><header class="topbar"><a class="brand" href="/">TJHG <span>/ experiments</span></a><nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="/#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav><details class="theme-panel"><summary>Theme <span data-theme-label>Auto</span></summary><div class="theme-options" role="group" aria-label="Theme"><button type="button" data-theme-choice="auto" aria-pressed="false">Auto</button><button type="button" data-theme-choice="light" aria-pressed="false">Light</button><button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button></div></details></header>
 <main id="main-content" class="detail-page" tabindex="-1"><p class="eyebrow">COMPILED EXPERIMENT · {identifier}</p><h1>{title}</h1><p class="lede">{summary}</p>
-<section class="identity"><h2>Package identity</h2><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl><div class="actions">{package_action}</div></section>
+<section class="result-summary"><h2>Result and interpretation</h2>{result_html}<h3>Recorded status</h3><p>{status_html}</p><p>Recorded attempts: {attempt_display}</p><p>A plan, a reference fixture, and an observed result answer different questions. Family membership does not make their metrics directly comparable.</p><div class="actions">{package_action}<a href="#verify-package">Verify or inspect prerequisites</a></div></section>
+<section class="identity"><details><summary>Exact package identity and provenance</summary><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl></details></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>
 {protocol_html}
+<section id="verify-package"><h2>Verification and reproduction</h2><p>Download the exact ZIP above. With <a href="https://github.com/pH34r-pH/experiment-compiler#readme">Experiment Compiler installed</a>, verify its bytes without executing packaged code:</p>{verification}<p>For reproduction, inspect the packaged README, protocol, environment, and dependency closure. Execution is a separate explicit step with its own prerequisites and observed result; this page does not certify independent reproduction.</p><details><summary>Declared replay prerequisites</summary>{prerequisites}</details></section>
 <section><p>Package integrity checks establish byte consistency. Execution status records an attempt; completed execution does not establish scientific acceptance. Interpretation is source-authored evidence, not approval. Independent reproduction requires its own observed run and comparison.</p><details><summary>Lifecycle, evidence, and declared environment</summary><pre>{records}</pre></details></section>
 {backlink_html}<p class="return-link"><a href="/#experiments">← Return to the compiled experiment catalog</a></p></main>
 <footer><span>Apache-2.0 · Tyler J.H.G.</span><a href="https://github.com/pH34r-pH/experiment-compiler">Source on GitHub ↗</a></footer></body></html>\n'''
