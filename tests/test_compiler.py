@@ -490,10 +490,46 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(descriptor["reproduction"]["entrypoint"], "experiment/reproduce.py")
         self.assertEqual(descriptor["contents"]["unavailable"], [])
 
+    def test_podman_reuse_plan_preserves_frozen_science_and_exact_parent(self):
+        original = ROOT / "examples/linear-regression-frozen-lifecycle-v1"
+        prepared = ROOT / "examples/linear-regression-podman-lifecycle-v1"
+        parent, child = self.root / "parent.zip", self.root / "podman.zip"
+        parent_report = compile_package(original / "experiment.json", parent)
+        report = compile_package(prepared / "experiment.json", child)
+        recipe = load_recipe(prepared / "experiment.json")
+        verify_bytes(child.read_bytes(), recipe=recipe)
+        self.assertEqual(report["packageSha256"], recipe["expectedPackage"]["sha256"])
+        self.assertNotEqual(report["packageSha256"], parent_report["packageSha256"])
+        self.assertEqual(report["source"], parent_report["source"])
+        with zipfile.ZipFile(parent) as before, zipfile.ZipFile(child) as after:
+            changed = {name for name in before.namelist() if before.read(name) != after.read(name)}
+            self.assertEqual(changed, {MANIFEST, "dependency-closure.json",
+                                      "experiment/runner.json", "ro-crate-metadata.json"})
+            old_runner = json.loads(before.read("experiment/runner.json"))
+            new_runner = json.loads(after.read("experiment/runner.json"))
+            self.assertEqual(old_runner["executionMode"], "cwltool-docker")
+            self.assertEqual(new_runner, dict(old_runner, executionMode="cwltool-podman"))
+            graph = {node["@id"]: node for node in json.loads(after.read("ro-crate-metadata.json"))["@graph"]}
+            root = graph["./"]
+            reference = root["https://www.w3.org/ns/prov#wasRevisionOf"]["@id"]
+            self.assertEqual(after.read(reference), parent.read_bytes())
+            self.assertEqual(graph[reference]["sha256"], parent_report["packageSha256"])
+            self.assertEqual(root["identifier"], "linear-regression-frozen-lifecycle-v1")
+            self.assertEqual(set(after.namelist()) - set(before.namelist()),
+                             {reference, "experiment/operational-handoff.md"})
+        self.assertEqual(report["lifecycle"]["creativeWorkStatus"], "Draft")
+        self.assertEqual(report["lifecycle"]["attemptCount"], 0)
+        self.assertFalse(report["lifecycle"]["processRunCrate"])
+        self.assertEqual(report["scientificReproduction"], "not-run")
+        second = self.root / "podman-again.zip"
+        compile_package(prepared / "experiment.json", second)
+        self.assertEqual(second.read_bytes(), child.read_bytes())
+
     def test_catalog_discovers_plan_and_published_package_without_registry(self):
         recipes = discover_recipes(ROOT / "examples")
         self.assertEqual(recipes, [ROOT / "examples/linear-regression-frozen-lifecycle-v1/experiment.json",
                                    ROOT / "examples/linear-regression-plan-v1/experiment.json",
+                                   ROOT / "examples/linear-regression-podman-lifecycle-v1/experiment.json",
                                    SELF_CONTAINED / "experiment.json",
                                    ROOT / "examples/muon-comparison-plan-v1/experiment.json",
                                    ROOT / "examples/muon-unit-hypersphere-depth3-multiseed-v1-final-87409154/experiment.json"])
@@ -501,20 +537,21 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(catalog["schemaVersion"], 2)
         self.assertEqual([item["id"] for item in catalog["experiments"]],
                          ["linear-regression-frozen-lifecycle-v1", "linear-regression-plan-v1",
+                          "linear-regression-podman-lifecycle-v1",
                           "stdlib-linear-regression-v1-compiled-experiment", "muon-comparison-plan-v1",
                           "muon-unit-hypersphere-depth3-multiseed-v1-final-87409154"])
         self.assertIsNone(catalog["experiments"][1]["package"])
         self.assertEqual(catalog["experiments"][1]["lifecycle"]["creativeWorkStatus"], "Draft")
-        self.assertEqual(catalog["experiments"][2]["package"]["sha256"],
+        self.assertEqual(catalog["experiments"][3]["package"]["sha256"],
                          "251a43f8719a17bb0898a5e5e51f4d8c22f9280b29febadd72d98ffbba20e544")
-        muon = catalog["experiments"][3]
+        muon = catalog["experiments"][4]
         self.assertEqual(muon["lifecycle"]["creativeWorkStatus"], "Draft")
         self.assertEqual(muon["lifecycle"]["attemptCount"], 0)
         self.assertEqual(muon["lifecycle"]["potentialActionCount"], 1)
         self.assertFalse(muon["lifecycle"]["processRunCrate"])
         self.assertTrue(muon["unavailablePrerequisites"])
         self.assertTrue(all(item["value"] == "unknown" for item in muon["lifecycle"]["resourceMeasurements"]))
-        published = catalog["experiments"][4]
+        published = catalog["experiments"][5]
         self.assertEqual(published["package"]["sha256"],
                          "28d2d6c6dba2ff2370b9536c4428f40dd23de4ea42a26c98f3e8225b4dd9a8c4")
         self.assertEqual(published["backlinks"], [{
@@ -532,6 +569,7 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(published["protocol"]["record"], "experiment/protocol.md")
         family_ids = [item.get("isPartOf", {}).get("@id") for item in catalog["experiments"]]
         self.assertEqual(family_ids, [
+            "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
             "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
             "https://experiments.tyharbin.com/#family-stdlib-linear-regression",
             "https://experiments.tyharbin.com/#family-stdlib-linear-regression",

@@ -9,6 +9,7 @@ Documentation is the durable explanation of package scope and evidence boundarie
 - [`poc-scope.md`](poc-scope.md) and [`../ORIGINS.md`](../ORIGINS.md) preserve the historical #164 compatibility scope and lineage.
 - [`evidence-boundaries.md`](evidence-boundaries.md), [`resources-and-closure.md`](resources-and-closure.md), and [`real-study-walkthrough.md`](real-study-walkthrough.md) explain distinct evidence and disclosure boundaries.
 - [`catalog-projection.md`](catalog-projection.md) documents the derived public projection.
+- [`second-study-reuse.md`](second-study-reuse.md) pins the prepared #87 operational handoff and its remaining physical execution/evidence gate.
 - [`site-visual-contract.md`](site-visual-contract.md) documents the scoped Portfolio 2071 alignment, theme behavior, accessibility fallbacks, and unchanged data/hosting boundary.
 - [`agent-onboarding.md`](agent-onboarding.md) is the canonical human guide to the packaged onboarding, doctor, and repair skills, including verified client discovery limits.
 - [`wiki/`](wiki/) is the source copied by the existing wiki-sync workflow; keep its pages consistent with repository documents.
