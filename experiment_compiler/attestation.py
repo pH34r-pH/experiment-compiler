@@ -1,8 +1,10 @@
 """Use the maintained GitHub CLI for signature verification; no local crypto engine."""
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from .core import (
@@ -23,6 +25,17 @@ def _failure_receipt(output, digest, commit, reason):
         "builderSourceCommit": commit, "publicationAuthorized": False}))
 
 
+def _verification_environment(root):
+    home, config = root / "home", root / "gh-config"
+    home.mkdir(mode=0o700)
+    config.mkdir(mode=0o700)
+    environment = {"PATH": os.defpath, "HOME": str(home), "GH_CONFIG_DIR": str(config),
+        "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1", "LANG": "C.UTF-8", "NO_COLOR": "1"}
+    if "GH_TOKEN" in os.environ:
+        environment["GH_TOKEN"] = os.environ["GH_TOKEN"]
+    return environment
+
+
 def verify_attestation(package, expected_sha256, *, repository, source_commit, signer_workflow, output):
     """Verify signed provenance against independently supplied builder identities."""
     if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
@@ -39,9 +52,11 @@ def verify_attestation(package, expected_sha256, *, repository, source_commit, s
     command = [str(executable), "attestation", "verify", str(Path(package).resolve()), "--repo", repository,
                "--source-digest", source_commit, "--source-ref", "refs/heads/main",
                "--signer-workflow", signer_workflow, "--signer-digest", source_commit,
-               "--deny-self-hosted-runners", "--format", "json", "--limit", "10"]
+               "--deny-self-hosted-runners", "--hostname", "github.com", "--format", "json", "--limit", "10"]
     try:
-        result = subprocess.run(command, capture_output=True, check=True, timeout=120)
+        with tempfile.TemporaryDirectory(prefix="compiler-attestation-") as temporary:
+            result = subprocess.run(command, env=_verification_environment(Path(temporary)),
+                capture_output=True, check=True, timeout=120)
         verified = json_value(result.stdout)
         if not isinstance(verified, list) or not verified:
             raise PackageError("GitHub CLI returned no verified attestations")

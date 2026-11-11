@@ -5,8 +5,6 @@ import re
 
 from .core import PackageError
 
-PUBLIC_CONFORMANCE_PACKET = "sha256:87f1a81ab8207ce271752e79cd93e8f1c18bd282a035e2ab56c498fd2d3aec66"
-
 
 def _require(condition, reason):
     if not condition:
@@ -83,7 +81,7 @@ def validate_disclosure(documents, audience):
 
 def _private_commitments(documents):
     """Bare private-check digests leak low-entropy inputs; await upstream #245."""
-    from .agent_profiles import projection_fingerprint
+    from .agent_profiles import projection_fingerprint, public_conformance_packet
     task = documents.get("repository-task")
     public = documents.get("repository-evaluator-public")
     packet = documents.get("repository-evidence")
@@ -94,7 +92,7 @@ def _private_commitments(documents):
         _require(all(item["classification"] != "SEALED" for item in public["requirements"]),
                  "Private evaluator requirements await a qualified guarded upstream projection")
     if packet is not None:
-        _require(projection_fingerprint(packet) == PUBLIC_CONFORMANCE_PACKET,
+        _require(projection_fingerprint(packet) == public_conformance_packet(),
                  "Only the exact already-public #243 conformance packet is disclosure-qualified")
     if "repository-candidate" in documents:
         _require(packet is not None and documents["repository-candidate"] == packet["candidate"],

@@ -38,11 +38,21 @@ def _strict_objects(value):
             _strict_objects(item)
 
 
-def _schema(kind):
+def _source_pin():
     directory = Path(__file__).parent / "profiles"
     pin = json_value((directory / "source-pin.json").read_bytes())
     if {key: pin[key] for key in SOURCE} != SOURCE:
         raise PackageError("Long-Haul schema source pin changed")
+    return directory, pin
+
+
+def public_conformance_packet():
+    _, pin = _source_pin()
+    return pin["publicConformancePacket"]["fingerprint"]
+
+
+def _schema(kind):
+    directory, pin = _source_pin()
     name = SCHEMAS[kind]
     raw = (directory / name).read_bytes()
     if sha256(raw) != pin["schemas"][name]:
