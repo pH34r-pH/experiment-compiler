@@ -679,6 +679,8 @@ def _verify_archive(archive: zipfile.ZipFile, *, package_sha256: str, package_si
         lifecycle_projection = validate_lifecycle_crate(json_value(archive.read(metadata_path)))
     if recipe and (profile != recipe["profile"] or manifest != manifest_for(recipe)):
         raise PackageError("Package manifest differs from reviewed recipe")
+    from .agent_profiles import validate_agent_profiles
+    agent_projection = validate_agent_profiles(archive, manifest)
 
     return {
         "schemaVersion": 1,
@@ -693,6 +695,7 @@ def _verify_archive(archive: zipfile.ZipFile, *, package_sha256: str, package_si
         "source": manifest["source"],
         "matchedExpectedPackage": bool(expected or expected_sha256),
         **({"lifecycle": lifecycle_projection} if lifecycle_projection is not None else {}),
+        **({"repositoryAgent": agent_projection} if agent_projection is not None else {}),
     }
 
 

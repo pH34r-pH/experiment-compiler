@@ -20,6 +20,7 @@ classifiers = [
 
 [project.optional-dependencies]
 runner = ["PyYAML==6.0.2"]
+repository = ["jsonschema==4.25.1"]
 mutation = [
   "irradiate==0.4.3",
   "jsonschema>=4.25,<5",
@@ -41,6 +42,9 @@ Issues = "https://github.com/pH34r-pH/experiment-compiler/issues"
 
 [tool.setuptools.packages.find]
 include = ["experiment_compiler*"]
+
+[tool.setuptools.package-data]
+experiment_compiler = ["profiles/*.json"]
 
 
 [tool.irradiate]

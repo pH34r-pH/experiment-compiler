@@ -1,0 +1,22 @@
+{
+  "commit": "458bc2f1ec669392963b7fe29e4c252e2e70776c",
+  "publicConformancePacket": {
+    "fingerprint": "sha256:87f1a81ab8207ce271752e79cd93e8f1c18bd282a035e2ab56c498fd2d3aec66",
+    "path": "programs/issue-251/evidence/issue-243-gvisor-ac003.json",
+    "scope": "already-public synthetic conformance only; no private evaluator disclosure"
+  },
+  "publicProjection": {
+    "method": "RepositoryEvaluationProfileV1.public_projection",
+    "path": "src/long_haul/work/repository_evaluation_models.py",
+    "sha256": "3869e83f040e4b17f7f69fba6dd44d01fab6ccf5940dd55b3da42e3fdd19b762"
+  },
+  "repository": "pH34r-pH/long-haul",
+  "schemas": {
+    "frozen-repository-candidate-v1.schema.json": "466d777242b4f453e82d134497ce5e7fd8400f6b38e8df764d386a085bde3ae2",
+    "repository-context-v1.schema.json": "6b600e4572ba22c9e255e5c5e7a317b8e0b64a507d175674b30472e433bb9d2b",
+    "repository-evaluation-v1.schema.json": "316e77b9ddcca306471215354a024f534c849ad8728ea9a0da1f19a78d42a139",
+    "repository-evidence-v1.schema.json": "b377046771eaeb0ee511252f383b3e6109adce39cd2e36ca128ba611c06b1354",
+    "repository-work-v1.schema.json": "99dcfb7334f57c05d2cc7ff7f16d467d63fac2e16ca06aa5d5d169a12b243002"
+  },
+  "scope": "Frozen authoring schemas and public projection; not independent scientific acceptance."
+}

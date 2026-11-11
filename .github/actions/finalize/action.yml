@@ -1,0 +1,13 @@
+name: Compiled Experiment finalize
+description: Reuse the existing finalize boundary with explicit JSON parameters.
+inputs:
+  parameters:
+    description: Reviewed argument map; execution and publication authority remain separate.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        COMPONENT_PARAMETERS: ${{ inputs.parameters }}
+      run: python "$GITHUB_ACTION_PATH/../../../scripts/lifecycle_component.py" finalize
