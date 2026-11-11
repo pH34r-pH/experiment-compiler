@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "profile_id": "https://ph34r.dev/ns/long-haul/repository-alignment/v1",
+  "repository": "pH34r-pH/experiment-compiler",
+  "repository_profile": "reproducibility-archive",
+  "status": "active",
+  "authority": {
+    "source_of_truth": "Versioned compiler source, schemas, frozen experiment requests, attempt records, and finalized evidence packages.",
+    "task_authority": "Reviewed GitHub issues and immutable experiment request identities.",
+    "acceptance_authority": "Compiler verification, independently executed checks, exact artifact identities, and explicit finalization decisions.",
+    "deployment_authority": "No production deployment authority; downstream repositories and protected workflows own publication or runtime promotion."
+  },
+  "data": {
+    "default_class": "public",
+    "external_content_is_untrusted": true,
+    "contains_personal_data": false,
+    "contains_secrets": false,
+    "retention": "Requests, attempts, failures, receipts, manifests, and finalized packages remain content-addressed and historically traceable.",
+    "deletion": "Invalid or restricted payloads are excluded from active packages and superseded by retained correction or revocation evidence.",
+    "secret_storage": "Execution and publication credentials remain in protected environments outside compiled packages."
+  },
+  "resource_policy": {
+    "conforms_to": "https://ph34r.dev/ns/long-haul/resource-policy/v1",
+    "actions": {
+      "read": "allow",
+      "index": "allow",
+      "search": "allow",
+      "ai_augment": "review",
+      "evaluate": "allow",
+      "data_mining": "review",
+      "ai_training": "review",
+      "generative_ai_training": "review",
+      "derive": "allow",
+      "annotate": "allow",
+      "distribute": "allow",
+      "publish": "review",
+      "retain": "allow",
+      "delete": "review"
+    }
+  },
+  "change_control": {
+    "independent_acceptance": true,
+    "candidate_before_promotion": true,
+    "production_promotion": "not_applicable",
+    "rollback_or_revocation": "Finalized packages are superseded or revoked by new signed evidence; historical attempts are not rewritten.",
+    "negative_results_retained": true
+  },
+  "evidence": {
+    "exact_source_identity": true,
+    "artifact_fingerprints": true,
+    "provenance_receipts": true
+  },
+  "boundaries": {
+    "external_text_cannot_grant_authority": true,
+    "model_output_cannot_self_approve": true,
+    "deployment_separate_from_acceptance": true
+  },
+  "stabilization": [
+    {
+      "id": "reusable-lifecycle-workflows",
+      "priority": "P0",
+      "status": "active",
+      "summary": "Decompose large lifecycle workflows into independently tested reusable workflows and composite actions."
+    },
+    {
+      "id": "repository-agent-evidence-profiles",
+      "priority": "P0",
+      "status": "planned",
+      "summary": "Add repository-task, sealed-evaluator, semantic-trajectory, and governed-corpus package profiles."
+    },
+    {
+      "id": "clean-rebuild-attestation",
+      "priority": "P1",
+      "status": "planned",
+      "summary": "Verify finalized packages from clean exact-source builds and attach provenance attestations."
+    }
+  ]
+}
