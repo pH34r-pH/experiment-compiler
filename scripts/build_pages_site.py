@@ -301,7 +301,7 @@ def render_protocol(protocol: object) -> str:
     """Show exact authoritative source text without interpreting its headings."""
     if not isinstance(protocol, dict) or not isinstance(protocol.get("text"), str):
         return ""
-    return ("<section id="source-protocol"><details><summary>Full authoritative protocol</summary>"
+    return ('<section id="source-protocol"><details><summary>Full authoritative protocol</summary>'
             f"<p>Package member: {html.escape(protocol['record'])}</p>"
             f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
 
