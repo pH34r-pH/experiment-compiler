@@ -1,0 +1,6 @@
+<section aria-labelledby="protocol-guide">
+  <h2 id="protocol-guide">Reading the Muon comparison</h2>
+  <p>This study asks whether changing the optimizer on four weight matrices improves a depth-three unit-hypersphere model. It compares Muon with historical AdamW runs from the same three starting model states (seeds 17, 31, and 47). Each run gets 128 updates. Seed 17 had already been observed in an infrastructure pilot.</p>
+  <p>The primary measure compares the area under the loss curve across seven checkpoints. The analysis pairs scores by source document, averages across seeds, and bootstraps documents for the uncertainty interval. The endpoint loss is a secondary measure. The two measures favored different optimizers.</p>
+  <p><a href="#source-protocol">Inspect the packaged protocol and its chronology</a>.</p>
+</section>

@@ -301,7 +301,7 @@ def render_protocol(protocol: object) -> str:
     """Show exact authoritative source text without interpreting its headings."""
     if not isinstance(protocol, dict) or not isinstance(protocol.get("text"), str):
         return ""
-    return ("<section><details><summary>Full authoritative protocol</summary>"
+    return ("<section id="source-protocol"><details><summary>Full authoritative protocol</summary>"
             f"<p>Package member: {html.escape(protocol['record'])}</p>"
             f"<pre>{html.escape(protocol['text'])}</pre></details></section>")
 
@@ -310,6 +310,14 @@ def render_prerequisites(experiment: dict) -> str:
     unavailable = experiment.get('unavailablePrerequisites')
     return ('<pre>' + html.escape(json.dumps(unavailable, indent=2)) + '</pre>'
                      if unavailable else '<p>No separate unavailable-prerequisite list is declared. Inspect the packaged protocol and dependency closure before attempting a replay.</p>')
+
+
+def protocol_guide(package_hash: str) -> str:
+    """Attach editorial context only to the exact package its author inspected."""
+    if len(package_hash) != 64 or any(c not in "0123456789abcdef" for c in package_hash):
+        return ""
+    path = ROOT / "site" / "reading-guides" / f"{package_hash}.html"
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
 def render_detail(experiment: dict) -> str:
@@ -357,6 +365,7 @@ def render_detail(experiment: dict) -> str:
 <section class="result-summary"><h2>Result and interpretation</h2>{result_html}<h3>Recorded status</h3><p>{status_html}</p><p>Recorded attempts: {attempt_display}</p><p>A plan, a reference fixture, and an observed result answer different questions. Family membership does not make their metrics directly comparable.</p><div class="actions">{package_action}<a href="#verify-package">Verify or inspect prerequisites</a></div></section>
 <section class="identity"><details><summary>Exact package identity and provenance</summary><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl></details></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>
+{protocol_guide(package_hash)}
 {protocol_html}
 <section id="verify-package"><h2>Verification and reproduction</h2><p>Download the exact ZIP above. With <a href="https://github.com/pH34r-pH/experiment-compiler#readme">Experiment Compiler installed</a>, verify its bytes without executing packaged code:</p>{verification}<p>For reproduction, inspect the packaged README, protocol, environment, and dependency closure. Execution is a separate explicit step with its own prerequisites and observed result; this page does not certify independent reproduction.</p><details><summary>Declared replay prerequisites</summary>{prerequisites}</details></section>
 <section><p>Package integrity checks establish byte consistency. Execution status records an attempt; completed execution does not establish scientific acceptance. Interpretation is source-authored evidence, not approval. Independent reproduction requires its own observed run and comparison.</p><details><summary>Lifecycle, evidence, and declared environment</summary><pre>{records}</pre></details></section>
