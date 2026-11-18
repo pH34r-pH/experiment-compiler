@@ -15,6 +15,27 @@ from experiment_compiler.core import PackageError, compile_package
 
 
 class SiteProjectionTest(unittest.TestCase):
+    def test_readable_result_keeps_protocol_execution_and_science_separate(self):
+        record = {'id': 'mixed-example', 'title': 'An optimizer comparison',
+                  'lifecycle': {'creativeWorkStatus': 'Draft', 'attemptCount': 1},
+                  'executionAttempts': [{'actionStatus': 'https://schema.org/CompletedActionStatus'}],
+                  'scientificInterpretation': [{'summary': 'Mixed: curve area favors A; endpoint favors B. No overall winner.'}],
+                  'source': {'repository': 'owner/repo', 'commit': 'b' * 40},
+                  'package': {'sha256': 'a' * 64, 'size': 123}}
+        page = render_detail(record)
+        summary = page.split('<section class="result-summary">')[1].split('</section>')[0]
+        self.assertIn('Mixed: curve area favors A; endpoint favors B. No overall winner.', summary)
+        self.assertNotIn('<details', summary)
+        self.assertIn('Protocol: Draft', summary)
+        self.assertIn('Execution: CompletedActionStatus', summary)
+        self.assertIn('not scientific acceptance', summary)
+        self.assertIn('verify ' + 'a' * 64 + '.zip --expected-sha256 ' + 'a' * 64, page)
+        table = render_catalog([record])
+        self.assertLess(table.index('class="catalog-links"'), table.index('data-label="Result / interpretation"'))
+        self.assertNotIn('Eval MSE Not reported', table)
+        record['scientificInterpretation'][0]['summary'] = '<script>untrusted</script>'
+        self.assertNotIn('<script>untrusted</script>', render_detail(record))
+
     def test_catalog_schema_versions_exact_identity_and_optional_article_backlinks(self):
         schema = json.loads((ROOT / "site/data/experiments.schema.json").read_text())
         self.assertEqual(schema["properties"]["schemaVersion"]["const"], 2)
