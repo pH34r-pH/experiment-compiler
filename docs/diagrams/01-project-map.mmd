@@ -31,13 +31,19 @@ flowchart TB
     DECISION -->|"select attempt"| FINALIZE --> FINAL
   end
 
-  subgraph E["5 · Publish and expose reproduction"]
-    PROMOTE["Reviewed merge to main<br/>publication event"]
-    SITE["experiments.tyharbin.com<br/>static catalog · detail route · exact package"]
+  subgraph E["5 · Publish, reproduce, and archive"]
+    REVIEWPUB["Source-owner disclosure / publication review"]
+    SITE["experiments.tyharbin.com<br/>live static reproduction projection"]
+    ARCHIVE["compiled-experiments<br/>exact reviewed public bytes"]
+    RELEASE["Human-reviewed GitHub Release"]
+    ZENODO["Zenodo archival record + DOI"]
     ARTICLE["Portfolio / MyST article<br/>explanation · intuition · browser interaction"]
-    FINAL --> PROMOTE --> SITE
+    FINAL --> REVIEWPUB
+    REVIEWPUB --> SITE
+    REVIEWPUB --> ARCHIVE --> RELEASE --> ZENODO
     ARTICLE -->|"exact experiment reference"| SITE
     SITE -->|"canonical article backlink"| ARTICLE
+    SITE -.->|"archival citation when released"| ARCHIVE
   end
 
   RECIPE --> COMPILE
