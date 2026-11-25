@@ -13,7 +13,7 @@ STAGES = {
                 {"output", "expected-sha256"}),
     "finalize": ("experiment_compiler", "finalize", "parent-package", {
         "expected-sha256", "attempt-id", "id", "title", "decision", "decision-summary", "review",
-        "review-summary", "reviewer-name", "output"}, {
+        "review-summary", "reviewer-name", "output", "coverage-record"}, {
         "expected-sha256", "attempt-id", "id", "title", "decision", "decision-summary", "review",
         "review-summary", "reviewer-name", "output"}),
 }
