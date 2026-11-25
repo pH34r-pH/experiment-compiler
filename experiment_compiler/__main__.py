@@ -9,6 +9,7 @@ from . import __version__
 from .catalog import describe_catalog, describe_recipe
 from .core import (
     PackageError,
+    bounded_read,
     canonical,
     compile_package,
     load_recipe,
@@ -16,6 +17,7 @@ from .core import (
     write_once,
 )
 from .finalization import finalize_package
+from .coverage import inspect_coverage
 from .revision import revise_package
 
 
@@ -63,8 +65,14 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="source-authored Schema.org reviewBody for the review record")
     finalize.add_argument("--reviewer-name", required=True,
                           help="reviewer identity recorded as a Schema.org Person")
+    finalize.add_argument("--coverage-record", type=Path,
+                          help="optional source-authored selected-attempt protocol coverage JSON")
     finalize.add_argument("--output", required=True, type=Path,
                           help="new immutable final ZIP; writes a sibling .source closure")
+
+    coverage = commands.add_parser("inspect-coverage", help="read exact source-authored protocol coverage")
+    coverage.add_argument("package", type=Path)
+    coverage.add_argument("--expected-sha256", required=True, help="exact final-package digest")
 
     projection = commands.add_parser("project-actions", help="derive inert native Actions job data without dispatch")
     projection.add_argument("package", type=Path)
@@ -115,6 +123,8 @@ def _revise(args: argparse.Namespace) -> dict:
 
 def _finalize(args: argparse.Namespace) -> dict:
     protected = {args.parent_package.resolve(), args.decision.resolve(), args.review.resolve()}
+    if args.coverage_record is not None:
+        protected.add(args.coverage_record.resolve())
     if args.output.resolve() in protected:
         raise PackageError("Final output must not replace its parent package or source record")
     return finalize_package(
@@ -129,7 +139,12 @@ def _finalize(args: argparse.Namespace) -> dict:
         review_path=args.review,
         review_summary=args.review_summary,
         reviewer_name=args.reviewer_name,
+        coverage_path=args.coverage_record,
     )
+
+
+def _inspect_coverage(args: argparse.Namespace) -> dict:
+    return inspect_coverage(bounded_read(args.package), expected_sha256=args.expected_sha256)
 
 
 def _verify(args: argparse.Namespace) -> dict:
@@ -159,6 +174,7 @@ _COMMANDS = {
     "compile": _compile,
     "revise": _revise,
     "finalize": _finalize,
+    "inspect-coverage": _inspect_coverage,
     "verify": _verify,
     "project-actions": _project_actions,
 }

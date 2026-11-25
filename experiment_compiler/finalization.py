@@ -15,6 +15,7 @@ from .assembly import compile_source_closure
 from .core import (MANIFEST, PackageError, bounded_read,
                    canonical, json_value, safe_path, sha256,
                    validate_lifecycle_crate, verify_bytes)
+from .coverage import assess_coverage
 from .revision import PROV, _read_parent_attempt, _root_and_protocol
 
 SCHEMA = "https://schema.org/"
@@ -47,7 +48,7 @@ def finalize_package(parent_package: Path, output: Path, *,
                      experiment_id: str, title: str,
                      decision_path: Path, decision_summary: str,
                      review_path: Path, review_summary: str,
-                     reviewer_name: str) -> dict:
+                     reviewer_name: str, coverage_path: Path | None = None) -> dict:
     """Bind explicit decision/review records to one exact runner attempt.
 
     The parent attempt ZIP is carried as a digest-addressed member; all its
@@ -79,6 +80,9 @@ def finalize_package(parent_package: Path, output: Path, *,
     parent_crate, receipt, _ = _read_parent_attempt(parent_bytes, attempt_id)
     decision_bytes = _source_text(decision_path, "Decision record")
     review_bytes = _source_text(review_path, "Publication review record")
+    coverage_bytes = bounded_read(coverage_path) if coverage_path is not None else None
+    coverage_summary = (assess_coverage(coverage_bytes, parent_bytes, receipt, attempt_id)
+                        if coverage_bytes is not None else None)
 
     temporary = Path(tempfile.mkdtemp(prefix="compiled-experiment-finalization-"))
     try:
@@ -109,6 +113,9 @@ def finalize_package(parent_package: Path, output: Path, *,
         review_member = "evidence/publication-review.md"
         reviewer_id = "#publication-reviewer"
         reserved = {parent_member, decision_member, review_member}
+        coverage_member = "evidence/protocol-coverage.json"
+        if coverage_bytes is not None:
+            reserved.add(coverage_member)
         if reserved.intersection(files):
             raise PackageError("Parent package already contains a reserved finalization member")
         if any(node.get("@id") in reserved or node.get("@id") == reviewer_id
@@ -121,6 +128,8 @@ def finalize_package(parent_package: Path, output: Path, *,
         root[PROV + "wasDerivedFrom"] = {"@id": parent_member}
         for path in (parent_member, decision_member, review_member):
             _append_part(root, path)
+        if coverage_bytes is not None:
+            _append_part(root, coverage_member)
         graph = crate["@graph"]
         graph.extend([
             {"@id": parent_member, "@type": "File", "name": "Exact selected attempt package",
@@ -141,10 +150,17 @@ def finalize_package(parent_package: Path, output: Path, *,
              "itemReviewed": {"@id": parent_member}, "about": {"@id": selected_id},
              PROV + "wasDerivedFrom": {"@id": parent_member}},
         ])
+        if coverage_bytes is not None:
+            graph.append({"@id": coverage_member, "@type": "File",
+                          "name": "Source-authored protocol coverage",
+                          "encodingFormat": "application/json", "sha256": sha256(coverage_bytes),
+                          "about": {"@id": selected_id}, PROV + "wasDerivedFrom": {"@id": parent_member}})
         files["ro-crate-metadata.json"] = canonical(crate)
         files[parent_member] = parent_bytes
         files[decision_member] = decision_bytes
         files[review_member] = review_bytes
+        if coverage_bytes is not None:
+            files[coverage_member] = coverage_bytes
         if "experiment.json" in files:
             raise PackageError("Parent package member experiment.json conflicts with the source-owned recipe")
 
@@ -158,10 +174,16 @@ def finalize_package(parent_package: Path, output: Path, *,
         result = compile_source_closure(
             temporary, output, source_directory, files, recipe, "finalized.zip"
         )
-        return {**result, "parentPackageSha256": expected_sha256,
-                "parentPlanPackageSha256": receipt["planPackageSha256"],
-                "selectedAttemptId": attempt_id,
-                "decisionSha256": sha256(decision_bytes),
-                "reviewRecordSha256": sha256(review_bytes)}
+        response = {**result, "parentPackageSha256": expected_sha256,
+                    "parentPlanPackageSha256": receipt["planPackageSha256"],
+                    "selectedAttemptId": attempt_id,
+                    "decisionSha256": sha256(decision_bytes),
+                    "reviewRecordSha256": sha256(review_bytes)}
+        if coverage_bytes is not None:
+            response["coverageRecordSha256"] = sha256(coverage_bytes)
+            response["coverage"] = coverage_summary
+        else:
+            response["coverage"] = {"status": "unassessed", "campaignAttemptInventory": "unassessed"}
+        return response
     finally:
         shutil.rmtree(temporary, ignore_errors=True)

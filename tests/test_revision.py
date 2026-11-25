@@ -24,9 +24,10 @@ class RevisionTests(unittest.TestCase):
     def _fixture_container_journal(attempt_directory, attempt_id, runner):
         return prepare_container_journal(attempt_directory, attempt_id, runner)
 
-    def _attempt(self, directory: Path) -> tuple[Path, str, bytes, str]:
+    def _attempt(self, directory: Path, recipe_path: Path | None = None,
+                 fixture_result: str = '{"fixture":"result"}\n') -> tuple[Path, str, bytes, str]:
         plan = directory / "plan.zip"
-        built = compile_package(ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
+        built = compile_package(recipe_path or ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
         plan_bytes = plan.read_bytes()
 
         class CompletedProcess:
@@ -40,7 +41,7 @@ class RevisionTests(unittest.TestCase):
             outdir = Path(command[command.index("--outdir") + 1])
             provdir = Path(command[command.index("--provenance") + 1])
             outdir.mkdir(parents=True)
-            (outdir / "result.json").write_text('{"fixture":"result"}\n')
+            (outdir / "result.json").write_text(fixture_result)
             provdir.mkdir(parents=True)
             (provdir / "workflow-run.json").write_text('{"fixture":"provenance"}\n')
             return CompletedProcess()
