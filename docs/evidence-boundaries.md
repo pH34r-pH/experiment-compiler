@@ -171,6 +171,30 @@ the frozen declaration. `supersedes` is either `null` or the source's
 The interpretation continues to be a source declaration beside the
 verified package identities and the runner's process outcomes.
 
+## Reading the historical radix archive
+
+Run the read-only [radix example](../examples/radix_archive_coverage.py) on
+the canonical ZIP from the [original release](https://github.com/pH34r-pH/compiled-experiments/releases/tag/dsl-issue-152-v1.0.0).
+
+```sh
+python -m examples.radix_archive_coverage /path/to/issue152-replay.zip
+```
+
+The report verifies the release digest and binds its protocol, result
+summary and trace manifest by SHA-256. The four primary pairs have
+recorded failures and the separate calibration pair is unreported.
+The frozen decision is zero of four validated, with three required.
+Eight retained trace shards from the pinned model and tokenizer support
+replay. Full model capture requires those external assets. The screening
+tables are known by checksum and their original bytes are unavailable in
+the archive. The 1,296 settings per pair describe the sensitivity grid.
+Their scope is engineering proxies.
+
+The command reports coverage from the archived evidence and leaves the
+original release bytes intact. The archive owns its independent replay
+record. Any later calibration result needs its own dated evidence and a
+link to the original study.
+
 `test_source_owned_comparison_failures_remain_integrity_valid_evidence` uses small,
 explicitly illustrative source reports through the existing lifecycle profile. It
 retains comparison/check JSON, attempt status JSON, and interpretation Markdown as
