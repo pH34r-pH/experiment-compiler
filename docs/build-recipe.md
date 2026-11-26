@@ -43,6 +43,17 @@ The local lifecycle check is a narrow contract check, not RO-Crate or Process Ru
 
 ## Execution handoff prototype
 
+The local CWL controller requires the `systemd-cgroup-v2-cwl-v1` worker profile.
+Its trusted launcher supplies `EXPERIMENT_RUNNER_WORKER_ENVELOPE` with `profile`,
+the actual `unit` name prefixed `experiment-compiler-worker-`, and the approved
+positive integer `cpuQuotaMicros`, `cpuPeriodMicros`, `memoryBytes`, and `tasks`.
+The runner checks that its process belongs to that service and reads Linux
+cgroup v2 limits for the service and its visible parents. All three effective
+limits must be finite and within the approved policy. The workflow's CPU and
+RAM requests must also fit the observed limits. The result records the approved
+and observed values separately. A host service records its outer image identity
+as unavailable. The existing workflow container image check remains separate.
+
 The local runner requires `EXPERIMENT_RUNNER_TMPFS_ROOT` to name a dedicated
 Linux tmpfs mount whose observed capacity matches the declared `tmpdirMiB`
 limit. The attempt's temporary directory must use that filesystem. The result

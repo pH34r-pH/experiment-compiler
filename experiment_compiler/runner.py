@@ -31,6 +31,7 @@ import zipfile
 from .archive_policy import PackageReadPolicy
 from .core import (MANIFEST, PackageError, bounded_read, canonical, compile_package,
                    json_value, safe_path, verify_bytes)
+from .worker_limits import observe_worker
 
 
 _CONTAINER_JOURNAL_SCHEMA = "cwltool-container-journal/v1"
@@ -124,7 +125,10 @@ def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, st
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
     _admit_job(job_document, payload, input_ids)
-    return limits, tmpfs_root, input_ids
+    worker, observation = observe_worker(os.environ.get("EXPERIMENT_RUNNER_WORKER_ENVELOPE"))
+    resources = workflow_document["requirements"]["ResourceRequirement"]
+    worker.check_workload(resources["coresMax"], resources["ramMax"])
+    return {**limits, "workerObservation": observation}, tmpfs_root, input_ids
 
 
 def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
@@ -1466,6 +1470,7 @@ def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
             "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
             "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
             "attestation": "caller-reported; not independently verified by the adapter",
+            "outerWorker": execution.get("workerObservation", {"status": "unverified"}),
         },
         "status": ("timed-out" if execution["timedOut"] else
                    "failed" if execution["returnCode"] != 0 or execution["collectionErrors"] else "succeeded"),
@@ -1821,6 +1826,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
                 temporary, state.payload, state.runner, state.limits, state.tmpfs_root,
                 (state.attempt_directory, state.journal, state.receipt),
             ))
+            execution["workerObservation"] = state.limits["workerObservation"]
             execution.setdefault("containerJournal", state.receipt.get("containerJournal"))
             execution.setdefault("containerCleanup", _container_cleanup_summary(state.journal))
             execution["containerJournalStorePath"] = _retain_journal_snapshot(
@@ -1875,7 +1881,8 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     created = datetime.now(timezone.utc)
     started = time.monotonic()
     execution = {"returnCode": None, "timedOut": False, "stdout": b"", "stderr": b"",
-                 "outputs": {}, "provenance": {}, "collectionErrors": []}
+                 "outputs": {}, "provenance": {}, "collectionErrors": [],
+                 "workerObservation": limits["workerObservation"]}
     timing = {"created": created, "ended": created, "elapsed": 0}
     initial, run_id, _ = _attempt_evidence(
         payload, package_bytes, expected_sha256, closure, runner, execution, timing,
