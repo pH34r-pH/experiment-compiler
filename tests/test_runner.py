@@ -8,6 +8,7 @@ import unittest
 import uuid
 import zipfile
 from copy import deepcopy
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -28,11 +29,15 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
+from experiment_compiler.runner_logs import LogCapture
 from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
 WORKER_OUTPUT_BUDGET = 64 * MIB
+ATTEMPT_DIAGNOSTIC = b"bounded diagnostic"
+ATTEMPT_LOG_OVERFLOW = b" extra diagnostic"
+TRUNCATED_ATTEMPT_LOGS = {"oversized-log", "timeout", "compile", "cancelled"}
 
 
 class RunnerBoundaryTests(unittest.TestCase):
@@ -751,9 +756,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             if scenario == "interrupted":
                 raise KeyboardInterrupt()
             scratch.append(Path(kwargs["cwd"]).parent)
-            kwargs["stdout"].write(b"bounded diagnostic")
-            if scenario == "oversized-log":
-                kwargs["stdout"].truncate(4 * 1024 * 1024 + 1)
+            kwargs["stdout"].write(ATTEMPT_DIAGNOSTIC)
+            if scenario in TRUNCATED_ATTEMPT_LOGS:
+                kwargs["stdout"].write(ATTEMPT_LOG_OVERFLOW)
             self._write_attempt_outputs(scenario, directory, command)
             return Process()
 
@@ -810,6 +815,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         scratch, terminal_failure = [], []
         launch = self._mock_attempt_launch(scenario, directory, scratch)
         replace_receipt, copy_source = self._mock_attempt_publication(scenario, output, terminal_failure)
+        capture = partial(LogCapture, stream_limit=len(ATTEMPT_DIAGNOSTIC))
         with patch.dict(os.environ, {
                 "EXPERIMENT_RUNNER_SANDBOX": "fixture",
                 "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
@@ -818,6 +824,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
         }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._require_bounded_tmpfs"), \
+                patch("experiment_compiler.runner.LogCapture", capture), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
                 patch("experiment_compiler.runner.os.killpg") as kill_group, \
                 patch.object(Path, "replace", new=replace_receipt), \
@@ -845,6 +852,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "success": "succeeded", "timeout": "timed-out", "timeout-orphan": "timed-out"}
         self.assertEqual(receipt["status"], statuses.get(scenario, "failed"))
         self._check_cancellation_evidence(scenario, directory, receipt)
+        if scenario in TRUNCATED_ATTEMPT_LOGS:
+            self._check_truncated_attempt_log(directory, receipt)
         rejected = {"symlink", "oversized-output", "aggregate", "missing"}
         errors = rejected | {"compile", "copy", "existing-output", "existing-source",
                              "launch", "oversized-log", "oversized-provenance"}
@@ -859,9 +868,17 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertIn(message, receipt["collectionErrors"][-1])
             self.assertFalse((directory / "result.zip").exists())
             self.assertFalse((directory / "result.source").exists())
-        if scenario == "compile":
-            self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
         self._check_attempt_publication(scenario, directory, receipt, terminal_failure)
+
+    def _check_truncated_attempt_log(self, directory, receipt):
+        self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), ATTEMPT_DIAGNOSTIC)
+        self.assertEqual(receipt["logCapture"]["streams"]["stdout"], {
+            "observedBytes": len(ATTEMPT_DIAGNOSTIC) + len(ATTEMPT_LOG_OVERFLOW),
+            "retainedBytes": len(ATTEMPT_DIAGNOSTIC),
+            "reachedEof": True,
+            "truncationReasons": ["stream-limit"],
+        })
+        self.assertIn("stdout log truncated by stream-limit", receipt["collectionErrors"])
 
     def _check_cancellation_evidence(self, scenario, directory, receipt):
         if scenario == "interrupted" or scenario.startswith("cancelled"):
@@ -870,7 +887,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertIsNotNone(receipt["endedAt"])
             self.assertFalse((directory / "result.zip").exists())
         if scenario.startswith("cancelled"):
-            self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"bounded diagnostic")
+            self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), ATTEMPT_DIAGNOSTIC)
         if scenario in ("cancelled-cleanup-timeout", "cancelled-cleanup-interrupted"):
             diagnostic = "TimeoutExpired" if scenario.endswith("timeout") else "KeyboardInterrupt"
             self.assertTrue(any("Process cleanup wait" in error and diagnostic in error

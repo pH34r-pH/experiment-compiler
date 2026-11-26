@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +31,7 @@ import zipfile
 from .archive_policy import PackageReadPolicy
 from .core import (MANIFEST, PackageError, _verify_file_stream, bounded_read, canonical,
                    compile_package, json_value, safe_path, sha256_file, verify_bytes)
+from .runner_logs import LOG_STREAM_LIMIT, LogCapture
 from .worker_limits import observe_worker
 
 
@@ -668,52 +669,77 @@ def _handle_cwl_error(paths: _CwlExecutionPaths, process: Any, exc: Exception) -
         raise PackageError(f"CWL runner could not complete its controller handoff: {exc}") from exc
 
 
-def _launch_cwl_process(paths: _CwlExecutionPaths, timeout: int) -> tuple[int, bool, list[str]]:
+def _record_cwl_exit(paths: _CwlExecutionPaths, return_code: int | None, *, unresolved: bool) -> None:
+    if unresolved:
+        paths.journal["cwlProcessGroupUnresolved"] = True
+        _journal_update(paths.attempt_directory, paths.journal, paths.receipt, state="unknown")
+    else:
+        paths.journal["cwlProcessExit"] = {"returnCode": return_code}
+        _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
+
+
+def _wait_cwl_process(paths: _CwlExecutionPaths, process: Any, timeout: int) -> tuple[int, bool, list[str]]:
+    try:
+        return_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        errors = _terminate_process_group(process)
+        _record_cwl_exit(paths, process.returncode, unresolved=_process_group_exists(process.pid))
+        return process.returncode or 124, True, errors
+    group_exists = _process_group_exists(process.pid)
+    errors = _terminate_process_group(process) if group_exists else []
+    _record_cwl_exit(paths, return_code, unresolved=group_exists and _process_group_exists(process.pid))
+    return return_code, False, errors
+
+
+def _finish_cwl_logs(paths: _CwlExecutionPaths, capture: LogCapture,
+                     original: BaseException | None = None) -> None:
+    if paths.receipt.get("logCapture") is None:
+        with _defer_operator_signals(original):
+            capture.finish()
+            paths.receipt["logCapture"] = capture.summary()
+            paths.receipt.setdefault("collectionErrors", []).extend(capture.errors())
+
+
+@contextmanager
+def _capture_cwl_logs(paths: _CwlExecutionPaths):
+    with ExitStack() as resources:
+        capture = LogCapture(resources, paths.stdout_path, paths.stderr_path)
+        try:
+            with _defer_operator_signals():
+                capture.start()
+            yield capture
+        except BaseException as exc:
+            _finish_cwl_logs(paths, capture, exc)
+            raise
+        else:
+            _finish_cwl_logs(paths, capture)
+
+
+def _run_cwl_process(paths: _CwlExecutionPaths, timeout: int, capture: LogCapture) -> tuple[int, bool, list[str]]:
     process = None
     try:
-        with paths.stdout_path.open("wb") as stdout_stream, paths.stderr_path.open("wb") as stderr_stream:
+        with _defer_operator_signals():
             process = subprocess.Popen(
                 paths.command, cwd=paths.work, env=paths.environment,
-                stdout=stdout_stream, stderr=stderr_stream, start_new_session=True,
+                stdout=capture.streams["stdout"].writer, stderr=capture.streams["stderr"].writer,
+                start_new_session=True,
             )
+            capture.close_writers()
             paths.journal["cwlProcessIdentity"] = _cwl_process_identity(process.pid)
             paths.receipt.update(executionPhase="running", executionNeverStarted=False,
                                  launchIntentPersisted=True)
             _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
                             state="running", processStartedAt=datetime.now(timezone.utc).isoformat())
-            try:
-                return_code = process.wait(timeout=timeout)
-                if _process_group_exists(process.pid):
-                    errors = _terminate_process_group(process)
-                    if _process_group_exists(process.pid):
-                        paths.journal["cwlProcessGroupUnresolved"] = True
-                        _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
-                                        state="unknown")
-                    else:
-                        paths.journal["cwlProcessExit"] = {"returnCode": return_code}
-                        _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
-                    return return_code, False, errors
-                else:
-                    paths.journal["cwlProcessExit"] = {"returnCode": return_code}
-                    _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
-                return return_code, False, []
-            except subprocess.TimeoutExpired:
-                errors = _terminate_process_group(process)
-                if _process_group_exists(process.pid):
-                    paths.journal["cwlProcessGroupUnresolved"] = True
-                    _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
-                                    state="unknown")
-                else:
-                    paths.journal["cwlProcessExit"] = {"returnCode": process.returncode}
-                    _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
-                return process.returncode if process.returncode else 124, True, errors
-            except KeyboardInterrupt:
-                paths.journal["cancellation"] = {"requestedAt": datetime.now(timezone.utc).isoformat()}
-                _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
-                                state="cancellation-requested")
-                raise
+        outcome = _wait_cwl_process(paths, process, timeout)
+        paths.receipt.update(exitCode=outcome[0], timedOut=outcome[1])
+        _finish_cwl_logs(paths, capture)
+        return outcome
     except KeyboardInterrupt as interruption:
-        _handle_cwl_interrupt(paths, process, interruption)
+        with _defer_operator_signals(interruption):
+            if process is not None and paths.journal["cancellation"] is None:
+                paths.journal["cancellation"] = {"requestedAt": datetime.now(timezone.utc).isoformat()}
+                _journal_update(paths.attempt_directory, paths.journal, paths.receipt, state="cancellation-requested")
+            _handle_cwl_interrupt(paths, process, interruption)
         raise
     except Exception as exc:
         _handle_cwl_error(paths, process, exc)
@@ -791,11 +817,12 @@ def _prepare_cwl_paths(request: _CwlExecutionRequest) -> _CwlExecutionPaths:
 def _execute_cwl(request: _CwlExecutionRequest) -> dict:
     limits = request.limits
     paths = _prepare_cwl_paths(request)
-    return_code, timed_out, cleanup_errors = _launch_cwl_process(paths, request.runner["maxWallSeconds"])
+    with _capture_cwl_logs(paths) as capture:
+        return_code, timed_out, cleanup_errors = _run_cwl_process(paths, request.runner["maxWallSeconds"], capture)
     attempt_directory, journal, receipt = paths.attempt_directory, paths.journal, paths.receipt
     output_attempt, attempt_out, provenance = paths.output_attempt, paths.attempt_out, paths.provenance
     stdout_path, stderr_path = paths.stdout_path, paths.stderr_path
-    collection_errors: list[str] = cleanup_errors
+    collection_errors = [*cleanup_errors, *receipt["collectionErrors"]]
     if journal.get("cwlProcessGroupUnresolved") is True:
         journal["state"] = "unknown"
         _journal_update(attempt_directory, journal, receipt)
@@ -829,6 +856,7 @@ def _execute_cwl(request: _CwlExecutionRequest) -> dict:
         "outputs": output_files,
         "provenance": provenance_files,
         "collectionErrors": collection_errors,
+        "logCapture": receipt["logCapture"],
         "containerJournal": receipt.get("containerJournal"),
         "containerCleanup": _container_cleanup_summary(journal),
         "scratchStorage": {"enforcement": "dedicated-mounted-tmpfs", "capMiB": limits["tmpdirMiB"]},
@@ -852,7 +880,7 @@ def _collect_execution_tree(root: Path, label: str, errors: list[str],
 
 def _read_execution_log(path: Path, label: str, errors: list[str]) -> bytes:
     try:
-        return bounded_read(path, 4 * 1024 * 1024)
+        return bounded_read(path, LOG_STREAM_LIMIT)
     except (PackageError, OSError) as exc:
         errors.append(f"{label} rejected: {exc}")
         return b""
@@ -1515,6 +1543,7 @@ def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
         "status": ("timed-out" if execution["timedOut"] else
                    "failed" if execution["returnCode"] != 0 or execution["collectionErrors"] else "succeeded"),
         "collectionErrors": execution["collectionErrors"],
+        "logCapture": execution.get("logCapture"),
         "containerJournal": container_journal,
         "containerCleanup": execution.get("containerCleanup", {"state": "unknown", "allAbsent": False}),
         "scratchStorage": execution.get("scratchStorage", {"enforcement": "unverified"}),

@@ -29,12 +29,14 @@ WORKER = textwrap.dedent("""\
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     print("native cancellation diagnostic", flush=True)
+    print("x" * 4096, end="", flush=True)
     (directory / "ready").write_text(str(os.getpid()))
     while True:
         time.sleep(1)
     """)
 CONTROLLER = textwrap.dedent("""\
     import json, os, sys
+    from functools import partial
     from pathlib import Path
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
@@ -60,6 +62,7 @@ CONTROLLER = textwrap.dedent("""\
             patch.object(runner, "_require_bounded_tmpfs"), \\
             patch.object(runner, "_runner_config", side_effect=configure), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
+            patch.object(runner, "LogCapture", partial(runner.LogCapture, stream_limit=31)), \\
             patch.object(runner, "_run_command", side_effect=native_command), \\
             patch.object(runner.os, "killpg", side_effect=record_signal):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
@@ -402,6 +405,11 @@ class NativeRunnerCancellationTests(unittest.TestCase):
         self.assertEqual((directory / "signals").read_text().splitlines(), ["15", "9"])
         self.assertEqual((directory / "result.attempt/stdout.log").read_bytes(), b"native cancellation diagnostic\n")
         self.assertEqual((directory / "result.attempt/stderr.log").read_bytes(), b"")
+        self.assertIn("stdout log truncated by stream-limit", errors)
+        self.assertEqual(receipt["logCapture"]["streams"]["stdout"], {
+            "observedBytes": 4096 + 31, "retainedBytes": 31, "reachedEof": True,
+            "truncationReasons": ["stream-limit"],
+        })
         self.assertEqual((directory / "result.zip").exists(), timeout_cleanup)
         self.assertEqual((directory / "result.source").exists(), timeout_cleanup)
         if timeout_cleanup:
