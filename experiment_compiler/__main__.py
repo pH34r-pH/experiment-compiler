@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .archive_policy_cli import add_archive_policy_options, archive_policy_from_args
 from .catalog import describe_catalog, describe_recipe
 from .core import (
     PackageError,
@@ -42,6 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     check.add_argument("package", type=Path)
     check.add_argument("--recipe", type=Path)
     check.add_argument("--expected-sha256")
+    add_archive_policy_options(check)
 
     revise = commands.add_parser("revise", help="compile a new plan revision from one verified attempt")
     revise.add_argument("parent_package", type=Path)
@@ -155,6 +157,7 @@ def _verify(args: argparse.Namespace) -> dict:
         args.package,
         expected_sha256=args.expected_sha256,
         recipe=recipe,
+        policy=archive_policy_from_args(args),
     )
 
 

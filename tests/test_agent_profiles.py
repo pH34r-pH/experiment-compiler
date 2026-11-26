@@ -3,12 +3,14 @@ import copy
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from repository_profile_helpers import composed_records
 
 from experiment_compiler.agent_profiles import SOURCE, projection_fingerprint
+from experiment_compiler.archive_policy import PackageReadPolicy, ResourcePolicyError
 from experiment_compiler.core import (
     PackageError,
     canonical,
@@ -61,6 +63,28 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         self.assertEqual(verified["repositoryAgent"]["scope"], "schema-identity-and-disclosure-only")
         self.assertEqual(verified["repositoryAgent"]["acceptance"], "not-evaluated")
         self.assertEqual(verified["repositoryAgent"]["trainingEligibility"], "not-granted")
+
+    def test_repository_records_are_budgeted_and_opened_once(self):
+        report, package = self.package()
+        record = "records/repository-evidence.json"
+        with zipfile.ZipFile(package) as archive:
+            sizes = {info.filename: info.file_size for info in archive.infolist()}
+        original_open = zipfile.ZipFile.open
+        opened = []
+
+        def record_open(archive, info):
+            opened.append(info.filename)
+            return original_open(archive, info)
+
+        with patch.object(zipfile.ZipFile, "open", record_open):
+            verified = verify_package(package, expected_sha256=report["packageSha256"],
+                                      policy=PackageReadPolicy(max_total_bytes=sum(sizes.values())))
+        self.assertEqual(verified["repositoryAgent"], report["repositoryAgent"])
+        self.assertCountEqual(opened, sizes.keys())
+        with patch.object(zipfile.ZipFile, "open") as opener, self.assertRaises(ResourcePolicyError) as refusal:
+            verify_package(package, policy=PackageReadPolicy(max_member_bytes=sizes[record] - 1))
+        self.assertEqual(refusal.exception.member, record)
+        opener.assert_not_called()
 
     def test_failed_and_invalid_attempts_are_retained_as_typed_evidence(self):
         for outcome, state in (("fail", "FAIL"), ("timeout", "UNKNOWN")):

@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from .core import PackageError, json_value, safe_path, sha256
+from .core import MANIFEST, PackageError, json_value, safe_path, sha256
 
 SOURCE = {"repository": "pH34r-pH/long-haul", "commit": "458bc2f1ec669392963b7fe29e4c252e2e70776c"}
 SCHEMAS = {
@@ -91,28 +91,27 @@ def _declaration(value):
     return value
 
 
-def _records(archive, declaration):
-    documents = {}
+def agent_record_paths(manifest, member_names):
+    raw_declaration = manifest["evidence"].get("repositoryAgent")
+    if raw_declaration is None:
+        return set()
+    declaration = _declaration(raw_declaration)
     paths = set()
+    kinds = set()
     for record in declaration["records"]:
         if (not isinstance(record, dict) or set(record) != {"kind", "path", "fingerprint"}
                 or not isinstance(record["kind"], str) or record["kind"] not in SCHEMAS):
             raise PackageError("Unknown repository evidence record kind")
         path = safe_path(record["path"])
-        if path in paths or record["kind"] in documents:
+        if path in paths or record["kind"] in kinds:
             raise PackageError("Repository evidence records must have unique paths and kinds")
         paths.add(path)
-        document = json_value(archive.read(path))
-        _validate_record(record["kind"], document)
-        if projection_fingerprint(document) != record["fingerprint"]:
-            raise PackageError("Repository record fingerprint mismatch")
-        documents[record["kind"]] = document
+        kinds.add(record["kind"])
     # These profiles package typed evidence only. Arbitrary source, traces, logs,
     # schemas, hidden tests and unclassified payloads are never admitted members.
-    from .core import MANIFEST
-    if set(archive.namelist()) != paths | {MANIFEST}:
+    if MANIFEST in paths or member_names != paths | {MANIFEST}:
         raise PackageError("Repository evidence package contains unclassified or sealed payloads")
-    return documents
+    return paths
 
 
 def _references(references):
@@ -130,12 +129,17 @@ def _references(references):
             raise PackageError("Trajectory/corpus references require exact upstream identity; payloads are not qualified")
 
 
-def validate_agent_profiles(archive, manifest):
+def validate_agent_profiles(manifest, parsed_members):
     declaration = manifest["evidence"].get("repositoryAgent")
     if declaration is None:
         return None
-    declaration = _declaration(declaration)
-    documents = _records(archive, declaration)
+    documents = {}
+    for record in declaration["records"]:
+        document = parsed_members[record["path"]]
+        _validate_record(record["kind"], document)
+        if projection_fingerprint(document) != record["fingerprint"]:
+            raise PackageError("Repository record fingerprint mismatch")
+        documents[record["kind"]] = document
     _references(declaration["references"])
     from .agent_disclosure import validate_bindings, validate_disclosure
     validate_bindings(documents)

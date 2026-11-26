@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 import zipfile
 
+from .archive_policy import PackageReadPolicy
 from .core import (MANIFEST, PackageError, bounded_read, canonical, compile_package,
                    json_value, safe_path, verify_bytes)
 
@@ -39,8 +40,9 @@ _MAX_ATTEMPT_CONTAINERS = 64
 _MAX_RECOVERY_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
-def _read_package(data: bytes, expected_sha256: str) -> tuple[dict, dict[str, bytes]]:
-    verified = verify_bytes(data, expected_sha256=expected_sha256)
+def _read_package(data: bytes, expected_sha256: str,
+                  policy: PackageReadPolicy | None = None) -> tuple[dict, dict[str, bytes]]:
+    verified = verify_bytes(data, expected_sha256=expected_sha256, policy=policy)
     if verified["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("runner accepts only compiled-experiment-lifecycle-v1 plans and result artifacts")
     with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
@@ -1845,7 +1847,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             _persist_attempt_receipt(state.attempt_directory, state.receipt)
         return result
 def run_package(package: Path, output: Path, *, expected_sha256: str,
-                allow_workflow_execution: bool = False) -> dict:
+                allow_workflow_execution: bool = False, policy: PackageReadPolicy | None = None) -> dict:
     """Run a digest-pinned lifecycle package and create a new immutable result package."""
     if not allow_workflow_execution:
         raise PackageError("workflow execution requires explicit opt-in after reviewing the package")
@@ -1853,7 +1855,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     if output.exists() or source_directory.exists():
         raise PackageError("run output package or source directory already exists; attempts are never overwritten")
     package_bytes = bounded_read(package)
-    manifest, payload = _read_package(package_bytes, expected_sha256)
+    manifest, payload = _read_package(package_bytes, expected_sha256, policy)
     closure, runner, limits, tmpfs_root = _admit(payload)
     attempt_directory = output.with_name(output.stem + ".attempt")
     if attempt_directory.exists():
