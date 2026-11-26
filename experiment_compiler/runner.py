@@ -59,10 +59,18 @@ def _dependency_closure(payload: dict[str, bytes]) -> dict:
     if not isinstance(closure, dict) or not isinstance(closure.get("classifications"), dict):
         raise PackageError("dependency closure has no classifications")
     classes = closure["classifications"]
-    if classes.get("unavailable"):
+    unavailable = classes.get("unavailable")
+    if not isinstance(unavailable, list):
+        raise PackageError("execution deferred: dependency closure requires an explicit unavailable list")
+    if unavailable:
         raise PackageError("execution deferred: dependency closure has unavailable prerequisites")
-    if classes.get("external"):
+    if classes.get("external") != []:
         raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
+    embedded = classes.get("embedded")
+    if not isinstance(embedded, list) or any(
+        not isinstance(member, dict) or safe_path(member.get("path")) not in payload for member in embedded
+    ):
+        raise PackageError("execution deferred: embedded dependencies must name packaged files")
     if closure.get("runtimeNetworkRequired") is not False:
         raise PackageError("execution deferred: local adapter requires a declared no-network protocol")
     return closure
@@ -109,6 +117,8 @@ def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, st
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse worker limits or CWL: {exc}") from exc
     input_ids = _admit_workflow(workflow_document, limits, runner.get("workerImageBase"))
+    if runner["maxWallSeconds"] > limits["wallSeconds"]:
+        raise PackageError("execution deferred: runner wall budget exceeds the approved worker limit")
     try:
         job_document = yaml.safe_load(payload["experiment/job.yml"])
     except (ValueError, yaml.YAMLError) as exc:
@@ -777,6 +787,7 @@ def _execute_cwl(request: _CwlExecutionRequest) -> dict:
         "collectionErrors": collection_errors,
         "containerJournal": receipt.get("containerJournal"),
         "containerCleanup": _container_cleanup_summary(journal),
+        "scratchStorage": {"enforcement": "dedicated-mounted-tmpfs", "capMiB": limits["tmpdirMiB"]},
         "outputStorage": ({"enforcement": "separate-mounted-tmpfs", "capMiB": limits["outdirMiB"]}
                           if output_attempt is not None else {"enforcement": "worker-tmpfs-only", "hardCap": False}),
     }
@@ -1461,6 +1472,7 @@ def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
         "collectionErrors": execution["collectionErrors"],
         "containerJournal": container_journal,
         "containerCleanup": execution.get("containerCleanup", {"state": "unknown", "allAbsent": False}),
+        "scratchStorage": execution.get("scratchStorage", {"enforcement": "unverified"}),
         "outputStorage": execution.get("outputStorage", {"enforcement": "worker-tmpfs-only", "hardCap": False}),
     }
 
@@ -1929,41 +1941,44 @@ def _require_bounded_tmpfs(temporary: Path, root: Path, limit_mib: int) -> None:
     resolved_temporary = temporary.resolve(strict=True)
     if not resolved_temporary.is_relative_to(resolved_root):
         raise PackageError("execution deferred: runner temporary directory is outside the declared tmpfs")
-    capacity = shutil.disk_usage(resolved_root).total
-    if capacity < limit_mib * 1024 * 1024:
-        raise PackageError("execution deferred: temporary filesystem capacity is below the declared worker limit")
+    _require_dedicated_tmpfs(root, limit_mib, "scratch")
+    if resolved_temporary.stat().st_dev != resolved_root.stat().st_dev:
+        raise PackageError("execution deferred: runner temporary directory must use the admitted scratch filesystem")
 
 
 def _require_bounded_output_tmpfs(root: Path, limit_mib: int) -> Path:
+    return _require_dedicated_tmpfs(root, limit_mib, "output")
+
+
+def _require_dedicated_tmpfs(root: Path, limit_mib: int, role: str) -> Path:
     if root.is_symlink() or not root.is_dir():
-        raise PackageError("execution deferred: output root must be an existing regular directory")
+        raise PackageError(f"execution deferred: {role} root must be an existing regular directory")
     resolved = root.resolve(strict=True)
     current = root.absolute()
     while current != current.parent:
         if current.is_symlink():
-            raise PackageError("execution deferred: output root path contains a symlink")
+            raise PackageError(f"execution deferred: {role} root path contains a symlink")
         current = current.parent
     try:
         entries = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise PackageError("execution deferred: cannot verify the output tmpfs mount") from exc
-    mount_type = None
+        raise PackageError(f"execution deferred: cannot verify the {role} tmpfs mount") from exc
+    mount_types = []
     for line in entries:
         try:
             before, after = line.split(" - ", 1)
             fields = before.split()
             mountpoint = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), fields[4])
             if Path(mountpoint) == resolved:
-                mount_type = after.split()[0]
-                break
+                mount_types.append(after.split()[0])
         except (IndexError, ValueError):
             continue
-    if mount_type != "tmpfs":
-        raise PackageError("execution deferred: output root is not a dedicated tmpfs mountpoint")
+    if mount_types != ["tmpfs"]:
+        raise PackageError(f"execution deferred: {role} root must be an unambiguous dedicated tmpfs mountpoint")
     capacity = shutil.disk_usage(resolved).total
     cap_bytes = int(limit_mib * 1024 * 1024)
     if capacity != cap_bytes:
-        raise PackageError("execution deferred: output tmpfs size must exactly match the declared worker output cap")
+        raise PackageError(f"execution deferred: {role} tmpfs size must exactly match the declared worker {role} cap")
     return resolved
 
 
