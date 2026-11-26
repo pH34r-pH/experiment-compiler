@@ -8,23 +8,18 @@ from collections.abc import Callable
 
 from .campaign_census import IDENTIFIER, assess_campaign, attempt_member
 from .core import PackageError, json_value, safe_path, sha256, verify_bytes
+from .protocol_amendments import ROLES, assess_amendments, assess_interpretation, evidence_text, matches_output
 from .revision import _root_and_protocol
 
 FROZEN_SCHEMA = "compiled-experiment-obligations/v1"
 RESOLUTION_SCHEMA = "compiled-experiment-coverage/v1"
 CAMPAIGN_COVERAGE_SCHEMA = "compiled-experiment-coverage/v2"
-ROLES = {"primary", "secondary", "control", "diagnostic", "exclusion", "stopping-rule"}
+AMENDED_COVERAGE_SCHEMA = "compiled-experiment-coverage/v3"
 
 
 def _object(value, keys, label):
     if not isinstance(value, dict) or set(value) != keys:
         raise PackageError(f"{label} has missing or unsupported fields")
-    return value
-
-
-def _text(value, label):
-    if not isinstance(value, str) or not value.strip() or len(value) > 4000:
-        raise PackageError(f"{label} must be nonempty bounded text")
     return value
 
 
@@ -64,7 +59,7 @@ def _frozen(plan_bytes, binding):
             raise PackageError("Frozen obligation ID is invalid or duplicated")
         if not isinstance(item["role"], str) or item["role"] not in ROLES:
             raise PackageError("Frozen obligation role is unsupported")
-        _text(item["applicability"], "Obligation applicability")
+        evidence_text(item["applicability"], "Obligation applicability")
         result[identifier] = item
     return result
 
@@ -76,12 +71,10 @@ def _check_observed_output(item, receipts, *, campaign):
         if campaign:
             raise PackageError("Observed coverage does not identify a verified measured campaign attempt")
         raise PackageError("Observed coverage references a different attempt")
-    path = safe_path(item["outputPath"])
-    outputs = [out for out in receipt.get("outputs", []) if isinstance(out, dict) and out.get("@id") == path]
-    if len(outputs) != 1 or outputs[0].get("sha256") != item["outputSha256"]:
+    if not matches_output(receipt, item):
         owner = "campaign-attempt" if campaign else "selected-attempt"
         raise PackageError(f"Observed coverage does not reference an exact {owner} output")
-    _text(item["finding"], "Source-authored finding")
+    evidence_text(item["finding"], "Source-authored finding")
 
 
 def _resolution(item, obligations, receipts, *, campaign):
@@ -97,18 +90,32 @@ def _resolution(item, obligations, receipts, *, campaign):
     if not isinstance(identifier, str) or identifier not in obligations:
         raise PackageError("Coverage resolution references an unknown obligation")
     if status in {"omitted", "pending"}:
-        _text(item["reason"], "Omission or pending reason")
+        evidence_text(item["reason"], "Omission or pending reason")
     else:
         _check_observed_output(item, receipts, campaign=campaign)
     return identifier
 
 
-def _obligation_readout(entries, obligations, receipts, *, campaign):
+def _amended_frozen_id(item, obligations, versions):
+    _object(item, {"id", "status", "amendmentId"}, "Amended disposition")
+    identifier, amendment_id = item["id"], item["amendmentId"]
+    if (
+        not isinstance(identifier, str) or identifier not in obligations
+        or not isinstance(amendment_id, str) or identifier not in versions.get(amendment_id, {})
+    ):
+        raise PackageError("Amended disposition must reference an amendment of that frozen obligation")
+    return identifier
+
+
+def _obligation_readout(entries, obligations, receipts, *, campaign, versions=None):
     if not isinstance(entries, list):
         raise PackageError("Coverage resolutions must be an array")
     resolved = {}
     for item in entries:
-        identifier = _resolution(item, obligations, receipts, campaign=campaign)
+        if versions is not None and isinstance(item, dict) and item.get("status") == "amended":
+            identifier = _amended_frozen_id(item, obligations, versions)
+        else:
+            identifier = _resolution(item, obligations, receipts, campaign=campaign)
         if identifier in resolved:
             raise PackageError("Coverage resolution ID is duplicated")
         resolved[identifier] = item
@@ -123,22 +130,80 @@ def _obligation_readout(entries, obligations, receipts, *, campaign):
     return readout
 
 
+def _coverage_record(raw: bytes, plan_sha256: str, attempt_id: str) -> dict:
+    record = json_value(raw)
+    schema = record.get("schema") if isinstance(record, dict) else None
+    if schema not in (RESOLUTION_SCHEMA, CAMPAIGN_COVERAGE_SCHEMA, AMENDED_COVERAGE_SCHEMA):
+        raise PackageError("Unsupported coverage record schema")
+    keys = {"schema", "planSha256", "selectedAttemptId", "frozen", "resolutions"}
+    if schema != RESOLUTION_SCHEMA:
+        keys.add("campaign")
+    if schema == AMENDED_COVERAGE_SCHEMA:
+        keys.update(("amendments", "amendedResolutions", "interpretation"))
+    _object(record, keys, "Coverage record")
+    if record["planSha256"] != plan_sha256 or record["selectedAttemptId"] != attempt_id:
+        raise PackageError("Coverage record binds a different plan or selected attempt")
+    return record
+
+
+def _read_amended_version(row, versions, entries, receipts):
+    obligations = _obligation_readout(
+        entries, {key: version for key, version in versions.items() if version is not None},
+        receipts, campaign=True,
+    )
+    for item in obligations:
+        if item["status"] == "observed":
+            item["availableBeforeAmendment"] = item["attemptId"] in row["availableAttemptIds"]
+    return {"amendmentId": row["id"], "obligations": obligations}
+
+
+def _amended_readout(entries, history, versions, receipts):
+    if not isinstance(entries, list):
+        raise PackageError("Amended resolutions must be an array")
+    by_version: dict[str, list] = {revision: [] for revision in versions}
+    for item in entries:
+        _object(item, {"amendmentId", "resolution"}, "Amended resolution binding")
+        revision = item["amendmentId"]
+        if not isinstance(revision, str) or revision not in by_version:
+            raise PackageError("Amended resolution references an unknown amendment")
+        by_version[revision].append(item["resolution"])
+    return [
+        _read_amended_version(row, versions[row["id"]], by_version[row["id"]], receipts)
+        for row in history
+    ]
+
+
+def _summarize(record, obligations, receipts, campaign):
+    result = {"campaignAttemptInventory": "unassessed", "scientificInterpretation": "source-owned"}
+    if campaign is not None:
+        result.update(campaignAttemptInventory=campaign["scope"], campaign=campaign)
+    versions = None
+    if record["schema"] == AMENDED_COVERAGE_SCHEMA:
+        history, versions = assess_amendments(
+            record["amendments"], record["frozen"]["sha256"], obligations, campaign, receipts,
+        )
+        result.update(
+            amendments=history,
+            amendedObligations=_amended_readout(record["amendedResolutions"], history, versions, receipts),
+            interpretation=assess_interpretation(record["interpretation"], obligations, versions),
+        )
+    readout = _obligation_readout(
+        record["resolutions"], obligations, receipts, campaign=campaign is not None, versions=versions,
+    )
+    result.update(
+        obligations=readout,
+        sourceAccountedFor=all(row["status"] in {"observed", "omitted", "amended"} for row in readout),
+        sourceReportedObservedAsPlanned=all(row["status"] == "observed" for row in readout),
+    )
+    return result
+
+
 def assess_coverage(
     raw: bytes, parent_bytes: bytes, receipt: dict, attempt_id: str, *,
     load_campaign_attempt: Callable[[str], bytes] | None = None,
 ) -> dict:
     """Check plan-frozen obligations and return a non-scientific coverage readout."""
-    record = json_value(raw)
-    schema = record.get("schema") if isinstance(record, dict) else None
-    if schema not in (RESOLUTION_SCHEMA, CAMPAIGN_COVERAGE_SCHEMA):
-        raise PackageError("Unsupported coverage record schema")
-    keys = {"schema", "planSha256", "selectedAttemptId", "frozen", "resolutions"}
-    has_campaign = schema == CAMPAIGN_COVERAGE_SCHEMA
-    if has_campaign:
-        keys.add("campaign")
-    _object(record, keys, "Coverage record")
-    if record["planSha256"] != receipt.get("planPackageSha256") or record["selectedAttemptId"] != attempt_id:
-        raise PackageError("Coverage record binds a different plan or selected attempt")
+    record = _coverage_record(raw, receipt.get("planPackageSha256"), attempt_id)
     with zipfile.ZipFile(io.BytesIO(parent_bytes)) as parent:
         ref = receipt["planPackageArchive"]
         plan_bytes = _member(parent, ref["@id"], receipt["planPackageSha256"], "Embedded plan")
@@ -146,21 +211,14 @@ def assess_coverage(
     obligations = _frozen(plan_bytes, record["frozen"])
     campaign = None
     receipts = {attempt_id: receipt}
-    if has_campaign:
+    if "campaign" in record:
         if load_campaign_attempt is None:
             raise PackageError("Campaign coverage requires a retained attempt member reader")
         campaign, receipts = assess_campaign(
             record["campaign"], plan_sha256=receipt["planPackageSha256"], selected_id=attempt_id,
             selected_sha256=sha256(parent_bytes), selected_receipt=receipt, loader=load_campaign_attempt,
         )
-    readout = _obligation_readout(record["resolutions"], obligations, receipts, campaign=has_campaign)
-    statuses = [item["status"] for item in readout]
-    result = {"obligations": readout, "sourceAccountedFor": all(s in {"observed", "omitted"} for s in statuses),
-              "sourceReportedObservedAsPlanned": all(s == "observed" for s in statuses),
-              "campaignAttemptInventory": "unassessed", "scientificInterpretation": "source-owned"}
-    if campaign is not None:
-        result.update(campaignAttemptInventory=campaign["scope"], campaign=campaign)
-    return result
+    return _summarize(record, obligations, receipts, campaign)
 
 
 def _coverage_graph(archive, coverage_path):

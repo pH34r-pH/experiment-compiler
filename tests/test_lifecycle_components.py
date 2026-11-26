@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import test_protocol_coverage
 import test_revision
 import yaml
 
@@ -88,3 +89,25 @@ class LifecycleComponentTests(unittest.TestCase):
         self.assertEqual(pages["if"], "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'")
         self.assertEqual(pages["environment"]["name"], "github-pages")
         self.assertEqual(pages["permissions"]["attestations"], "write")
+
+    def test_finalization_component_retains_amended_coverage(self):
+        from experiment_compiler.core import sha256_file
+        from experiment_compiler.coverage import inspect_coverage
+
+        fixture = test_protocol_coverage.ProtocolCoverageTests()
+        attempt, attempt_id, coverage = fixture.amendment_fixture(self.root)
+        source = self.root / "coverage.json"
+        source.write_text(json.dumps(coverage), encoding="utf-8")
+        output = self.root / "result-with-amendments.zip"
+        parameters = {
+            "parent-package": str(attempt), "expected-sha256": sha256_file(attempt),
+            "attempt-id": attempt_id, "id": "component-amendments", "title": "Synthetic amendments",
+            "decision": str(ROOT / "examples/pipeline-finalization-fixture/decision.md"),
+            "decision-summary": "Synthetic negative decision.",
+            "review": str(ROOT / "examples/pipeline-finalization-fixture/review.md"),
+            "review-summary": "Synthetic review.", "reviewer-name": "Fixture reviewer",
+            "output": str(output), "coverage-record": str(source),
+        }
+        report = json.loads(self.run_component("finalize", parameters).stdout)
+        self.assertEqual(report["coverageRecordSha256"], sha256_file(source))
+        self.assertEqual(report["coverage"], inspect_coverage(output.read_bytes(), expected_sha256=sha256_file(output)))

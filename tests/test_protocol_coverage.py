@@ -22,6 +22,53 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProtocolCoverageTests(unittest.TestCase):
+    def amendment_fixture(self, directory):
+        attempt, attempt_id, coverage, _ = self.campaign_fixture(directory)
+        inventory = coverage["campaign"]["inventory"]
+        first_issue = datetime.fromisoformat(inventory["issued"][0]["issuedAt"])
+        cutoff = datetime.fromisoformat(inventory["cutoff"])
+        calibration = coverage["resolutions"].pop()
+        primary = coverage["resolutions"][0]
+        prospective = {
+            "id": "calibration-gate",
+            "predecessorSha256": coverage["frozen"]["sha256"],
+            "recordedAt": (first_issue - timedelta(seconds=1)).isoformat(),
+            "reason": "Specify when to use the diagnostic.",
+            "observedOutputs": [],
+            "changes": [{"id": "calibration", "action": "revise", "role": "diagnostic",
+                         "applicability": "When the study flags an instrumentation discrepancy."}],
+        }
+        later = {
+            "id": "secondary-analysis",
+            "predecessorSha256": sha256(canonical(prospective)),
+            "recordedAt": (cutoff - timedelta(seconds=1)).isoformat(),
+            "reason": "Retain an explicit secondary interpretation after results.",
+            "observedOutputs": [{key: primary[key] for key in ("attemptId", "outputPath", "outputSha256")}],
+            "changes": [{"id": "primary-0", "action": "revise", "role": "secondary",
+                         "applicability": "Sensitivity analysis."}],
+        }
+        coverage["resolutions"].append({"id": "calibration", "status": "amended", "amendmentId": prospective["id"]})
+        coverage.update(
+            schema="compiled-experiment-coverage/v3",
+            amendments=[prospective, later],
+            amendedResolutions=[
+                {"amendmentId": prospective["id"], "resolution": calibration},
+                {"amendmentId": later["id"], "resolution": primary},
+            ],
+            interpretation={
+                "comparator": "Source-authored synthetic baseline",
+                "unitOfAnalysis": "Source-declared replicate",
+                "uncertaintyMethod": "No uncertainty estimate for this fixture",
+                "limits": ["Synthetic negative outcome only."],
+                "endpoints": [
+                    {"obligationId": "primary-0", "amendmentId": None, "role": "primary"},
+                    {"obligationId": "primary-0", "amendmentId": later["id"], "role": "secondary"},
+                ],
+                "supersedes": {"finalPackageSha256": "b" * 64, "reason": "Synthetic interpretation revision."},
+            },
+        )
+        return attempt, attempt_id, coverage
+
     def campaign_fixture(self, directory):
         attempt, attempt_id, coverage = self.fixture(directory)
         separate = directory / "excluded-attempt"
@@ -306,6 +353,69 @@ class ProtocolCoverageTests(unittest.TestCase):
             (directory / f"{excluded_digest}.zip").unlink()
             with self.assertRaisesRegex(PackageError, "Expected regular file"):
                 self.finalize(directory, attempt, attempt_id, coverage, "missing-campaign-package")
+
+    def test_amendments_preserve_frozen_coverage_and_distinguish_when_outcomes_were_available(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            attempt, attempt_id, coverage = self.amendment_fixture(root)
+            report, final, _ = self.finalize(root, attempt, attempt_id, coverage, "amended-coverage")
+            verified = inspect_coverage(final.read_bytes(), expected_sha256=sha256(final.read_bytes()))
+            self.assertEqual(verified, report["coverage"])
+            self.assertTrue(verified["sourceAccountedFor"])
+            self.assertFalse(verified["sourceReportedObservedAsPlanned"])
+            self.assertEqual(verified["obligations"][0]["role"], "primary")
+            self.assertEqual(verified["obligations"][-1]["status"], "amended")
+            self.assertEqual([row["timing"] for row in verified["amendments"]],
+                             ["prospective", "post-observation"])
+            self.assertEqual(verified["amendments"][1]["predecessorSha256"], verified["amendments"][0]["sha256"])
+            alternative = [row["obligations"][0] for row in verified["amendedObligations"]]
+            self.assertFalse(alternative[0]["availableBeforeAmendment"])
+            self.assertTrue(alternative[1]["availableBeforeAmendment"])
+            self.assertEqual(alternative[1]["role"], "secondary")
+            self.assertEqual(verified["interpretation"], coverage["interpretation"])
+            self.assertEqual(verified["scientificInterpretation"], "source-owned")
+
+    def test_amendment_with_partial_census_keeps_timing_unknown_until_an_outcome_is_available(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            attempt, attempt_id, coverage = self.amendment_fixture(root)
+            campaign = coverage["campaign"]
+            campaign["inventory"]["scope"] = "partial"
+            campaign["inventorySha256"] = sha256(canonical(campaign["inventory"]))
+            coverage["amendments"][1]["observedOutputs"] = []
+            report, _, _ = self.finalize(root, attempt, attempt_id, coverage, "partial-amendment")
+            history = report["coverage"]["amendments"]
+            self.assertEqual([row["timing"] for row in history], ["unknown", "post-observation"])
+            self.assertEqual(history[1]["observedOutputs"], [])
+            self.assertIn(attempt_id, history[1]["availableAttemptIds"])
+
+    def test_invalid_amendment_evidence_fails_before_finalization(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            attempt, attempt_id, coverage = self.amendment_fixture(root)
+            for name, error in (
+                ("wrong-predecessor", "wrong predecessor"), ("before-outcome", "evidence available"),
+                ("wrong-output", "evidence available"), ("duplicate-change", "duplicate obligation"),
+                ("bad-disposition", "of that frozen obligation"), ("bad-endpoint", "declared obligation and role"),
+            ):
+                with self.subTest(name=name):
+                    record = copy.deepcopy(coverage)
+                    first, later = record["amendments"]
+                    if name == "wrong-predecessor":
+                        later["predecessorSha256"] = "a" * 64
+                    elif name == "before-outcome":
+                        first["observedOutputs"] = later["observedOutputs"]
+                    elif name == "wrong-output":
+                        later["observedOutputs"][0]["outputSha256"] = "a" * 64
+                    elif name == "duplicate-change":
+                        first["changes"].append(copy.deepcopy(first["changes"][0]))
+                    elif name == "bad-disposition":
+                        record["resolutions"][-1]["amendmentId"] = later["id"]
+                    elif name == "bad-endpoint":
+                        record["interpretation"]["endpoints"][0]["role"] = "secondary"
+                    with self.assertRaisesRegex(PackageError, error):
+                        self.finalize(root, attempt, attempt_id, record, name)
+                    self.assertFalse((root / f"{name}.zip").exists())
 
 
 if __name__ == "__main__":

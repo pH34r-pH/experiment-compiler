@@ -113,9 +113,63 @@ using only the final package and its expected digest.
 
 The digest identifies the source census declaration, whose completeness
 depends on the source producer. An interruption recorded without a package
-is a source disposition. Amendments to a frozen protocol still require a
-separate revision and a statement of what outcomes were available at the
-time of the amendment.
+is a source disposition.
+
+## Protocol amendments and interpretation
+
+Use `compiled-experiment-coverage/v3` with the same v2 campaign and frozen
+plan bindings. Add `amendments`, `amendedResolutions`, and `interpretation`.
+The amendment list is ordered by its source-declared `recordedAt` timestamps.
+The first predecessor is the frozen obligation file's SHA-256. Later
+predecessors are the SHA-256 of the previous amendment in the Compiler's
+`canonical` JSON encoding.
+
+For example, a study can revise the applicability of a retained diagnostic.
+
+```json
+{
+  "id": "calibration-gate",
+  "predecessorSha256": "<frozen obligation SHA-256>",
+  "recordedAt": "2026-01-01T12:00:00Z",
+  "reason": "Specify when to run calibration",
+  "observedOutputs": [],
+  "changes": [
+    {"id": "calibration", "action": "revise", "role": "diagnostic",
+     "applicability": "When instrumentation reports a discrepancy"}
+  ]
+}
+```
+
+A change may `add`, `revise`, or `withdraw` one obligation. A withdrawal
+uses `null` for `role` and `applicability`. The same ID continues through
+revisions. Earlier declarations and output evidence remain in the package.
+Use the existing plan revision path when a change needs a new execution
+protocol or input identity.
+
+Each `observedOutputs` entry identifies an `attemptId`, `outputPath` and
+`outputSha256` verified in an exact attempt that ended by the recorded time.
+The source records which outputs it had observed. The Compiler separately
+reports the verified attempt IDs already available then. Timing is
+`post-observation` when an exact measured attempt had finished, and
+`prospective` when a complete source census shows that execution had yet
+to begin. A partial census or earlier unresolved execution leaves timing
+`unknown` unless a verified outcome was already available.
+
+A frozen obligation may carry `{"id":"calibration","status":"amended",
+"amendmentId":"calibration-gate"}` in `resolutions`. This accounts for its
+disposition while preserving the frozen role and applicability and leaving
+it unobserved as planned. For the new declaration, include a wrapper with
+`amendmentId` and a normal `resolution` in `amendedResolutions`. Readback
+reports amended observations separately and shows whether each output was
+available before the amendment.
+
+`interpretation` carries source-authored `comparator`, `unitOfAnalysis`,
+`uncertaintyMethod`, `limits`, and `endpoints`. Each endpoint binds an
+`obligationId`, its `role` and the exact `amendmentId` or `null` for
+the frozen declaration. `supersedes` is either `null` or the source's
+`{finalPackageSha256, reason}` reference to an earlier finalization.
+The interpretation continues to be a source declaration beside the
+verified package identities and the runner's process outcomes.
 
 `test_source_owned_comparison_failures_remain_integrity_valid_evidence` uses small,
 explicitly illustrative source reports through the existing lifecycle profile. It
