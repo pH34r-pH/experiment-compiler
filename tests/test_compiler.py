@@ -14,9 +14,11 @@ import tempfile
 import unittest
 import warnings
 import zipfile
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
+from experiment_compiler.archive_policy import ArchiveMemberReader, PackageReadPolicy, ResourcePolicyError
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
 from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
     json_value, load_recipe, manifest_for, safe_path, sha256, unique_paths, verify_bytes, verify_package)
@@ -823,6 +825,78 @@ class CompilerTests(unittest.TestCase):
         self.assertGreater(member["size"], former_total_limit)
         with zipfile.ZipFile(package) as archive:
             self.assertEqual(archive.getinfo("experiment/data.csv").file_size, member["size"])
+            total_bytes = sum(info.file_size for info in archive.infolist())
+        self.assertEqual(verify_package(package, policy=PackageReadPolicy(max_total_bytes=total_bytes)), verified)
+
+    def test_archive_policy_accepts_exact_inclusive_limits_and_rejects_smaller_limits(self):
+        raw = self.build()
+        with zipfile.ZipFile(self.output) as archive:
+            infos = archive.infolist()
+        limits = {
+            "max_member_bytes": max(info.file_size for info in infos),
+            "max_total_bytes": sum(info.file_size for info in infos),
+            "max_members": len(infos),
+            "max_compression_ratio": max(-(-info.file_size // info.compress_size) for info in infos),
+        }
+        baseline = verify_bytes(raw)
+        self.assertEqual(verify_package(self.output, policy=PackageReadPolicy(**limits)), baseline)
+        for budget, limit in limits.items():
+            policy = PackageReadPolicy(**{budget: limit - 1})
+            with self.subTest(budget=budget), patch.object(zipfile.ZipFile, "open") as opener:
+                with self.assertRaises(ResourcePolicyError) as refusal:
+                    verify_bytes(raw, policy=policy)
+                self.assertEqual(refusal.exception.budget, budget)
+                self.assertEqual(refusal.exception.limit, limit - 1)
+                opener.assert_not_called()
+
+    def test_archive_policy_counts_manifest_and_refuses_before_opening_it(self):
+        raw = self.build()
+        with zipfile.ZipFile(self.output) as archive:
+            manifest_size = archive.getinfo(MANIFEST).file_size
+            pairs = [(info, archive.read(info)) for info in archive.infolist()]
+        manifest_first = io.BytesIO()
+        with zipfile.ZipFile(manifest_first, "w") as archive:
+            for info, content in sorted(pairs, key=lambda pair: pair[0].filename != MANIFEST):
+                archive.writestr(info, content)
+        with patch.object(zipfile.ZipFile, "open") as opener, self.assertRaises(ResourcePolicyError) as refusal:
+            verify_bytes(manifest_first.getvalue(), policy=PackageReadPolicy(max_member_bytes=manifest_size - 1))
+        self.assertEqual(refusal.exception.member, MANIFEST)
+        opener.assert_not_called()
+        self.assertEqual(verify_bytes(raw)["packageSha256"], EXPECTED)
+
+    def test_archive_policy_checks_observed_bytes_before_retaining_them(self):
+        info = zipfile.ZipInfo("metadata.json")
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w") as archive:
+            archive.writestr(info, b"{}")
+        with zipfile.ZipFile(archive_bytes) as archive:
+            info = archive.getinfo("metadata.json")
+            for budget in ("max_member_bytes", "max_total_bytes", "max_compression_ratio"):
+                limit = 1 if budget == "max_compression_ratio" else 2
+                reader = ArchiveMemberReader(archive, PackageReadPolicy(**{budget: limit}))
+                with self.subTest(budget=budget), patch.object(archive, "open", return_value=io.BytesIO(b"{}\n")):
+                    with self.assertRaises(ResourcePolicyError) as refusal:
+                        reader.read(info, capture=True)
+                    self.assertEqual(refusal.exception.budget, budget)
+                    self.assertEqual(refusal.exception.member, info.filename)
+
+    def test_verifier_opens_lifecycle_and_generic_json_members_once(self):
+        recipe = ROOT / "examples/linear-regression-plan-v1/experiment.json"
+        compile_package(recipe, self.output)
+        with zipfile.ZipFile(self.output) as archive:
+            infos = archive.infolist()
+        opened = Counter()
+        original_open = zipfile.ZipFile.open
+
+        def record_open(archive, info):
+            opened[info.filename] += 1
+            return original_open(archive, info)
+
+        with patch.object(zipfile.ZipFile, "open", record_open):
+            policy = PackageReadPolicy(max_total_bytes=sum(info.file_size for info in infos))
+            report = verify_package(self.output, recipe=load_recipe(recipe), policy=policy)
+        self.assertIn("lifecycle", report)
+        self.assertEqual(opened, Counter(info.filename for info in infos))
 
     def test_verifier_rejects_malformed_zip(self):
         with self.assertRaises(PackageError):
@@ -840,6 +914,22 @@ class CompilerTests(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("Traceback", result.stderr)
+        result = subprocess.run(command + ["verify", str(self.output), "--max-members", "1"],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Local resource policy refused package", result.stderr)
+
+    def test_runner_cli_refuses_budget_without_starting_an_attempt(self):
+        package = self.build()
+        output = self.root / "rejected.zip"
+        command = [sys.executable, "-m", "experiment_compiler.runner_cli", "run", str(self.output),
+                   "--output", str(output), "--expected-sha256", sha256(package),
+                   "--allow-workflow-execution", "--max-members", "1"]
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Local resource policy refused package", result.stderr)
+        self.assertFalse(output.with_suffix(".attempt").exists())
 
 
 if __name__ == "__main__":

@@ -14,6 +14,19 @@ Verification checks the exact member inventory, digests, sizes and JSON syntax. 
 
 `verify --recipe ...` also compares the manifest with the reviewed recipe. `verify --expected-sha256 ...` checks an external complete-package checksum. Without either external pin, success means self-consistency only: an attacker could change both content and its hashes. Hashes do not establish authorship or scientific validity. Receipts always state `scope: package-integrity-only` and `scientificReproduction: not-run`.
 
+Operators can pass `--max-member-bytes`, `--max-total-bytes`, `--max-members`,
+and `--max-compression-ratio` to `experiment-compiler verify` or
+`experiment-runner run`. Each flag is an optional inclusive positive integer.
+Byte limits count expanded data and include the manifest. The ratio compares
+each member's expanded bytes with its compressed bytes. The verifier checks
+declared ZIP sizes before opening members and counts expanded bytes during reads.
+Library callers can pass `policy=PackageReadPolicy(...)` to `verify_package`,
+`verify_bytes`, or `run_package`. `PackageReadPolicy` and `ResourcePolicyError`
+are available from `experiment_compiler.archive_policy`. Unset budgets impose
+no additional limit. A `ResourcePolicyError` reports a local refusal, so the
+caller can retry under an appropriate policy. See [Security](../SECURITY.md)
+for process resource limits and JSON memory considerations.
+
 This release preserves the initial POC wire format. A future complete research package must use an explicitly versioned profile and a new digest; never silently “repair” historical member bytes or relabel a new scientific run as historical evidence.
 
 ## Lifecycle profile: plans, attempts and interpretation

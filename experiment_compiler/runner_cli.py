@@ -8,6 +8,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
+from .archive_policy_cli import add_archive_policy_options, archive_policy_from_args
 from .core import PackageError, canonical
 from .runner import recover_attempt, run_package
 
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--expected-sha256", required=True, help="exact reviewed plan package digest")
     run.add_argument("--allow-workflow-execution", action="store_true",
                      help="confirm that the packaged CWL workflow and its tool code may execute")
+    add_archive_policy_options(run)
     recover = commands.add_parser("recover", help="reconcile retained container evidence after an interrupted attempt")
     recover.add_argument("attempt_directory", type=Path,
                          help="existing .attempt directory; recovery never re-executes the workflow")
@@ -70,7 +72,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = recover_attempt(args.attempt_directory)
             else:
                 result = run_package(args.package, args.output, expected_sha256=args.expected_sha256,
-                                     allow_workflow_execution=args.allow_workflow_execution)
+                                     allow_workflow_execution=args.allow_workflow_execution,
+                                     policy=archive_policy_from_args(args))
         sys.stdout.buffer.write(canonical(result))
         if args.command == "recover":
             return 0 if result.get("containerCleanup", {}).get("state") in {"clean", "not-started"} else 2
