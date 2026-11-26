@@ -73,6 +73,14 @@ components accept the same archive-policy options as their CLI commands.
 
 `experiment-runner run` is a separate, opt-in command; compile and verify never execute package contents. It verifies the reviewed plan package digest and lifecycle profile, requires a declared bounded worker, an explicit no-network declaration, pinned cwltool version and CWL CPU/RAM/storage/time maxima that fit within the worker limits, then invokes the packaged CWL workflow. `experiment/runner.json` selects the pinned cwltool engine with `executionMode` set to `cwltool-docker` or `cwltool-podman`; both execute standard CWL `DockerRequirement` images. The current bounded adapter admits one self-contained `CommandLineTool` document only; CWL `Workflow`, `run` references and `$import`/`$include`/`$schemas`/`$graph`/`$base` document references are rejected before cwltool starts. Its job order is restricted to declared input names and packaged relative File objects; SALAD references, `cwl:tool`, and `cwltool:overrides` are rejected before execution. Each invocation creates a new result ZIP and sibling `.source/` directory containing the compiler recipe and all hashed package members, so `verify --recipe result.source/experiment.json` and catalog discovery can independently rebuild the exact package. The result package retains the original plan bytes, a distinct attempt ID, Process Run Crate metadata, CWL provenance files, logs, outputs and a runner receipt. A timeout or failed process still receives a separate failure artifact; the process status is not a scientific decision.
 
+The runner retains up to 4 MiB of diagnostic prefix per stream and 8 MiB
+across stdout and stderr. It drains both pipes throughout execution and discards
+bytes over budget. Truncation records a collection error and preserves the
+child's exit code and any timeout or operator cancellation. The attempt receipt
+records bytes observed, bytes retained, the applicable limit, and whether each
+pipe reached EOF. If final draining ends before EOF, observed counts are lower
+bounds. These are worker log limits.
+
 ### Revising a plan after an attempt
 
 The `experiment-compiler revise` command creates a new prospective plan from a source-authored recipe and one explicitly selected attempt package:
