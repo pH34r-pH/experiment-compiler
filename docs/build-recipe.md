@@ -62,6 +62,15 @@ identity. Local admission also requires explicit embedded, external, and
 unavailable dependency lists, and compares the runner's wall budget with the
 approved worker wall limit before launch.
 
+Local execution copies the plan into a private staging directory on the output
+filesystem and verifies that snapshot with the caller's archive policy. The
+runner keeps the manifest and admission documents in memory. Only the CWL
+workflow, job document, and declared job files enter the bounded execution
+scratch. The result retains the original plan ZIP and other plan members through
+streaming copies from the verified snapshot. Provision output storage for the
+snapshot and the immutable result. The existing `verify` and `execute` lifecycle
+components accept the same archive-policy options as their CLI commands.
+
 `experiment-runner run` is a separate, opt-in command; compile and verify never execute package contents. It verifies the reviewed plan package digest and lifecycle profile, requires a declared bounded worker, an explicit no-network declaration, pinned cwltool version and CWL CPU/RAM/storage/time maxima that fit within the worker limits, then invokes the packaged CWL workflow. `experiment/runner.json` selects the pinned cwltool engine with `executionMode` set to `cwltool-docker` or `cwltool-podman`; both execute standard CWL `DockerRequirement` images. The current bounded adapter admits one self-contained `CommandLineTool` document only; CWL `Workflow`, `run` references and `$import`/`$include`/`$schemas`/`$graph`/`$base` document references are rejected before cwltool starts. Its job order is restricted to declared input names and packaged relative File objects; SALAD references, `cwl:tool`, and `cwltool:overrides` are rejected before execution. Each invocation creates a new result ZIP and sibling `.source/` directory containing the compiler recipe and all hashed package members, so `verify --recipe result.source/experiment.json` and catalog discovery can independently rebuild the exact package. The result package retains the original plan bytes, a distinct attempt ID, Process Run Crate metadata, CWL provenance files, logs, outputs and a runner receipt. A timeout or failed process still receives a separate failure artifact; the process status is not a scientific decision.
 
 ### Revising a plan after an attempt

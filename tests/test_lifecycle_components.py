@@ -32,8 +32,11 @@ class LifecycleComponentTests(unittest.TestCase):
         output = self.root / "literal-$(touch INJECTION).zip"
         report = json.loads(self.run_component("compile", {"recipe": recipe, "output": str(output)}).stdout)
         self.assertEqual(report["packageSha256"], "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341")
-        checked = self.run_component("verify", {"package": str(output), "expected-sha256": report["packageSha256"]})
+        parameters = {"package": str(output), "expected-sha256": report["packageSha256"]}
+        checked = self.run_component("verify", {**parameters, "max-members": "9"})
         self.assertEqual(json.loads(checked.stdout)["scope"], "package-integrity-only")
+        refused = self.run_component("verify", {**parameters, "max-members": "8"}, check=False)
+        self.assertIn(b"Local resource policy refused package", refused.stderr)
         self.assertFalse((ROOT / "INJECTION").exists())
 
     def test_caller_repository_cannot_shadow_the_pinned_compiler_module(self):

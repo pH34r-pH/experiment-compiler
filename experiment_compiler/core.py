@@ -732,13 +732,18 @@ def verify_package(package: Path, *, expected_sha256: str | None = None,
     """Verify from disk, with optional caller-owned archive budgets."""
     if package.is_symlink() or not package.is_file():
         raise PackageError(f"Expected regular package file: {package}")
+    with package.open("rb") as stream:
+        return _verify_file_stream(stream, expected_sha256=expected_sha256, recipe=recipe, policy=policy)
+
+
+def _verify_file_stream(stream, *, expected_sha256=None, recipe=None, policy=None) -> dict:
+    stream.seek(0)
+    package_sha, package_size = _hash_stream(stream)
+    stream.seek(0)
     try:
-        with package.open("rb") as stream:
-            package_sha, package_size = _hash_stream(stream)
-            stream.seek(0)
-            with zipfile.ZipFile(stream) as archive:
-                return _verify_archive(archive, package_sha256=package_sha, package_size=package_size,
-                                       expected_sha256=expected_sha256, recipe=recipe, policy=policy)
+        with zipfile.ZipFile(stream) as archive:
+            return _verify_archive(archive, package_sha256=package_sha, package_size=package_size,
+                                   expected_sha256=expected_sha256, recipe=recipe, policy=policy)
     except (zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
         raise PackageError(f"Invalid package: {exc}") from exc
 

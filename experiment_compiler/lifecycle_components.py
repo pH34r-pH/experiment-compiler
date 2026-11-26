@@ -4,12 +4,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .archive_policy_cli import ARCHIVE_POLICY_OPTIONS
 from .core import PackageError
 
 STAGES = {
     "compile": ("experiment_compiler", "compile", "recipe", {"output", "receipt"}, set()),
-    "verify": ("experiment_compiler", "verify", "package", {"recipe", "receipt", "expected-sha256"}, set()),
-    "execute": ("experiment_compiler.runner_cli", "run", "package", {"output", "expected-sha256"},
+    "verify": ("experiment_compiler", "verify", "package",
+               {"recipe", "receipt", "expected-sha256"} | ARCHIVE_POLICY_OPTIONS, set()),
+    "execute": ("experiment_compiler.runner_cli", "run", "package", {"output", "expected-sha256"} | ARCHIVE_POLICY_OPTIONS,
                 {"output", "expected-sha256"}),
     "finalize": ("experiment_compiler", "finalize", "parent-package", {
         "expected-sha256", "attempt-id", "id", "title", "decision", "decision-summary", "review",
