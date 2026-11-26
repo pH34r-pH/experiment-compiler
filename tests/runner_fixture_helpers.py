@@ -1,6 +1,9 @@
 """Shared fake runner evidence for lifecycle tests; never contacts an engine."""
 
+import os
+from contextlib import contextmanager
 from fractions import Fraction
+from unittest.mock import patch
 
 from experiment_compiler.core import canonical
 from experiment_compiler.runner import _persist_attempt_receipt, sha256_bytes
@@ -9,6 +12,19 @@ from experiment_compiler.worker_limits import ObservedWorker
 
 def synthetic_worker_observation(_approval):
     return ObservedWorker(Fraction(1), 64 * 1024 * 1024, 128), {"observationSource": "synthetic fixture"}
+
+
+@contextmanager
+def synthetic_controller_environment(directory):
+    with patch.dict(os.environ, {
+            "EXPERIMENT_RUNNER_SANDBOX": "native test fixture",
+            "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
+            "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
+                '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
+    }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
+            patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation):
+        yield
 
 
 def prepare_container_journal(attempt_directory, attempt_id, config):

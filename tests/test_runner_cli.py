@@ -38,7 +38,7 @@ CONTROLLER = textwrap.dedent("""\
     from pathlib import Path
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
-    from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
+    from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     worker = sys.argv[2]
@@ -56,14 +56,7 @@ CONTROLLER = textwrap.dedent("""\
     def native_command(temporary, *args):
         (directory / "scratch").write_text(str(temporary))
         return [sys.executable, "-u", "-c", worker, str(directory)]
-    with patch.dict(os.environ, {
-            "EXPERIMENT_RUNNER_SANDBOX": "native test fixture",
-            "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
-            "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
-                '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
-            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-    }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
-            patch.object(runner, "observe_worker", side_effect=synthetic_worker_observation), \\
+    with synthetic_controller_environment(directory), \\
             patch.object(runner, "_require_bounded_tmpfs"), \\
             patch.object(runner, "_runner_config", side_effect=configure), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
@@ -76,7 +69,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     from pathlib import Path
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
-    from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
+    from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
@@ -107,14 +100,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
                         raise RuntimeError("native receipt fixture release timed out")
                     time.sleep(0.01)
         return replace(path, target)
-    with patch.dict(os.environ, {
-            "EXPERIMENT_RUNNER_SANDBOX": "native test fixture",
-            "EXPERIMENT_RUNNER_WORKER_IMAGE": "sha256:fixture",
-            "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
-                '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
-            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-    }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
-            patch.object(runner, "observe_worker", side_effect=synthetic_worker_observation), \\
+    with synthetic_controller_environment(directory), \\
             patch.object(runner, "_execute_cwl", side_effect=execute), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(Path, "replace", new=pause_receipt):
