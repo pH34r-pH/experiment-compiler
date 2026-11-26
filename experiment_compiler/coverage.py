@@ -1,21 +1,19 @@
-"""Validate a source-authored, selected-attempt protocol coverage record.
-
-This first version accounts for obligations against one verified attempt. It
-does not certify a campaign census, interpret results, or infer omitted science.
-"""
+"""Validate source-authored obligations and optional campaign attempt accounting."""
 from __future__ import annotations
 
 import io
 import re
 import zipfile
+from collections.abc import Callable
 
+from .campaign_census import IDENTIFIER, assess_campaign, attempt_member
 from .core import PackageError, json_value, safe_path, sha256, verify_bytes
 from .revision import _root_and_protocol
 
 FROZEN_SCHEMA = "compiled-experiment-obligations/v1"
 RESOLUTION_SCHEMA = "compiled-experiment-coverage/v1"
+CAMPAIGN_COVERAGE_SCHEMA = "compiled-experiment-coverage/v2"
 ROLES = {"primary", "secondary", "control", "diagnostic", "exclusion", "stopping-rule"}
-IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
 def _object(value, keys, label):
@@ -71,7 +69,7 @@ def _frozen(plan_bytes, binding):
     return result
 
 
-def _resolution(item, obligations, receipt, attempt_id):
+def _resolution(item, obligations, receipts, *, campaign):
     if not isinstance(item, dict):
         raise PackageError("Coverage resolution must be an object")
     status = item.get("status")
@@ -86,22 +84,35 @@ def _resolution(item, obligations, receipt, attempt_id):
     if status in {"omitted", "pending"}:
         _text(item["reason"], "Omission or pending reason")
     elif status == "observed":
-        if item["attemptId"] != attempt_id:
+        observed_attempt = item["attemptId"]
+        receipt = receipts.get(observed_attempt) if isinstance(observed_attempt, str) else None
+        if receipt is None:
+            if campaign:
+                raise PackageError("Observed coverage does not identify a verified measured campaign attempt")
             raise PackageError("Observed coverage references a different attempt")
         path = safe_path(item["outputPath"])
         outputs = [out for out in receipt.get("outputs", []) if isinstance(out, dict) and out.get("@id") == path]
         if len(outputs) != 1 or outputs[0].get("sha256") != item["outputSha256"]:
-            raise PackageError("Observed coverage does not reference an exact selected-attempt output")
+            owner = "campaign-attempt" if campaign else "selected-attempt"
+            raise PackageError(f"Observed coverage does not reference an exact {owner} output")
         _text(item["finding"], "Source-authored finding")
     return identifier
 
 
-def assess_coverage(raw: bytes, parent_bytes: bytes, receipt: dict, attempt_id: str) -> dict:
+def assess_coverage(
+    raw: bytes, parent_bytes: bytes, receipt: dict, attempt_id: str, *,
+    load_campaign_attempt: Callable[[str], bytes] | None = None,
+) -> dict:
     """Check plan-frozen obligations and return a non-scientific coverage readout."""
-    record = _object(json_value(raw), {"schema", "planSha256", "selectedAttemptId", "frozen", "resolutions"},
-                     "Coverage record")
-    if record["schema"] != RESOLUTION_SCHEMA:
+    record = json_value(raw)
+    schema = record.get("schema") if isinstance(record, dict) else None
+    if schema not in (RESOLUTION_SCHEMA, CAMPAIGN_COVERAGE_SCHEMA):
         raise PackageError("Unsupported coverage record schema")
+    keys = {"schema", "planSha256", "selectedAttemptId", "frozen", "resolutions"}
+    has_campaign = schema == CAMPAIGN_COVERAGE_SCHEMA
+    if has_campaign:
+        keys.add("campaign")
+    _object(record, keys, "Coverage record")
     if record["planSha256"] != receipt.get("planPackageSha256") or record["selectedAttemptId"] != attempt_id:
         raise PackageError("Coverage record binds a different plan or selected attempt")
     with zipfile.ZipFile(io.BytesIO(parent_bytes)) as parent:
@@ -109,12 +120,21 @@ def assess_coverage(raw: bytes, parent_bytes: bytes, receipt: dict, attempt_id: 
         plan_bytes = _member(parent, ref["@id"], receipt["planPackageSha256"], "Embedded plan")
     verify_bytes(plan_bytes, expected_sha256=receipt["planPackageSha256"])
     obligations = _frozen(plan_bytes, record["frozen"])
+    campaign = None
+    receipts = {attempt_id: receipt}
+    if has_campaign:
+        if load_campaign_attempt is None:
+            raise PackageError("Campaign coverage requires a retained attempt member reader")
+        campaign, receipts = assess_campaign(
+            record["campaign"], plan_sha256=receipt["planPackageSha256"], selected_id=attempt_id,
+            selected_sha256=sha256(parent_bytes), selected_receipt=receipt, loader=load_campaign_attempt,
+        )
     entries = record["resolutions"]
     if not isinstance(entries, list):
         raise PackageError("Coverage resolutions must be an array")
     resolved = {}
     for item in entries:
-        identifier = _resolution(item, obligations, receipt, attempt_id)
+        identifier = _resolution(item, obligations, receipts, campaign=has_campaign)
         if identifier in resolved:
             raise PackageError("Coverage resolution ID is duplicated")
         resolved[identifier] = item
@@ -127,9 +147,12 @@ def assess_coverage(raw: bytes, parent_bytes: bytes, receipt: dict, attempt_id: 
             entry.update({key: value for key, value in item.items() if key not in {"id", "status"}})
         readout.append(entry)
     statuses = [item["status"] for item in readout]
-    return {"obligations": readout, "sourceAccountedFor": all(s in {"observed", "omitted"} for s in statuses),
-            "sourceReportedObservedAsPlanned": all(s == "observed" for s in statuses),
-            "campaignAttemptInventory": "unassessed", "scientificInterpretation": "source-owned"}
+    result = {"obligations": readout, "sourceAccountedFor": all(s in {"observed", "omitted"} for s in statuses),
+              "sourceReportedObservedAsPlanned": all(s == "observed" for s in statuses),
+              "campaignAttemptInventory": "unassessed", "scientificInterpretation": "source-owned"}
+    if campaign is not None:
+        result.update(campaignAttemptInventory=campaign["scope"], campaign=campaign)
+    return result
 
 
 def _coverage_graph(archive, coverage_path):
@@ -204,7 +227,21 @@ def inspect_coverage(package_bytes: bytes, *, expected_sha256: str) -> dict:
         action_id = _coverage_action(node, nodes)
         parent_path, parent_node = _coverage_parent(root, node, nodes)
         parent_bytes = _member(archive, parent_path, parent_node.get("sha256"), "Parent attempt package")
-    verify_bytes(parent_bytes, expected_sha256=parent_node["sha256"])
-    attempt_id = action_id.removeprefix("#attempt-")
-    _, receipt, _ = _read_parent_attempt(parent_bytes, attempt_id)
-    return assess_coverage(raw, parent_bytes, receipt, attempt_id)
+        verify_bytes(parent_bytes, expected_sha256=parent_node["sha256"])
+        attempt_id = action_id.removeprefix("#attempt-")
+        _, receipt, _ = _read_parent_attempt(parent_bytes, attempt_id)
+
+        def load_campaign_attempt(digest: str) -> bytes:
+            name = attempt_member(digest)
+            attempt_node = nodes.get(name)
+            if (
+                not isinstance(attempt_node, dict) or attempt_node.get("@type") != "File"
+                or attempt_node.get("sha256") != digest
+                or {"@id": name} not in parts
+            ):
+                raise PackageError("Campaign attempt lacks its exact File entity in the final crate")
+            return _member(archive, name, digest, "Campaign attempt package")
+
+        return assess_coverage(
+            raw, parent_bytes, receipt, attempt_id, load_campaign_attempt=load_campaign_attempt,
+        )

@@ -7,9 +7,11 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from experiment_compiler.core import PackageError, compile_package, sha256, verify_bytes
+from experiment_compiler.core import PackageError, canonical, compile_package, sha256, verify_bytes
+from experiment_compiler.campaign_census import attempt_member
 from experiment_compiler.coverage import inspect_coverage
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt
@@ -20,6 +22,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProtocolCoverageTests(unittest.TestCase):
+    def campaign_fixture(self, directory):
+        attempt, attempt_id, coverage = self.fixture(directory)
+        separate = directory / "excluded-attempt"
+        separate.mkdir()
+        excluded, plan_sha256, _, excluded_id = test_revision.RevisionTests()._attempt(
+            separate, directory / "fixture/experiment.json", '{"diagnostic":"observed"}\n',
+        )
+        excluded_bytes = excluded.read_bytes()
+        excluded_sha256 = sha256(excluded_bytes)
+        (directory / f"{excluded_sha256}.zip").write_bytes(excluded_bytes)
+        _, excluded_receipt, _ = _read_parent_attempt(excluded_bytes, excluded_id)
+        output = next(entry for entry in excluded_receipt["outputs"] if entry["@id"].endswith("/result.json"))
+        coverage["resolutions"].append({
+            "id": "calibration", "status": "observed", "attemptId": excluded_id,
+            "outputPath": output["@id"], "outputSha256": output["sha256"],
+            "finding": "Measured as a diagnostic and kept outside the primary analysis.",
+        })
+        now = datetime.now(UTC)
+        inventory = {
+            "campaignId": "synthetic-campaign", "planSha256": plan_sha256, "scope": "complete",
+            "cutoff": (now + timedelta(minutes=1)).isoformat(),
+            "issued": [
+                {"attemptId": identifier, "replicateId": replicate,
+                 "issuedAt": (now - timedelta(minutes=minutes)).isoformat(), "retryOf": parent}
+                for identifier, replicate, minutes, parent in (
+                    ("failed-root", "replicate-a", 4, None),
+                    (excluded_id, "replicate-a", 3, "failed-root"),
+                    (attempt_id, "replicate-a", 2, excluded_id),
+                    ("interrupted-root", "replicate-b", 2, None),
+                )
+            ],
+        }
+        outcomes = [
+            {"attemptId": "failed-root", "status": "failed", "packageSha256": None,
+             "reason": "Source recorded infrastructure failure before a package was available."},
+            {"attemptId": excluded_id, "status": "measured-excluded", "packageSha256": excluded_sha256,
+             "reason": "Calibration is outside the primary analysis."},
+            {"attemptId": attempt_id, "status": "included", "packageSha256": sha256(attempt.read_bytes()),
+             "reason": None},
+            {"attemptId": "interrupted-root", "status": "interrupted", "packageSha256": None,
+             "reason": "Source recorded no terminal package."},
+        ]
+        coverage.update(
+            schema="compiled-experiment-coverage/v2",
+            campaign={"inventory": inventory, "inventorySha256": sha256(canonical(inventory)), "outcomes": outcomes},
+        )
+        return attempt, attempt_id, coverage, excluded_sha256
+
     def fixture(self, directory, *, wrong_protocol=False, duplicate_obligation=False):
         source = directory / "fixture"
         shutil.copytree(ROOT / "examples/linear-regression-plan-v1", source)
@@ -166,6 +216,96 @@ class ProtocolCoverageTests(unittest.TestCase):
             self.assertEqual(built["packageSha256"], "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341")
             self.assertEqual(inspect_coverage(path.read_bytes(), expected_sha256=built["packageSha256"]),
                              {"status": "unassessed", "campaignAttemptInventory": "unassessed"})
+
+    def test_campaign_checks_and_retains_attempts_without_counting_retries_as_replicates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            attempt, attempt_id, coverage, excluded_digest = self.campaign_fixture(directory)
+            report, finalized, _ = self.finalize(directory, attempt, attempt_id, coverage, "campaign-census")
+            result = report["coverage"]
+            self.assertEqual(result["campaignAttemptInventory"], "complete")
+            self.assertEqual(result["campaign"]["campaignDenominator"], 4)
+            self.assertEqual(result["campaign"]["recordedReplicates"], 2)
+            self.assertEqual(result["campaign"]["recordedRetries"], 2)
+            self.assertEqual([item["status"] for item in result["campaign"]["attempts"]],
+                             ["failed", "measured-excluded", "included", "interrupted"])
+            self.assertEqual(result["obligations"][0]["finding"], "source reports failure")
+            self.assertEqual(result["obligations"][-1]["attemptId"], coverage["resolutions"][-1]["attemptId"])
+            with zipfile.ZipFile(finalized) as archive:
+                self.assertEqual(sha256(archive.read(attempt_member(excluded_digest))), excluded_digest)
+            payload = finalized.read_bytes()
+            self.assertEqual(inspect_coverage(payload, expected_sha256=sha256(payload)), result)
+            readback = subprocess.run([sys.executable, "-m", "experiment_compiler", "inspect-coverage",
+                                       str(finalized), "--expected-sha256", sha256(payload)],
+                                      cwd=ROOT, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(readback.stdout), result)
+            profile = subprocess.run([sys.executable, str(ROOT / "scripts/validate_current_ro_profiles.py"),
+                                      str(finalized.with_name(finalized.stem + ".source"))],
+                                     capture_output=True, text=True)
+            self.assertEqual(profile.returncode, 0, profile.stdout + profile.stderr)
+
+    def test_partial_inventory_keeps_denominator_unknown(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            attempt, attempt_id, coverage, _ = self.campaign_fixture(directory)
+            campaign = coverage["campaign"]
+            campaign["inventory"]["scope"] = "partial"
+            del campaign["inventory"]["issued"][0]
+            campaign["inventorySha256"] = sha256(canonical(campaign["inventory"]))
+            del campaign["outcomes"][0]
+            campaign["outcomes"].pop()
+            report, _, _ = self.finalize(directory, attempt, attempt_id, coverage, "partial-campaign")
+            result = report["coverage"]["campaign"]
+            self.assertIsNone(result["campaignDenominator"])
+            self.assertEqual(result["recordedIssuedAttempts"], 3)
+            self.assertEqual(result["unresolvedRetryParents"], ["failed-root"])
+            self.assertEqual(result["attempts"][-1]["status"], "unreported")
+
+    def test_campaign_rejects_invalid_source_and_evidence_relationships(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            attempt, attempt_id, coverage, excluded_digest = self.campaign_fixture(directory)
+            cases = (
+                ("scope-digest", "wrong plan, scope or digest"),
+                ("unaccounted", "unaccounted issued attempts"),
+                ("duplicate-outcome", "unissued or duplicate attempt"),
+                ("duplicate-issuance", "duplicated or beyond"),
+                ("retry", "earlier issued attempt"),
+                ("other-plan", "wrong plan, scope or digest"),
+                ("misbound-output", "exact campaign-attempt output"),
+                ("misbound-package", "ID does not match"),
+                ("cutoff", "outside the issued campaign interval"),
+            )
+            for name, error in cases:
+                with self.subTest(name=name):
+                    invalid = copy.deepcopy(coverage)
+                    campaign = invalid["campaign"]
+                    inventory = campaign["inventory"]
+                    if name == "unaccounted":
+                        campaign["outcomes"].pop()
+                    elif name == "duplicate-outcome":
+                        campaign["outcomes"].append(campaign["outcomes"][0])
+                    elif name == "duplicate-issuance":
+                        inventory["issued"].append(inventory["issued"][0])
+                    elif name == "retry":
+                        inventory["issued"][1]["retryOf"] = "interrupted-root"
+                    elif name == "other-plan":
+                        inventory["planSha256"] = "a" * 64
+                    elif name == "misbound-output":
+                        invalid["resolutions"][-1]["outputSha256"] = "a" * 64
+                    elif name == "misbound-package":
+                        different_digest = sha256(attempt.read_bytes())
+                        (directory / f"{different_digest}.zip").write_bytes(attempt.read_bytes())
+                        campaign["outcomes"][1]["packageSha256"] = different_digest
+                    elif name == "cutoff":
+                        inventory["cutoff"] = inventory["issued"][-1]["issuedAt"]
+                    campaign["inventorySha256"] = "a" * 64 if name == "scope-digest" else sha256(canonical(inventory))
+                    with self.assertRaisesRegex(PackageError, error):
+                        self.finalize(directory, attempt, attempt_id, invalid, name)
+                    self.assertFalse((directory / f"{name}.zip").exists())
+            (directory / f"{excluded_digest}.zip").unlink()
+            with self.assertRaisesRegex(PackageError, "Expected regular file"):
+                self.finalize(directory, attempt, attempt_id, coverage, "missing-campaign-package")
 
 
 if __name__ == "__main__":

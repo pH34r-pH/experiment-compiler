@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 from .assembly import compile_source_closure
+from .campaign_census import attempt_member
 from .core import (MANIFEST, PackageError, bounded_read,
                    canonical, json_value, safe_path, sha256,
                    validate_lifecycle_crate, verify_bytes)
@@ -81,8 +82,19 @@ def finalize_package(parent_package: Path, output: Path, *,
     decision_bytes = _source_text(decision_path, "Decision record")
     review_bytes = _source_text(review_path, "Publication review record")
     coverage_bytes = bounded_read(coverage_path) if coverage_path is not None else None
-    coverage_summary = (assess_coverage(coverage_bytes, parent_bytes, receipt, attempt_id)
-                        if coverage_bytes is not None else None)
+    campaign_packages: dict[str, bytes] = {}
+    coverage_summary = None
+    if coverage_path is not None and coverage_bytes is not None:
+        evidence_dir = coverage_path.parent
+
+        def load_campaign_attempt(digest: str) -> bytes:
+            data = bounded_read(evidence_dir / f"{digest}.zip")
+            campaign_packages[attempt_member(digest)] = data
+            return data
+
+        coverage_summary = assess_coverage(
+            coverage_bytes, parent_bytes, receipt, attempt_id, load_campaign_attempt=load_campaign_attempt,
+        )
 
     temporary = Path(tempfile.mkdtemp(prefix="compiled-experiment-finalization-"))
     try:
@@ -112,7 +124,7 @@ def finalize_package(parent_package: Path, output: Path, *,
         decision_member = "evidence/scientific-decision.md"
         review_member = "evidence/publication-review.md"
         reviewer_id = "#publication-reviewer"
-        reserved = {parent_member, decision_member, review_member}
+        reserved = {parent_member, decision_member, review_member, *campaign_packages}
         coverage_member = "evidence/protocol-coverage.json"
         if coverage_bytes is not None:
             reserved.add(coverage_member)
@@ -130,6 +142,8 @@ def finalize_package(parent_package: Path, output: Path, *,
             _append_part(root, path)
         if coverage_bytes is not None:
             _append_part(root, coverage_member)
+        for name in campaign_packages:
+            _append_part(root, name)
         graph = crate["@graph"]
         graph.extend([
             {"@id": parent_member, "@type": "File", "name": "Exact selected attempt package",
@@ -155,12 +169,16 @@ def finalize_package(parent_package: Path, output: Path, *,
                           "name": "Source-authored protocol coverage",
                           "encodingFormat": "application/json", "sha256": sha256(coverage_bytes),
                           "about": {"@id": selected_id}, PROV + "wasDerivedFrom": {"@id": parent_member}})
+        for name, data in campaign_packages.items():
+            graph.append({"@id": name, "@type": "File", "name": "Exact campaign attempt package",
+                          "encodingFormat": "application/zip", "sha256": sha256(data), "contentSize": len(data)})
         files["ro-crate-metadata.json"] = canonical(crate)
         files[parent_member] = parent_bytes
         files[decision_member] = decision_bytes
         files[review_member] = review_bytes
         if coverage_bytes is not None:
             files[coverage_member] = coverage_bytes
+        files.update(campaign_packages)
         if "experiment.json" in files:
             raise PackageError("Parent package member experiment.json conflicts with the source-owned recipe")
 

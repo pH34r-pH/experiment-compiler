@@ -9,11 +9,10 @@ source-authored comparison inconclusive even when the package verifies.
 
 ## Optional selected-attempt coverage record
 
-Finalization can optionally carry a source-authored coverage record without
-changing historical packages or deciding scientific validity. This first slice
-supports **one selected attempt**. It does not reconcile a campaign inventory,
-retry lineage, protocol amendments or other attempts; its readout labels the
-campaign attempt inventory `unassessed`.
+Finalization can carry a source-authored coverage record alongside the
+scientific decision. The v1 record covers one selected attempt and labels the
+campaign inventory `unassessed`. The optional v2 record adds an issued-attempt
+census, retry lineage, dispositions, and verified outputs from other attempts.
 
 Before execution, the study can include a JSON member in its exact plan. The
 member binds the plan's actual RO-Crate main protocol by path and SHA-256 and
@@ -78,6 +77,45 @@ embedded plan, protocol and coverage links without running package members.
 Packages without a coverage record report `unassessed`; their original bytes
 and identities are unchanged. This opt-in local record is not a new registry or
 an automatic public catalog or publication action.
+
+## Campaign census and cross-attempt observations
+
+Keep the same finalization command and change the coverage schema to
+`compiled-experiment-coverage/v2`. Add a `campaign` object with
+`inventory`, `inventorySha256`, and `outcomes`. Hash the embedded inventory
+with the Compiler's `canonical` JSON encoding. The inventory carries
+`campaignId`, the same `planSha256`, an offset-bearing ISO timestamp
+`cutoff`, a `scope` of `complete` or `partial`, and the `issued` array.
+
+Each issued entry identifies `attemptId`, a study-defined `replicateId`,
+`issuedAt`, and `retryOf`. Use `null` for a root attempt. A retry must link
+to an earlier issuance in the same replicate. The readout reports issued
+attempts, retries and study-defined replicates separately. A complete
+source-declared census requires a disposition for every issued ID. A
+partial census keeps the campaign denominator unknown and exposes any
+recorded attempt with a missing disposition or an unavailable retry parent.
+
+Each outcome contains `attemptId`, `status`, `packageSha256`, and `reason`.
+The selected parent must be `included` at its exact digest, with a `null`
+reason. An included or `measured-excluded` outcome requires a successful
+lifecycle attempt with retained outputs. All non-included outcomes need a
+reason. The source can record `failed`, `interrupted`, `not-admitted`,
+`lost`, or `unknown` with a `null` package digest. A failed outcome can
+also point to a retained failed or timed-out lifecycle attempt.
+
+Place any additional referenced ZIP next to the coverage file as
+`<packageSha256>.zip`. Finalization verifies the exact bytes, runner
+receipt, selected action, plan and timestamps. The added ZIP is retained
+under `evidence/campaign-attempts/` and linked in the final crate. An
+`observed` obligation can reference an exact retained output of an included
+or measured-excluded attempt. Readback validates the same relationships
+using only the final package and its expected digest.
+
+The digest identifies the source census declaration, whose completeness
+depends on the source producer. An interruption recorded without a package
+is a source disposition. Amendments to a frozen protocol still require a
+separate revision and a statement of what outcomes were available at the
+time of the amendment.
 
 `test_source_owned_comparison_failures_remain_integrity_valid_evidence` uses small,
 explicitly illustrative source reports through the existing lifecycle profile. It
