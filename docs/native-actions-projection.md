@@ -3,8 +3,9 @@
 `project-actions` derives an inert controller handoff from independently pinned
 package and profile bytes. It performs no dispatch, asset download, member
 execution, or attempt creation. The result always has `dispatchAuthorized: false`.
-This is preparation for the native runner in #119, not native runner qualification.
-The existing live runner remains container-only.
+This is the offline projection for #119. The `experiment-runner run` CLI uses
+the container adapter. The [trusted controller consumer](#trusted-native-controller-consumer)
+has separate admission and qualification requirements.
 
 ```sh
 python -m experiment_compiler project-actions plan.zip \
@@ -31,8 +32,8 @@ CWL remains the executable specification: one CWL v1.2 `CommandLineTool`, the
 existing restricted CWL/job admission rules, explicit resource and time limits,
 and disabled network access. A source-owned `DockerRequirement` is rejected;
 the projection never translates away a container requirement. CWL and job documents
-are each bounded to 1 MiB before parsing. Package verification and archive size
-limits remain in force.
+are each bounded to 1 MiB before parsing. The projection also checks the full
+package digest and member integrity.
 
 The separately pinned JSON worker profile has exactly these fields:
 

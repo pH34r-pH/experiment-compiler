@@ -34,7 +34,9 @@ Each run produces a separate immutable result package and source closure contain
 
 A revision creates a new prospective plan linked to a selected prior attempt. Finalization attaches source-authored interpretation and review to an exact selected attempt. Neither command invents a conclusion.
 
-Merging a reviewed public package is the publication event; process status alone is not.
+Compiler's protected main-branch deployment serves its reviewed reproduction
+catalog. Compiled Experiments has a separate archival release.
+[Archive handoff](https://github.com/pH34r-pH/experiment-compiler/blob/main/docs/integration-contracts.md#archive-handoff)
 
 See the lifecycle section in [docs/build-recipe.md](https://github.com/pH34r-pH/experiment-compiler/blob/main/docs/build-recipe.md).
 

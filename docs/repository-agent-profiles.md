@@ -1,5 +1,7 @@
 # Repository-agent package profiles
 
+See the [cross-repository contract matrix](integration-contracts.md#contract-matrix) for the corresponding consumer and qualification boundaries.
+
 Issue #150 adds offline projections of the merged Long-Haul repository contracts. The exact source is `pH34r-pH/long-haul@458bc2f1ec669392963b7fe29e4c252e2e70776c`; the five byte-preserved schemas, their SHA-256 pins, and the public-projection helper identity ship under [`experiment_compiler/profiles/`](../experiment_compiler/profiles/). Schema validation uses the optional `repository` extra (`jsonschema==4.25.1`). Ordinary existing packages retain their standard-library-only compiler/verifier path and historical bytes.
 
 The existing manifest's `evidence.repositoryAgent` field declares:

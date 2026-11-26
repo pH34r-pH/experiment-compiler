@@ -50,8 +50,5 @@ This is the same anti-drift principle used throughout the project: compile and d
 
 ## Archive boundary
 
-[pH34r-pH/compiled-experiments](https://github.com/pH34r-pH/compiled-experiments) is a downstream archival release surface, not another research workspace or compiler. It accepts only exact finalized public bytes after the source owner approves disclosure, verifies their digests/receipts/provenance, and preserves them under an immutable release identity. It must not rebuild or execute the artifact.
-
-The reviewed GitHub Release is the explicit human handoff to Zenodo. DOI creation remains outside Experiment Compiler. After Zenodo archives a release, its exact DOI/record identity can be projected back into source/manuscript/article/experiment metadata without creating another status registry.
-
-Cross-repository integration: [compiled-experiments#1](https://github.com/pH34r-pH/compiled-experiments/issues/1).
+Compiled Experiments preserves the reviewed archival copy and release identity.
+[Archive handoff and qualification](https://github.com/pH34r-pH/experiment-compiler/blob/main/docs/integration-contracts.md#archive-handoff)
