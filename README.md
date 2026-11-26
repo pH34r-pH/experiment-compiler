@@ -122,14 +122,9 @@ The Pages build writes `/data/experiments.json` from the discovered authoritativ
 
 ## Archival publication layer
 
-The live reproduction projection and the archival citation record are separate responsibilities.
-
-- **Experiment Compiler / `experiments.tyharbin.com`** owns package identity, lifecycle semantics, static experiment detail pages, and inspect/verify/run guidance.
-- **[pH34r-pH/compiled-experiments](https://github.com/pH34r-pH/compiled-experiments)** receives only exact source-owner-approved finalized public bytes plus their reviewed metadata/receipts. It does not rebuild or execute the package.
-- A reviewed GitHub Release in that archive is the explicit human publication handoff to Zenodo. Zenodo DOI creation is not a Compiler operation.
-- Exact archival release/DOI relations may be projected back into experiment/article metadata after they exist; missing archival metadata does not change package integrity, execution state, or scientific interpretation.
-
-See [compiled-experiments#1](https://github.com/pH34r-pH/compiled-experiments/issues/1) for the cross-repository integration contract.
+Compiler owns package identity and the live reproduction catalog. Compiled
+Experiments preserves the reviewed archival copy and release identity.
+[Cross-repository contracts and archival handoff](docs/integration-contracts.md#archive-handoff)
 
 ## Repository map
 
