@@ -69,6 +69,21 @@ def _frozen(plan_bytes, binding):
     return result
 
 
+def _check_observed_output(item, receipts, *, campaign):
+    observed_attempt = item["attemptId"]
+    receipt = receipts.get(observed_attempt) if isinstance(observed_attempt, str) else None
+    if receipt is None:
+        if campaign:
+            raise PackageError("Observed coverage does not identify a verified measured campaign attempt")
+        raise PackageError("Observed coverage references a different attempt")
+    path = safe_path(item["outputPath"])
+    outputs = [out for out in receipt.get("outputs", []) if isinstance(out, dict) and out.get("@id") == path]
+    if len(outputs) != 1 or outputs[0].get("sha256") != item["outputSha256"]:
+        owner = "campaign-attempt" if campaign else "selected-attempt"
+        raise PackageError(f"Observed coverage does not reference an exact {owner} output")
+    _text(item["finding"], "Source-authored finding")
+
+
 def _resolution(item, obligations, receipts, *, campaign):
     if not isinstance(item, dict):
         raise PackageError("Coverage resolution must be an object")
@@ -83,20 +98,29 @@ def _resolution(item, obligations, receipts, *, campaign):
         raise PackageError("Coverage resolution references an unknown obligation")
     if status in {"omitted", "pending"}:
         _text(item["reason"], "Omission or pending reason")
-    elif status == "observed":
-        observed_attempt = item["attemptId"]
-        receipt = receipts.get(observed_attempt) if isinstance(observed_attempt, str) else None
-        if receipt is None:
-            if campaign:
-                raise PackageError("Observed coverage does not identify a verified measured campaign attempt")
-            raise PackageError("Observed coverage references a different attempt")
-        path = safe_path(item["outputPath"])
-        outputs = [out for out in receipt.get("outputs", []) if isinstance(out, dict) and out.get("@id") == path]
-        if len(outputs) != 1 or outputs[0].get("sha256") != item["outputSha256"]:
-            owner = "campaign-attempt" if campaign else "selected-attempt"
-            raise PackageError(f"Observed coverage does not reference an exact {owner} output")
-        _text(item["finding"], "Source-authored finding")
+    else:
+        _check_observed_output(item, receipts, campaign=campaign)
     return identifier
+
+
+def _obligation_readout(entries, obligations, receipts, *, campaign):
+    if not isinstance(entries, list):
+        raise PackageError("Coverage resolutions must be an array")
+    resolved = {}
+    for item in entries:
+        identifier = _resolution(item, obligations, receipts, campaign=campaign)
+        if identifier in resolved:
+            raise PackageError("Coverage resolution ID is duplicated")
+        resolved[identifier] = item
+    readout = []
+    for identifier, obligation in obligations.items():
+        item = resolved.get(identifier)
+        entry = {"id": identifier, "role": obligation["role"], "applicability": obligation["applicability"],
+                 "status": "unreported" if item is None else item["status"]}
+        if item is not None:
+            entry.update({key: value for key, value in item.items() if key not in {"id", "status"}})
+        readout.append(entry)
+    return readout
 
 
 def assess_coverage(
@@ -129,23 +153,7 @@ def assess_coverage(
             record["campaign"], plan_sha256=receipt["planPackageSha256"], selected_id=attempt_id,
             selected_sha256=sha256(parent_bytes), selected_receipt=receipt, loader=load_campaign_attempt,
         )
-    entries = record["resolutions"]
-    if not isinstance(entries, list):
-        raise PackageError("Coverage resolutions must be an array")
-    resolved = {}
-    for item in entries:
-        identifier = _resolution(item, obligations, receipts, campaign=has_campaign)
-        if identifier in resolved:
-            raise PackageError("Coverage resolution ID is duplicated")
-        resolved[identifier] = item
-    readout = []
-    for identifier, obligation in obligations.items():
-        item = resolved.get(identifier)
-        entry = {"id": identifier, "role": obligation["role"], "applicability": obligation["applicability"],
-                 "status": "unreported" if item is None else item["status"]}
-        if item is not None:
-            entry.update({key: value for key, value in item.items() if key not in {"id", "status"}})
-        readout.append(entry)
+    readout = _obligation_readout(record["resolutions"], obligations, receipts, campaign=has_campaign)
     statuses = [item["status"] for item in readout]
     result = {"obligations": readout, "sourceAccountedFor": all(s in {"observed", "omitted"} for s in statuses),
               "sourceReportedObservedAsPlanned": all(s == "observed" for s in statuses),
