@@ -19,6 +19,6 @@ def seconds_to_cwl_limit(value: int | float) -> int:
     """Convert a positive time budget to CWL ToolTimeLimit seconds, rounding up."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise PackageError("A CWL time limit must be numeric; unknown is not zero")
-    if not math.isfinite(value) or value <= 0:
+    if value <= 0 or (isinstance(value, float) and not math.isfinite(value)):
         raise PackageError("A CWL time limit must be finite and positive")
     return math.ceil(value)

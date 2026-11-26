@@ -6,7 +6,9 @@ import sys
 import tempfile
 import unittest
 import uuid
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, canonical, compile_package, json_value, load_recipe, verify_bytes
@@ -17,6 +19,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _new_container_journal, _container_present, _validate_recovery_worker,
                                         _engine_image_reference_matches,
                                         _admit_container_requirement, _persist_attempt_receipt,
+                                        _dependency_closure, _worker_admission,
                                         _write_container_journal, _journal_receipt_reference,
                                         _augment_result_crate,
                                         recover_attempt, run_package)
@@ -958,25 +961,79 @@ class RunnerBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(PackageError, "outside the declared tmpfs"):
                     _require_bounded_tmpfs(path, root, 64)
 
-    def test_tmpfs_admission_accepts_backing_capacity_at_or_above_declared_limit(self):
+    @unittest.skipUnless(os.name == "posix", "tmpfs mount contract is Linux-specific")
+    def test_scratch_admission_requires_a_dedicated_exactly_bounded_mount(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "attempt"
             path.mkdir()
-            for total in (64, 512):
-                with patch("experiment_compiler.runner.shutil.disk_usage", return_value=type(
-                        "DiskUsage", (), {"total": total * 1024 * 1024})()):
+            mountinfo = f"20 1 0:1 / {root} rw,relatime - tmpfs tmpfs rw,size={64 * MIB}"
+            with patch.object(Path, "read_text", return_value=mountinfo), \
+                    patch("experiment_compiler.runner.shutil.disk_usage") as usage:
+                usage.return_value = SimpleNamespace(total=64 * MIB)
+                _require_bounded_tmpfs(path, root, 64)
+                for total in (63, 512):
+                    with self.subTest(total=total), self.assertRaisesRegex(PackageError, "declared worker scratch cap"):
+                        usage.return_value = SimpleNamespace(total=total * MIB)
+                        _require_bounded_tmpfs(path, root, 64)
+            for invalid in ("", mountinfo.replace("tmpfs tmpfs", "ext4 /dev/fake"), f"{mountinfo}\n{mountinfo}"):
+                with self.subTest(mountinfo=invalid), patch.object(Path, "read_text", return_value=invalid), \
+                        self.assertRaisesRegex(PackageError, "dedicated tmpfs"):
                     _require_bounded_tmpfs(path, root, 64)
 
-    def test_tmpfs_admission_rejects_backing_capacity_below_declared_limit(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            path = root / "attempt"
-            path.mkdir()
-            with patch("experiment_compiler.runner.shutil.disk_usage", return_value=type(
-                    "DiskUsage", (), {"total": 63 * 1024 * 1024})()):
-                with self.assertRaisesRegex(PackageError, "below the declared worker limit"):
-                    _require_bounded_tmpfs(path, root, 64)
+    def test_local_closure_requires_explicit_classifications_of_runtime_files(self):
+        classes = {"embedded": [{"path": "data.csv"}], "external": [], "unavailable": []}
+        closure = {"classifications": classes, "runtimeNetworkRequired": False}
+        payload = {"ro-crate-metadata.json": b"{}", "data.csv": b"x\n",
+                   "dependency-closure.json": canonical(closure)}
+        self.assertEqual(_dependency_closure(payload), closure)
+        for field, invalid in (
+            ("unavailable", None), ("unavailable", {}), ("unavailable", [{"item": "missing"}]),
+            ("external", None), ("external", {}), ("external", [{"item": "remote", "sha256": "a" * 64}]),
+            ("embedded", None), ("embedded", [{"path": "absent"}]),
+        ):
+            payload["dependency-closure.json"] = canonical({**closure, "classifications": {**classes, field: invalid}})
+            with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(PackageError, "execution deferred"):
+                _dependency_closure(payload)
+
+    def test_worker_refuses_runner_wall_time_above_approved_limit(self):
+        source = ROOT / "examples/linear-regression-plan-v1/source"
+        payload = {f"experiment/{path.name}": path.read_bytes() for path in source.iterdir() if path.is_file()}
+        runner = json_value((source / "runner.json").read_bytes())
+        limits = {"cores": 1, "ramMiB": 64, "tmpdirMiB": 64, "outdirMiB": 64, "wallSeconds": 120}
+        environment = {"EXPERIMENT_RUNNER_SANDBOX": "fixture", "EXPERIMENT_RUNNER_WORKER_IMAGE": "fixture",
+                       "EXPERIMENT_RUNNER_RESOURCE_LIMITS": canonical(limits).decode(),
+                       "EXPERIMENT_RUNNER_TMPFS_ROOT": "fixture"}
+        with patch.dict(os.environ, environment):
+            _worker_admission(payload, {**runner, "maxWallSeconds": 120})
+            with self.assertRaisesRegex(PackageError, "runner wall budget exceeds"):
+                _worker_admission(payload, {**runner, "maxWallSeconds": 121})
+
+    def test_cwl_resource_ranges_require_supported_explicit_finite_values(self):
+        import yaml
+
+        source = ROOT / "examples/linear-regression-plan-v1/source"
+        baseline = yaml.safe_load((source / "workflow.cwl").read_text())
+        requirements = baseline["requirements"]
+        image = requirements["DockerRequirement"]["dockerPull"]
+        limits = {"cores": 1, "ramMiB": 64, "tmpdirMiB": 64, "outdirMiB": 64, "wallSeconds": 120}
+        for field in requirements["ResourceRequirement"]:
+            for invalid in (None, "unknown", 0, -1, True, float("inf"), 10**400):
+                workflow = deepcopy(baseline)
+                workflow["requirements"]["ResourceRequirement"][field] = invalid
+                with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(PackageError, "CWL .*worker limit"):
+                    _admit_workflow(workflow, limits, image)
+            workflow = deepcopy(baseline)
+            del workflow["requirements"]["ResourceRequirement"][field]
+            with self.subTest(missing=field), self.assertRaisesRegex(PackageError, "incomplete resource/time fields"):
+                _admit_workflow(workflow, limits, image)
+        requirements["ResourceRequirement"].update(coresMin=0.25, coresMax=0.5)
+        _admit_workflow(baseline, limits, image)
+        for location in ("requirements", "hints"):
+            workflow = deepcopy(baseline)
+            workflow.setdefault(location, {})["cwltool:CUDARequirement"] = {"cudaDeviceCountMin": 1}
+            with self.subTest(location=location), self.assertRaisesRegex(PackageError, "unsupported CWL|CWL hints"):
+                _admit_workflow(workflow, limits, image)
 
     def test_workflow_admission_allows_literal_arguments_and_rejects_other_expressions(self):
         import yaml

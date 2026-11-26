@@ -37,6 +37,7 @@ with zipfile.ZipFile(Path(os.environ["PACKAGE_PATH"])) as archive:
     assert details["outputs"]
     assert details["workerContext"]["reportedImageId"].startswith("sha256:")
     assert "NetworkAccess=false" in details["workerContext"]["reportedSandbox"]
+    assert details["scratchStorage"] == {"enforcement": "dedicated-mounted-tmpfs", "capMiB": 64}
     assert details["containerJournal"]["availability"] == "private-store"
     assert len(details["containerJournal"]["sha256"]) == 64
     assert details["containerJournal"]["storePath"].endswith(details["containerJournal"]["sha256"] + ".json")
