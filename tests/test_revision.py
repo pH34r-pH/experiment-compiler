@@ -14,7 +14,7 @@ from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
 from experiment_compiler.runner import run_package
-from runner_fixture_helpers import prepare_container_journal
+from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,6 +55,7 @@ class RevisionTests(unittest.TestCase):
                 "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                 "TMPDIR": str(directory),
         }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
+                patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation), \
                 patch("experiment_compiler.runner.importlib.metadata.version",
                       return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._new_container_journal",

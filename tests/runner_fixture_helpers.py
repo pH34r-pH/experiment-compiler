@@ -1,7 +1,14 @@
 """Shared fake runner evidence for lifecycle tests; never contacts an engine."""
 
+from fractions import Fraction
+
 from experiment_compiler.core import canonical
 from experiment_compiler.runner import _persist_attempt_receipt, sha256_bytes
+from experiment_compiler.worker_limits import ObservedWorker
+
+
+def synthetic_worker_observation(_approval):
+    return ObservedWorker(Fraction(1), 64 * 1024 * 1024, 128), {"observationSource": "synthetic fixture"}
 
 
 def prepare_container_journal(attempt_directory, attempt_id, config):

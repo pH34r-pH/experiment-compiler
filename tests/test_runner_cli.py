@@ -38,7 +38,7 @@ CONTROLLER = textwrap.dedent("""\
     from pathlib import Path
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
-    from runner_fixture_helpers import prepare_container_journal
+    from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     worker = sys.argv[2]
@@ -63,6 +63,7 @@ CONTROLLER = textwrap.dedent("""\
                 '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
             "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
+            patch.object(runner, "observe_worker", side_effect=synthetic_worker_observation), \\
             patch.object(runner, "_require_bounded_tmpfs"), \\
             patch.object(runner, "_runner_config", side_effect=configure), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
@@ -75,7 +76,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     from pathlib import Path
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
-    from runner_fixture_helpers import prepare_container_journal
+    from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
     from experiment_compiler import runner, runner_cli
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
@@ -113,6 +114,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
                 '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
             "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
     }), patch.object(runner.importlib.metadata, "version", return_value="3.2.20260720092025"), \\
+            patch.object(runner, "observe_worker", side_effect=synthetic_worker_observation), \\
             patch.object(runner, "_execute_cwl", side_effect=execute), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(Path, "replace", new=pause_receipt):

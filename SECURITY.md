@@ -13,3 +13,10 @@ Limits include the manifest and typed metadata. Python reads ZIP directory recor
 before the member-count check, and JSON text and Python objects require additional
 memory beyond the encoded bytes. A large or costly archive may still require a
 separate process with controlled memory, CPU, and time limits.
+
+The local CWL runner verifies current cgroup v2 bounds under a trusted launcher
+and host. The observation covers the visible hierarchy and the process sampled
+at admission. A privileged host can change those controls after observation.
+Fleet qualification must independently establish launcher, host, and any
+container-backed worker identity. Workflow-image checks and tool network policy
+cover the inner CWL execution boundary.

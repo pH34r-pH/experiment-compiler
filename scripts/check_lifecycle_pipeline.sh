@@ -9,18 +9,31 @@ sudo mkdir -p "$OUTPUT_TMPFS_ROOT"
 sudo mount -t tmpfs -o size=64m,mode=1777 tmpfs "$OUTPUT_TMPFS_ROOT"
 sudo chown "$(id -u):$(id -g)" "$OUTPUT_TMPFS_ROOT"
 TOOL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' 'python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3')"
+
+run_cwl_fixture() {
+  local unit="experiment-compiler-worker-$1-$$.service"
+  local parameters="$2" output_tmpfs="${3:-}" approval
+  approval="$(jq -nc --arg unit "$unit" '{profile:"systemd-cgroup-v2-cwl-v1",unit:$unit,cpuQuotaMicros:100000,cpuPeriodMicros:100000,memoryBytes:536870912,tasks:128}')"
+  sudo -n systemd-run --quiet --wait --pipe --collect \
+    --unit="$unit" --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
+    --property=CPUQuota=100% --property=MemoryMax=512M --property=TasksMax=128 \
+    --setenv="PATH=$PATH" --setenv="LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" \
+    --setenv="EXPERIMENT_RUNNER_WORKER_ENVELOPE=$approval" \
+    --setenv="EXPERIMENT_RUNNER_WORKER_IMAGE=$TOOL_IMAGE_ID" \
+    --setenv='EXPERIMENT_RUNNER_SANDBOX=cwltool DockerExecutor; NetworkAccess=false; dedicated CWL scratch tmpfs' \
+    --setenv='EXPERIMENT_RUNNER_RESOURCE_LIMITS={"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
+    --setenv="EXPERIMENT_RUNNER_TMPFS_ROOT=$TMPFS_ROOT" \
+    --setenv="EXPERIMENT_RUNNER_OUTPUT_TMPFS_ROOT=$output_tmpfs" \
+    --setenv="TMPDIR=$TMPFS_ROOT" --setenv="COMPONENT_PARAMETERS=$parameters" \
+    "$(command -v python)" scripts/lifecycle_component.py execute
+}
+
 for experiment_id in linear-regression-plan-v1 linear-regression-frozen-lifecycle-v1; do
   output_dir="$RUNNER_TEMP/runner-output/$experiment_id"
   mkdir -p "$output_dir"
   PLAN_SHA256="$(cut -d ' ' -f 1 "$RUNNER_TEMP/$experiment_id.plan.sha256")"
-  EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
-  EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
-  EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
-  EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
-  EXPERIMENT_RUNNER_OUTPUT_TMPFS_ROOT="$OUTPUT_TMPFS_ROOT" \
-  TMPDIR="$TMPFS_ROOT" \
-    COMPONENT_PARAMETERS="$(jq -nc --arg package "$RUNNER_TEMP/$experiment_id.plan.zip" --arg output "$output_dir/result.zip" --arg digest "$PLAN_SHA256" '{package:$package,output:$output,"expected-sha256":$digest,"allow-workflow-execution":true}')" \
-    python scripts/lifecycle_component.py execute
+  parameters="$(jq -nc --arg package "$RUNNER_TEMP/$experiment_id.plan.zip" --arg output "$output_dir/result.zip" --arg digest "$PLAN_SHA256" '{package:$package,output:$output,"expected-sha256":$digest,"allow-workflow-execution":true}')"
+  run_cwl_fixture "$experiment_id" "$parameters" "$OUTPUT_TMPFS_ROOT"
   sha256sum -c "$RUNNER_TEMP/$experiment_id.plan.sha256"
   python -m experiment_compiler verify "$output_dir/result.zip" --recipe "$output_dir/result.source/experiment.json"
   python scripts/validate_current_ro_profiles.py "$output_dir/result.source"
@@ -38,6 +51,10 @@ with zipfile.ZipFile(Path(os.environ["PACKAGE_PATH"])) as archive:
     assert details["workerContext"]["reportedImageId"].startswith("sha256:")
     assert "NetworkAccess=false" in details["workerContext"]["reportedSandbox"]
     assert details["scratchStorage"] == {"enforcement": "dedicated-mounted-tmpfs", "capMiB": 64}
+    outer = details["workerContext"]["outerWorker"]
+    assert outer["profile"] == "systemd-cgroup-v2-cwl-v1"
+    assert outer["observedOuterLimits"] == {"cpuCores": {"numerator": 1, "denominator": 1}, "memoryBytes": 536870912, "tasks": 128}
+    assert outer["outerImage"]["status"] == "unavailable"
     assert details["containerJournal"]["availability"] == "private-store"
     assert len(details["containerJournal"]["sha256"]) == 64
     assert details["containerJournal"]["storePath"].endswith(details["containerJournal"]["sha256"] + ".json")
@@ -78,13 +95,8 @@ PY
     python -m experiment_compiler verify "$revision_package" \
       --recipe "$revision_package_source/experiment.json"
     REVISION_SHA256="$(sha256sum "$revision_package" | cut -d ' ' -f 1)"
-    EXPERIMENT_RUNNER_WORKER_IMAGE="$TOOL_IMAGE_ID" \
-    EXPERIMENT_RUNNER_SANDBOX='cwltool DockerExecutor; NetworkAccess=false; strict CPU/RAM; dedicated 64 MiB tmpfs' \
-    EXPERIMENT_RUNNER_RESOURCE_LIMITS='{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}' \
-    EXPERIMENT_RUNNER_TMPFS_ROOT="$TMPFS_ROOT" \
-    TMPDIR="$TMPFS_ROOT" \
-      COMPONENT_PARAMETERS="$(jq -nc --arg package "$revision_package" --arg output "$revision_attempt" --arg digest "$REVISION_SHA256" '{package:$package,output:$output,"expected-sha256":$digest,"allow-workflow-execution":true}')" \
-      python scripts/lifecycle_component.py execute
+    parameters="$(jq -nc --arg package "$revision_package" --arg output "$revision_attempt" --arg digest "$REVISION_SHA256" '{package:$package,output:$output,"expected-sha256":$digest,"allow-workflow-execution":true}')"
+    run_cwl_fixture linear-regression-plan-v2 "$parameters"
     python -m experiment_compiler verify "$revision_attempt" \
       --recipe "$revision_attempt_source/experiment.json"
     python -m experiment_compiler catalog "$revision_attempt_source" \

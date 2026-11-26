@@ -24,7 +24,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
-from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt
+from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -33,6 +33,9 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 
 class RunnerBoundaryTests(unittest.TestCase):
     def setUp(self):
+        worker = patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation)
+        worker.start()
+        self.addCleanup(worker.stop)
         self.process_identity_patch = patch(
             "experiment_compiler.runner._cwl_process_identity",
             return_value={"pid": 98765, "bootId": "fixture", "processStartTicks": "1",
