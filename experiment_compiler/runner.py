@@ -25,12 +25,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Container
 import zipfile
 
 from .archive_policy import PackageReadPolicy
-from .core import (MANIFEST, PackageError, bounded_read, canonical, compile_package,
-                   json_value, safe_path, verify_bytes)
+from .core import (MANIFEST, PackageError, _verify_file_stream, bounded_read, canonical,
+                   compile_package, json_value, safe_path, sha256_file, verify_bytes)
 from .worker_limits import observe_worker
 
 
@@ -39,6 +39,10 @@ _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _ENGINE_IMAGE_ID = re.compile(r"(?:sha256:)?([0-9a-fA-F]{64})\Z")
 _MAX_ATTEMPT_CONTAINERS = 64
 _MAX_RECOVERY_AGE_SECONDS = 7 * 24 * 60 * 60
+_ADMISSION_MEMBERS = ("dependency-closure.json", "ro-crate-metadata.json", "experiment/runner.json",
+                      "experiment/workflow.cwl", "experiment/job.yml")
+_WORKFLOW_MEMBERS = ("experiment/workflow.cwl", "experiment/job.yml")
+_MemberSource = bytes | Path | zipfile.Path
 
 
 def _read_package(data: bytes, expected_sha256: str,
@@ -52,7 +56,34 @@ def _read_package(data: bytes, expected_sha256: str,
     return manifest, payload
 
 
-def _dependency_closure(payload: dict[str, bytes]) -> dict:
+@dataclass(frozen=True)
+class _VerifiedRunPackage:
+    snapshot: Path
+    manifest: dict
+    admission: dict[str, bytes]
+    members: dict[str, zipfile.Path]
+
+
+@contextmanager
+def _open_run_package(package: Path, snapshot: Path, expected_sha256: str,
+                      policy: PackageReadPolicy | None):
+    if package.is_symlink() or not package.is_file():
+        raise PackageError(f"Expected regular package file: {package}")
+    with snapshot.open("xb+") as retained:
+        with package.open("rb") as source:
+            shutil.copyfileobj(source, retained, length=1024 * 1024)
+        verified = _verify_file_stream(retained, expected_sha256=expected_sha256, policy=policy)
+        if verified["profile"] != "compiled-experiment-lifecycle-v1":
+            raise PackageError("runner accepts only compiled-experiment-lifecycle-v1 plans and result artifacts")
+        retained.seek(0)
+        with zipfile.ZipFile(retained) as archive:
+            manifest = json_value(archive.read(MANIFEST))
+            members = {name: zipfile.Path(archive, at=name) for name in archive.namelist() if name != MANIFEST}
+            admission = {name: archive.read(name) for name in _ADMISSION_MEMBERS if name in members}
+            yield _VerifiedRunPackage(snapshot, manifest, admission, members)
+
+
+def _dependency_closure(payload: dict[str, bytes], member_names: Container[str] | None = None) -> dict:
     for required in ("dependency-closure.json", "ro-crate-metadata.json"):
         if required not in payload:
             raise PackageError(f"execution admission requires packaged {required}")
@@ -68,8 +99,9 @@ def _dependency_closure(payload: dict[str, bytes]) -> dict:
     if classes.get("external") != []:
         raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
     embedded = classes.get("embedded")
+    names = payload if member_names is None else member_names
     if not isinstance(embedded, list) or any(
-        not isinstance(member, dict) or safe_path(member.get("path")) not in payload for member in embedded
+        not isinstance(member, dict) or safe_path(member.get("path")) not in names for member in embedded
     ):
         raise PackageError("execution deferred: embedded dependencies must name packaged files")
     if closure.get("runtimeNetworkRequired") is not False:
@@ -98,7 +130,8 @@ def _runner_config(payload: dict[str, bytes]) -> dict:
     return runner
 
 
-def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, str, set[str]]:
+def _worker_admission(payload: dict[str, bytes], runner: dict,
+                      member_names: Container[str] | None = None) -> tuple[dict, str, set[str]]:
     workflow = payload["experiment/workflow.cwl"]
     if len(workflow) > 1024 * 1024:
         raise PackageError("CWL workflow exceeds the execution admission size limit")
@@ -124,18 +157,18 @@ def _worker_admission(payload: dict[str, bytes], runner: dict) -> tuple[dict, st
         job_document = yaml.safe_load(payload["experiment/job.yml"])
     except (ValueError, yaml.YAMLError) as exc:
         raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
-    _admit_job(job_document, payload, input_ids)
+    job_members = _admit_job(job_document, payload if member_names is None else member_names, input_ids)
     worker, observation = observe_worker(os.environ.get("EXPERIMENT_RUNNER_WORKER_ENVELOPE"))
     resources = workflow_document["requirements"]["ResourceRequirement"]
     worker.check_workload(resources["coresMax"], resources["ramMax"])
-    return {**limits, "workerObservation": observation}, tmpfs_root, input_ids
+    return {**limits, "workerObservation": observation}, tmpfs_root, job_members
 
 
-def _admit(payload: dict[str, bytes]) -> tuple[dict, dict, dict, str]:
-    closure = _dependency_closure(payload)
+def _admit(payload: dict[str, bytes], members: Container[str]) -> tuple[dict, dict, dict, str, set[str]]:
+    closure = _dependency_closure(payload, members)
     runner = _runner_config(payload)
-    limits, tmpfs_root, _ = _worker_admission(payload, runner)
-    return closure, runner, limits, tmpfs_root
+    limits, tmpfs_root, job_members = _worker_admission(payload, runner, members)
+    return closure, runner, limits, tmpfs_root, job_members
 
 
 def _finite_number(value: Any) -> bool:
@@ -287,7 +320,7 @@ def _values_for_key(value: Any, key: str, _seen: set[int] | None = None) -> list
     return found
 
 
-def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None:
+def _admit_job(job: Any, members: Container[str], input_ids: set[str]) -> set[str]:
     if not isinstance(job, dict):
         raise PackageError("execution admission requires a mapping CWL job document")
     if any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in job):
@@ -324,6 +357,7 @@ def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None
                 walk(child, seen)
 
     walk(job, set())
+    job_members = set()
     for item in files:
         path = item.get("path")
         if set(item) - {"class", "path", "basename", "format"} or not isinstance(path, str):
@@ -332,8 +366,11 @@ def _admit_job(job: Any, payload: dict[str, bytes], input_ids: set[str]) -> None
             relative = safe_path(path)
         except PackageError as exc:
             raise PackageError("execution deferred: unsafe job File path") from exc
-        if f"experiment/{relative}" not in payload:
+        member = f"experiment/{relative}"
+        if member not in members:
             raise PackageError(f"execution deferred: job File input is not embedded: {relative}")
+        job_members.add(member)
+    return job_members
 
 
 def _is_document_reference_key(key: Any) -> bool:
@@ -346,12 +383,16 @@ def _is_document_reference_key(key: Any) -> bool:
                ("run", "import", "include", "schemas", "graph", "base", "tool", "overrides"))
 
 
-def _materialize(root: Path, payload: dict[str, bytes]) -> None:
+def _materialize(root: Path, payload: dict[str, _MemberSource]) -> None:
     for relative, data in payload.items():
         safe_path(relative)
         target = root.joinpath(*relative.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        if isinstance(data, bytes):
+            target.write_bytes(data)
+        else:
+            with data.open("rb") as source, target.open("wb") as destination:
+                shutil.copyfileobj(source, destination, length=1024 * 1024)
 
 
 def _run_command(request: _CwlCommandRequest) -> list[str]:
@@ -524,7 +565,7 @@ class _CwlExecutionPaths:
 @dataclass
 class _CwlExecutionRequest:
     temporary: Path
-    payload: dict[str, bytes]
+    payload: dict[str, _MemberSource]
     runner: dict
     limits: dict
     tmpfs_root: str
@@ -548,9 +589,8 @@ class _AttemptExecution:
     output: Path
     source_directory: Path
     attempt_directory: Path
-    payload: dict[str, bytes]
-    manifest: dict
-    package_bytes: bytes
+    package: _VerifiedRunPackage
+    job_members: set[str]
     expected_sha256: str
     closure: dict
     runner: dict
@@ -1482,19 +1522,19 @@ def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
     }
 
 
-def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_sha256: str,
+def _attempt_evidence(package: _VerifiedRunPackage, expected_sha256: str,
                       closure: dict, runner: dict, execution: dict,
-                      timing: dict) -> tuple[dict[str, bytes], str, list[str]]:
+                      timing: dict) -> tuple[dict[str, _MemberSource], str, list[str]]:
     created = timing["created"]
     ended = timing["ended"]
     elapsed = timing["elapsed"]
     run_id = hashlib.sha256((expected_sha256 + created.isoformat()).encode()).hexdigest()[:12]
     evidence_root = f"evidence/attempts/{run_id}"
-    augmented = dict(payload)
+    augmented: dict[str, _MemberSource] = {**package.members, **package.admission}
     plan_archive = f"{evidence_root}/plan-package.zip"
     output_files = execution["outputs"]
     provenance_files = execution["provenance"]
-    augmented[plan_archive] = package_bytes
+    augmented[plan_archive] = package.snapshot
     augmented.update({f"{evidence_root}/{name}": value for name, value in output_files.items()})
     augmented.update({
         f"{evidence_root}/workflow-run/{name}": value
@@ -1511,10 +1551,10 @@ def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_
         "attemptId": run_id,
         "planPackageSha256": expected_sha256,
         "planPackageArchive": {
-            "@id": plan_archive, "sha256": expected_sha256, "contentSize": len(package_bytes),
+            "@id": plan_archive, "sha256": expected_sha256, "contentSize": package.snapshot.stat().st_size,
         },
-        "workflowSha256": sha256_bytes(payload["experiment/workflow.cwl"]),
-        "jobSha256": sha256_bytes(payload["experiment/job.yml"]),
+        "workflowSha256": sha256_bytes(package.admission["experiment/workflow.cwl"]),
+        "jobSha256": sha256_bytes(package.admission["experiment/job.yml"]),
         "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
         **_attempt_receipt_runtime(runner, execution),
         "exitCode": execution["returnCode"],
@@ -1537,7 +1577,7 @@ def _attempt_evidence(payload: dict[str, bytes], package_bytes: bytes, expected_
     return augmented, run_id, attempt_members
 
 
-def _augment_result_crate(augmented: dict[str, bytes], expected_sha256: str, run_id: str,
+def _augment_result_crate(augmented: dict[str, _MemberSource], expected_sha256: str, run_id: str,
                           attempt_members: list[str], created: datetime, ended: datetime,
                           execution: dict) -> tuple[str, str]:
     crate = json_value(augmented["ro-crate-metadata.json"])
@@ -1608,13 +1648,14 @@ def _augment_result_crate(augmented: dict[str, bytes], expected_sha256: str, run
     return experiment_id, title
 
 
-def _compile_attempt_result(temporary: Path, output: Path, source_directory: Path,
-                            augmented: dict[str, bytes], manifest: dict, expected_sha256: str,
-                            run_id: str, experiment_id: str, title: str, execution: dict) -> dict:
-    stage = temporary / "result-source"
-    _materialize(stage, augmented)
-    recipe_path = stage / "experiment.json"
-    recipe = {
+def _attempt_recipe(stage: Path, state: _AttemptExecution, augmented: dict[str, _MemberSource],
+                    run_id: str, experiment_id: str, title: str) -> dict:
+    manifest = state.package.manifest
+    members = []
+    for name in sorted(augmented):
+        path = stage.joinpath(*name.split("/"))
+        members.append({"source": name, "path": name, "sha256": sha256_file(path), "size": path.stat().st_size})
+    return {
         "buildRecipeVersion": 1,
         "id": f"{experiment_id[:60]}-attempt-{run_id}",
         "title": f"{title} — attempt {run_id}",
@@ -1625,22 +1666,27 @@ def _compile_attempt_result(temporary: Path, output: Path, source_directory: Pat
             "profile": "compiled-experiment-lifecycle-v1",
             "source": manifest["source"],
             "standards": manifest["standards"],
-            "evidence": {"planPackageSha256": expected_sha256, "attemptId": run_id},
+            "evidence": {"planPackageSha256": state.expected_sha256, "attemptId": run_id},
         },
-        "members": [
-            {"source": name, "path": name, "sha256": sha256_bytes(content), "size": len(content)}
-            for name, content in sorted(augmented.items())
-        ],
+        "members": members,
     }
-    recipe_path.write_bytes(canonical(recipe))
+
+
+def _compile_attempt_result(state: _AttemptExecution, augmented: dict[str, _MemberSource],
+                            run_id: str, experiment_id: str, title: str, execution: dict) -> dict:
+    output, source_directory = state.output, state.source_directory
     # Prepare the ZIP before exposing either publication destination. Claim
     # destinations exclusively and remove only paths owned by this attempt if
     # publishing the retained source or package fails.
-    # The result ZIP can be large and the runner's private temp tree is the
-    # worker-bounded tmpfs. Stage the package beside its publication target so
-    # ZIP assembly and the immutable copy do not consume that scratch budget.
+    # Stage the source and ZIP beside their destination. Only the workflow's
+    # declared files and execution state belong on the bounded worker tmpfs.
     with tempfile.TemporaryDirectory(prefix=".compiled-experiment-result-", dir=output.parent) as package_temp:
-        prepared_package = Path(package_temp) / "result.zip"
+        publication_stage = Path(package_temp)
+        stage = publication_stage / "result-source"
+        _materialize(stage, augmented)
+        recipe_path = stage / "experiment.json"
+        recipe_path.write_bytes(canonical(_attempt_recipe(stage, state, augmented, run_id, experiment_id, title)))
+        prepared_package = publication_stage / "result.zip"
         result = compile_package(recipe_path, prepared_package)
         source_identity = None
         output_identity = None
@@ -1819,11 +1865,13 @@ def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: di
 
 
 def _run_retained_attempt(state: _AttemptExecution) -> dict:
+    runtime_payload: dict[str, _MemberSource] = {name: state.package.members[name] for name in state.job_members}
+    runtime_payload.update({name: state.package.admission[name] for name in _WORKFLOW_MEMBERS})
     with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary_value:
         temporary = Path(temporary_value)
         try:
             execution = _execute_cwl(_CwlExecutionRequest(
-                temporary, state.payload, state.runner, state.limits, state.tmpfs_root,
+                temporary, runtime_payload, state.runner, state.limits, state.tmpfs_root,
                 (state.attempt_directory, state.journal, state.receipt),
             ))
             execution["workerObservation"] = state.limits["workerObservation"]
@@ -1836,8 +1884,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             timing = {"created": state.created, "ended": ended,
                       "elapsed": time.monotonic() - state.started}
             augmented, run_id, attempt_members = _attempt_evidence(
-                state.payload, state.package_bytes, state.expected_sha256,
-                state.closure, state.runner, execution, timing,
+                state.package, state.expected_sha256, state.closure, state.runner, execution, timing,
             )
             archived_receipt = json_value(augmented[state.receipt_key])
             state.receipt.update({key: value for key, value in archived_receipt.items()
@@ -1853,10 +1900,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
                 augmented, state.expected_sha256, run_id, attempt_members,
                 state.created, ended, execution,
             )
-            result = _compile_attempt_result(
-                temporary, state.output, state.source_directory, augmented, state.manifest,
-                state.expected_sha256, run_id, experiment_id, title, execution,
-            )
+            result = _compile_attempt_result(state, augmented, run_id, experiment_id, title, execution)
         except (Exception, KeyboardInterrupt) as exc:
             with _defer_operator_signals(exc):
                 _retain_failed_attempt(state.attempt_directory, temporary, state.receipt, state.started, exc)
@@ -1864,6 +1908,8 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
         with _defer_operator_signals():
             _persist_attempt_receipt(state.attempt_directory, state.receipt)
         return result
+
+
 def run_package(package: Path, output: Path, *, expected_sha256: str,
                 allow_workflow_execution: bool = False, policy: PackageReadPolicy | None = None) -> dict:
     """Run a digest-pinned lifecycle package and create a new immutable result package."""
@@ -1872,9 +1918,18 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     source_directory = output.with_name(output.stem + ".source")
     if output.exists() or source_directory.exists():
         raise PackageError("run output package or source directory already exists; attempts are never overwritten")
-    package_bytes = bounded_read(package)
-    manifest, payload = _read_package(package_bytes, expected_sha256, policy)
-    closure, runner, limits, tmpfs_root = _admit(payload)
+    staging_parent = next((parent for parent in output.absolute().parents if parent.is_dir()), None)
+    if staging_parent is None:
+        raise PackageError("run output must have an accessible parent directory for package intake")
+    with tempfile.TemporaryDirectory(prefix=".compiled-experiment-intake-", dir=staging_parent) as intake:
+        snapshot = Path(intake) / "plan.zip"
+        with _open_run_package(package, snapshot, expected_sha256, policy) as opened:
+            return _run_verified_package(opened, output, source_directory, expected_sha256)
+
+
+def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_directory: Path,
+                          expected_sha256: str) -> dict:
+    closure, runner, limits, tmpfs_root, job_members = _admit(package.admission, package.members)
     attempt_directory = output.with_name(output.stem + ".attempt")
     if attempt_directory.exists():
         raise PackageError("run attempt directory already exists; attempts are never overwritten")
@@ -1885,7 +1940,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                  "workerObservation": limits["workerObservation"]}
     timing = {"created": created, "ended": created, "elapsed": 0}
     initial, run_id, _ = _attempt_evidence(
-        payload, package_bytes, expected_sha256, closure, runner, execution, timing,
+        package, expected_sha256, closure, runner, execution, timing,
     )
     receipt_key = f"evidence/attempts/{run_id}/runner-receipt.json"
     receipt = json_value(initial[receipt_key])
@@ -1913,7 +1968,7 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
     _journal_receipt_reference(attempt_directory, journal, receipt)
     return _run_retained_attempt(_AttemptExecution(
         output=output, source_directory=source_directory, attempt_directory=attempt_directory,
-        payload=payload, manifest=manifest, package_bytes=package_bytes,
+        package=package, job_members=job_members,
         expected_sha256=expected_sha256, closure=closure, runner=runner, limits=limits,
         tmpfs_root=tmpfs_root, journal=journal, receipt=receipt, receipt_key=receipt_key,
         created=created, started=started,

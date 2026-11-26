@@ -12,6 +12,7 @@ _OPTIONS = {
     "max_members": "maximum archive member count, including the manifest",
     "max_compression_ratio": "maximum expanded-to-compressed ratio per archive member",
 }
+ARCHIVE_POLICY_OPTIONS = frozenset(name.replace("_", "-") for name in _OPTIONS)
 
 
 def _positive_integer(value: str) -> int:

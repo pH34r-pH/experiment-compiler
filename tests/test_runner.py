@@ -6,12 +6,15 @@ import sys
 import tempfile
 import unittest
 import uuid
+import zipfile
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from experiment_compiler.core import PackageError, canonical, compile_package, json_value, load_recipe, verify_bytes
+from experiment_compiler.archive_policy import PackageReadPolicy, ResourcePolicyError
+from experiment_compiler.core import (PackageError, canonical, compile_package, json_value, load_recipe,
+                                      sha256_file, verify_bytes)
 from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
                                         _cleanup_container_journal, _require_bounded_output_tmpfs,
@@ -20,6 +23,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _engine_image_reference_matches,
                                         _admit_container_requirement, _persist_attempt_receipt,
                                         _dependency_closure, _worker_admission,
+                                        _materialize, _open_run_package,
                                         _write_container_journal, _journal_receipt_reference,
                                         _augment_result_crate,
                                         recover_attempt, run_package)
@@ -1011,6 +1015,82 @@ class RunnerBoundaryTests(unittest.TestCase):
             _worker_admission(payload, {**runner, "maxWallSeconds": 120})
             with self.assertRaisesRegex(PackageError, "runner wall budget exceeds"):
                 _worker_admission(payload, {**runner, "maxWallSeconds": 121})
+
+    def _large_plan(self, root):
+        source = root / "source"
+        shutil.copytree(ROOT / "examples/linear-regression-plan-v1", source)
+        recipe_path = source / "experiment.json"
+        recipe = load_recipe(recipe_path)
+        recipe.pop("expectedPackage", None)
+        for name, content in (("data.csv", b"1,2,3\n" * (384 * 1024)),
+                              ("reference.bin", b"reference\n" * (200 * 1024))):
+            path = source / "source" / name
+            path.write_bytes(content)
+            member = next((item for item in recipe["members"] if item["path"] == f"experiment/{name}"), None)
+            if member is None:
+                member = {"path": f"experiment/{name}", "source": f"source/{name}"}
+                recipe["members"].append(member)
+            member.update(size=path.stat().st_size, sha256=sha256_file(path))
+        recipe_path.write_bytes(canonical(recipe))
+        package = root / "plan.zip"
+        compile_package(recipe_path, package)
+        return package, source / "source"
+
+    def test_file_backed_runner_stages_selected_inputs_and_preserves_other_members(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package, src = self._large_plan(root)
+            package_digest = sha256_file(package)
+            read_member = zipfile.ZipFile.read
+
+            def checked_read(archive, name, *args):
+                if name in {"experiment/data.csv", "experiment/reference.bin"}:
+                    raise AssertionError(f"Unexpected whole archive member read: {name}")
+                return read_member(archive, name, *args)
+
+            def execute(request):
+                self.assertNotIn("experiment/reference.bin", request.payload)
+                self.assertIsInstance(request.payload["experiment/data.csv"], zipfile.Path)
+                work = request.temporary / "job-work"
+                _materialize(work, request.payload)
+                self.assertEqual(sha256_file(work / "experiment/data.csv"), sha256_file(src / "data.csv"))
+                package.write_bytes(b"replacement after verified intake")
+                return {"returnCode": 0, "timedOut": False, "stdout": b"", "stderr": b"",
+                        "outputs": {"result.txt": b"synthetic"}, "provenance": {}, "collectionErrors": []}
+
+            environment = {"EXPERIMENT_RUNNER_SANDBOX": "fixture", "EXPERIMENT_RUNNER_WORKER_IMAGE": "fixture",
+                           "EXPERIMENT_RUNNER_RESOURCE_LIMITS": '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
+                           "EXPERIMENT_RUNNER_TMPFS_ROOT": str(root)}
+            output = root / "attempt.zip"
+            with patch.dict(os.environ, environment), patch.object(zipfile.ZipFile, "read", checked_read), \
+                    patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
+                    patch("experiment_compiler.runner._execute_cwl", side_effect=execute):
+                result = run_package(package, output, expected_sha256=package_digest, allow_workflow_execution=True,
+                                     policy=PackageReadPolicy(max_total_bytes=6 * MIB))
+            self.assertEqual(result["executionStatus"], "succeeded")
+            retained = root / "attempt.source"
+            self.assertEqual(sha256_file(retained / "experiment/reference.bin"), sha256_file(src / "reference.bin"))
+            self.assertEqual(sha256_file(next(retained.rglob("plan-package.zip"))), package_digest)
+
+    def test_intake_refuses_small_budgets_and_detects_unrelated_member_tampering(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package, _ = self._large_plan(root)
+            snapshot = root / "first.zip"
+            with patch.object(zipfile.ZipFile, "open") as opener, self.assertRaises(ResourcePolicyError):
+                with _open_run_package(package, snapshot, sha256_file(package), PackageReadPolicy(max_total_bytes=MIB)):
+                    self.fail("An oversized plan was admitted")
+            opener.assert_not_called()
+            altered = root / "altered.zip"
+            with zipfile.ZipFile(package) as archive, zipfile.ZipFile(altered, "w") as copy:
+                for item in archive.infolist():
+                    data = archive.read(item)
+                    if item.filename == "experiment/reference.bin":
+                        data = b"X" + data[1:]
+                    copy.writestr(item, data)
+            with self.assertRaisesRegex(PackageError, "Member integrity mismatch: experiment/reference.bin"):
+                with _open_run_package(altered, root / "second.zip", sha256_file(altered), None):
+                    self.fail("A changed unrelated member was admitted")
 
     def test_cwl_resource_ranges_require_supported_explicit_finite_values(self):
         import yaml

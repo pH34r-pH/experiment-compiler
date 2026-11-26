@@ -13,6 +13,7 @@ TOOL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' 'python:3.13.13-slim@sh
 run_cwl_fixture() {
   local unit="experiment-compiler-worker-$1-$$.service"
   local parameters="$2" output_tmpfs="${3:-}" approval
+  parameters="$(jq -c '. + {"max-members":"1024","max-total-bytes":"268435456"}' <<< "$parameters")"
   approval="$(jq -nc --arg unit "$unit" '{profile:"systemd-cgroup-v2-cwl-v1",unit:$unit,cpuQuotaMicros:100000,cpuPeriodMicros:100000,memoryBytes:536870912,tasks:128}')"
   sudo -n systemd-run --quiet --wait --pipe --collect \
     --unit="$unit" --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
