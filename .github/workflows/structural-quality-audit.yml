@@ -86,8 +86,10 @@ jobs:
           mapfile -t docs < "$RUNNER_TEMP/changed-living-docs.txt"
           lychee --offline --no-progress --include-fragments --root-dir "$GITHUB_WORKSPACE" "${docs[@]}"
 
-      - name: Install lightweight audit tools
-        run: python -m pip install --disable-pip-version-check "ruff==0.16.9" "lizard==1.24.0"
+      - name: Install pinned audit tools
+        run: >-
+          python -m pip install --disable-pip-version-check
+          "ruff==0.16.9" "lizard==1.24.0" "mypy==2.4.1" "pip-audit==2.10.0"
 
       - name: Native Python structural lint (audit only)
         shell: bash
@@ -209,6 +211,35 @@ jobs:
           test "$head_ruff" -le "$base_ruff" || { echo "::error::Ruff structural findings increased: $base_ruff -> $head_ruff"; exit 1; }
           test "$head_lizard" -le "$base_lizard" || { echo "::error::Lizard structural findings increased: $base_lizard -> $head_lizard"; exit 1; }
           test "$head_clones" -le "$base_clones" || { echo "::error::Duplication clone blocks increased: $base_clones -> $head_clones"; exit 1; }
+
+      - name: Enforce first-party lint
+        run: |
+          python -m ruff check experiment_compiler --select E4,E7,E9,F
+          python -m ruff check tests --select B023
+
+      - name: Type check verifier and worker admission contracts
+        run: python -m mypy
+
+      - name: Audit resolved runner and repository dependencies
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p quality-audit
+          report="$RUNNER_TEMP/runtime-dependencies.json"
+          pins="quality-audit/runtime-dependencies.txt"
+          python -m pip install --disable-pip-version-check --dry-run --ignore-installed \
+            --report "$report" '.[runner,repository]'
+          # The only direct source is this checkout. An extra containing a direct
+          # URL or VCS dependency needs a verified advisory mapping of its own.
+          jq -e '([.install[] | select(.is_direct) | .metadata.name] == ["experiment-compiler"])' \
+            "$report" >/dev/null
+          jq -r '.install[] | select(.is_direct | not) | "\(.metadata.name)==\(.metadata.version)"' \
+            "$report" | sort -f > "$pins"
+          test -s "$pins"
+          python -m pip_audit --strict --no-deps --disable-pip --vulnerability-service pypi \
+            --requirement "$pins" --format json --output quality-audit/pip-audit.json \
+            --progress-spinner off
 
       - name: Summarize audit policy
         if: always()

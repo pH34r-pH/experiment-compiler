@@ -6,6 +6,7 @@ runner status.
 """
 from __future__ import annotations
 
+import io
 import shutil
 import tempfile
 import zipfile
@@ -99,7 +100,7 @@ def finalize_package(parent_package: Path, output: Path, *,
     temporary = Path(tempfile.mkdtemp(prefix="compiled-experiment-finalization-"))
     try:
         try:
-            with zipfile.ZipFile(__import__("io").BytesIO(parent_bytes)) as archive:
+            with zipfile.ZipFile(io.BytesIO(parent_bytes)) as archive:
                 files = {name: archive.read(name) for name in archive.namelist() if name != MANIFEST}
                 parent_manifest = json_value(archive.read(MANIFEST))
         except (KeyError, zipfile.BadZipFile) as exc:

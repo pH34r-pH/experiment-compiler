@@ -17,7 +17,7 @@ import tempfile
 import zipfile
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from . import __version__
 from .archive_policy import ArchiveMemberReader, PackageError as PackageError, PackageReadPolicy
@@ -442,7 +442,8 @@ def _lifecycle_protocol(root: dict, nodes: dict[str, dict]) -> Any:
 
 
 def _measurement_node(value: dict, nodes: dict[str, dict]) -> dict:
-    measurement = nodes.get(value.get("@id")) if isinstance(value.get("@id"), str) else value
+    identifier = value.get("@id")
+    measurement = nodes.get(identifier) if isinstance(identifier, str) else value
     if (not isinstance(measurement, dict) or "PropertyValue" not in _types(measurement.get("@type")) or
             not isinstance(measurement.get("propertyID"), str) or not measurement["propertyID"].strip() or
             not isinstance(measurement.get("measurementTechnique"), str) or
@@ -557,7 +558,8 @@ def _potential_action_count(graph: list, nodes: dict[str, dict]) -> int:
         if not isinstance(node, dict):
             continue
         for ref in _as_refs(node.get("potentialAction")):
-            action = nodes.get(ref.get("@id"))
+            identifier = ref.get("@id")
+            action = nodes.get(identifier) if isinstance(identifier, str) else None
             if action is None:
                 raise PackageError("potentialAction references a missing graph node")
             if action.get("actionStatus") != "https://schema.org/PotentialActionStatus":
@@ -600,7 +602,7 @@ def _as_refs(value: Any) -> list[dict]:
     return []
 
 
-def _hash_stream(stream) -> tuple[str, int]:
+def _hash_stream(stream: BinaryIO) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -740,7 +742,8 @@ def verify_package(package: Path, *, expected_sha256: str | None = None,
         return _verify_file_stream(stream, expected_sha256=expected_sha256, recipe=recipe, policy=policy)
 
 
-def _verify_file_stream(stream, *, expected_sha256=None, recipe=None, policy=None) -> dict:
+def _verify_file_stream(stream: BinaryIO, *, expected_sha256: str | None = None,
+                        recipe: dict | None = None, policy: PackageReadPolicy | None = None) -> dict:
     stream.seek(0)
     package_sha, package_size = _hash_stream(stream)
     stream.seek(0)

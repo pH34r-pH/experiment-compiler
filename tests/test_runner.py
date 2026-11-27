@@ -449,9 +449,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                     receipt_bytes = receipt_path.read_bytes()
                     journal["cancellation"] = {"requestedAt": journal["createdAt"]}
 
-                    def stop_during_replace(source, target):
+                    def stop_during_replace(source, target, *, publish=publication_completed):
                         if target.name == "container-journal.json":
-                            if publication_completed:
+                            if publish:
                                 replace(source, target)
                             raise OSError("fixture journal publication interruption")
                         return replace(source, target)

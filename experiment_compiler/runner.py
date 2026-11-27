@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import io
 import json
 import math
 import os
@@ -140,7 +141,7 @@ def _read_package(data: bytes, expected_sha256: str,
     verified = verify_bytes(data, expected_sha256=expected_sha256, policy=policy)
     if verified["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("runner accepts only compiled-experiment-lifecycle-v1 plans and result artifacts")
-    with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
         payload = {name: archive.read(name) for name in archive.namelist() if name != MANIFEST}
         manifest = json_value(archive.read(MANIFEST))
     return manifest, payload

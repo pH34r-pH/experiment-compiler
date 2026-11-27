@@ -153,14 +153,14 @@ class RunnerSignalContextTests(unittest.TestCase):
     def test_pending_cancellation_survives_runner_return_and_error(self):
         for error in (None, PackageError("later runner failure"), KeyboardInterrupt("later interruption")):
             with self.subTest(error=error):
-                def runner(*args, **kwargs):
+                def runner(*args, runner_error=error, **kwargs):
                     try:
                         signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
                     except KeyboardInterrupt:
                         pass  # Same boundary as the bounded cleanup helper.
                     signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-                    if error is not None:
-                        raise error
+                    if runner_error is not None:
+                        raise runner_error
                     return {"executionStatus": "failed"}
                 with patch("experiment_compiler.runner_cli.run_package", side_effect=runner), \
                         patch("sys.stderr") as stderr:
@@ -213,16 +213,17 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
                 original_install = signal.signal
                 with self.assertRaisesRegex(KeyboardInterrupt, "SIGTERM"), _operator_cancellation():
                     handler = signal.getsignal(signal.SIGTERM)
-                    def install(number, restored):
-                        result = original_install(number, restored)
-                        if phase == "install" and number == signal.SIGTERM and restored is not handler:
+                    def install(number, restored, *, set_handler=original_install,
+                                tested_phase=phase, test_handler=handler):
+                        result = set_handler(number, restored)
+                        if tested_phase == "install" and number == signal.SIGTERM and restored is not test_handler:
                             signal.raise_signal(signal.SIGTERM)
-                        if phase == "restore" and number == signal.SIGTERM and restored is handler:
+                        if tested_phase == "restore" and number == signal.SIGTERM and restored is test_handler:
                             signal.raise_signal(signal.SIGINT)
                         return result
-                    def replay(number, frame):
+                    def replay(number, frame, *, test_handler=handler):
                         try:
-                            handler(number, frame)
+                            test_handler(number, frame)
                         finally:
                             signal.raise_signal(signal.SIGINT)
                     if phase == "replay":

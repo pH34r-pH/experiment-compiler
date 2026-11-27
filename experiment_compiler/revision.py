@@ -6,11 +6,11 @@ revision links; it does not interpret experiment outputs.
 """
 from __future__ import annotations
 
+import io
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
 
 from .assembly import compile_source_closure
 from .core import (MANIFEST, PackageError, bounded_read,
@@ -42,7 +42,7 @@ def _root_and_protocol(crate: dict) -> tuple[dict, dict]:
 def _read_parent_attempt(data: bytes, attempt_id: str) -> tuple[dict, dict, bytes]:
     """Require the explicitly selected CreateAction and its runner receipt."""
     try:
-        with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
             receipt_names = [name for name in archive.namelist() if name.endswith(_RUNNER_RECEIPT)]
             if len(receipt_names) != 1:
                 raise PackageError("Parent attempt package must contain exactly one runner receipt")
@@ -102,7 +102,7 @@ def _read_parent_attempt(data: bytes, attempt_id: str) -> tuple[dict, dict, byte
             not isinstance(archive_ref.get("@id"), str)):
         raise PackageError("Runner receipt does not identify the digest-pinned plan package")
     archive_path = safe_path(archive_ref["@id"])
-    with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
         try:
             plan_bytes = archive.read(archive_path)
         except KeyError as exc:
@@ -115,7 +115,7 @@ def _read_parent_attempt(data: bytes, attempt_id: str) -> tuple[dict, dict, byte
     derived_from = root.get(PROV + "wasDerivedFrom")
     if not isinstance(derived_from, dict) or derived_from.get("@id") != f"urn:sha256:{plan_sha256}":
         raise PackageError("Attempt package provenance does not match its runner receipt plan digest")
-    with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for output in receipt.get("outputs", []):
             if not isinstance(output, dict) or not isinstance(output.get("@id"), str):
                 raise PackageError("Runner receipt has a malformed output record")
@@ -192,7 +192,7 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
     if parent_verified["profile"] != "compiled-experiment-lifecycle-v1":
         raise PackageError("Revision parent must use compiled-experiment-lifecycle-v1")
     parent_crate = None
-    with zipfile.ZipFile(__import__("io").BytesIO(parent_bytes)) as archive:
+    with zipfile.ZipFile(io.BytesIO(parent_bytes)) as archive:
         parent_crate = json_value(archive.read("ro-crate-metadata.json"))
     parent_lifecycle = validate_lifecycle_crate(parent_crate)
     if parent_lifecycle["attemptCount"] < 1 or not parent_lifecycle["processRunCrate"]:
@@ -225,7 +225,7 @@ def revise_package(parent_package: Path, recipe_path: Path, output: Path, *,
             safe_protocol_id = safe_path(prior_protocol_id)
         except PackageError as exc:
             raise PackageError("Parent protocol must be a packaged relative file") from exc
-        with zipfile.ZipFile(__import__("io").BytesIO(parent_bytes)) as archive:
+        with zipfile.ZipFile(io.BytesIO(parent_bytes)) as archive:
             if safe_protocol_id not in archive.namelist():
                 raise PackageError("Parent protocol is not embedded in its package")
             prior_protocol_bytes = archive.read(safe_protocol_id)
