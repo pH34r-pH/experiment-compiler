@@ -8,6 +8,13 @@ Future lifecycle sources may use `## Hypothesis` in the experiment README and `#
 
 `executionAttempts` projects every execution CreateAction as `id`, its exact Schema.org `actionStatus`, and `result` member paths. PotentialActionStatus describes a plan and is excluded. Active, failed and completed attempts remain distinct. Cancellation may be recorded as a failed action with explanatory retained receipt evidence; this projection does not invent a separate Schema.org status. Result references must resolve to described File entities in the recipe inventory; absent results remain an empty list and do not imply acceptance. Duplicate entities and result references are rejected.
 
+The lifecycle record keeps the crate's `experimentIdentifier` when declared
+and the recipe's own `id` for the detail route. Optional `lineage` entries
+retain the root's PROV-O revision and derivation references. When a reference
+resolves to a retained ZIP, its digest and byte size come from the package
+inventory. An embedded parent preserves the original attempt's identity
+without adding an execution to a prospective revision.
+
 Completed execution, a retained interpretation summary, publication review and byte integrity establish different facts. None implies a successful scientific comparison or independent reproduction. Missing references, mismatched denominators and failed scientific checks retain their source-owned meaning in packaged records. Consumers must not synthesize a green scientific verdict from action status, package presence or workflow success.
 
 Pinned lifecycle catalog records verify the deterministic package and every source member before projection. Unpinned prospective descriptions remain available without requiring the full source closure to be built; their presentation is not an integrity verification receipt.

@@ -13,6 +13,7 @@ from typing import Any
 
 from .core import (
     PackageError,
+    _as_refs,
     _execution_action_nodes,
     _types,
     _validate_related_articles,
@@ -22,6 +23,8 @@ from .core import (
     load_recipe,
     validate_lifecycle_crate,
 )
+
+_PROV = "https://www.w3.org/ns/prov#"
 
 
 def _member_source(recipe: dict, recipe_path: Path, package_path: str) -> Path:
@@ -126,7 +129,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     graph = metadata["@graph"]
     root = next(node for node in graph if isinstance(node, dict) and node.get("@id") == "./")
     main_id = root["mainEntity"]["@id"]
-    protocol = _text_member(recipe, recipe_path, "experiment/protocol.md")
+    protocol = _text_member(recipe, recipe_path, main_id)
     readme = _text_member(recipe, recipe_path, "experiment/README.md")
     closure = None
     if any(item["path"] == "dependency-closure.json" for item in recipe["members"]):
@@ -187,7 +190,45 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     }
     if "isPartOf" in recipe:
         descriptor["isPartOf"] = recipe["isPartOf"]
+    identifier = root.get("identifier")
+    if isinstance(identifier, str) and identifier.strip():
+        descriptor["experimentIdentifier"] = identifier
+    lineage = _lifecycle_lineage(root, entities, recipe["members"])
+    if lineage:
+        descriptor["lineage"] = lineage
     return descriptor
+
+
+def _lineage_package(reference: str, members: dict, nodes: dict) -> dict | None:
+    member = members.get(reference)
+    if member is None or not reference.endswith(".zip"):
+        return None
+    node = nodes.get(reference, {})
+    digest, size = member["sha256"], member["size"]
+    if node.get("sha256", digest) != digest or str(node.get("contentSize", size)) != str(size):
+        raise PackageError("Catalog lineage disagrees with the packaged parent identity")
+    return {"sha256": digest, "size": size}
+
+
+def _lifecycle_lineage(root: dict, nodes: dict, members: list[dict]) -> list[dict]:
+    packages = {member["path"]: member for member in members if member["path"].endswith(".zip")}
+    by_digest = {member["sha256"]: member for member in packages.values()}
+    lineage = []
+    for relation in (_PROV + "wasRevisionOf", _PROV + "wasDerivedFrom"):
+        for item in _as_refs(root.get(relation)):
+            reference = item.get("@id")
+            if not isinstance(reference, str) or not reference:
+                raise PackageError("Catalog lineage must identify its parent by reference")
+            record = {"relation": relation, "reference": reference}
+            package = _lineage_package(reference, packages, nodes)
+            if reference.startswith("urn:sha256:"):
+                member = by_digest.get(reference.removeprefix("urn:sha256:"))
+                if member is not None:
+                    package = {"sha256": member["sha256"], "size": member["size"]}
+            if package is not None:
+                record["package"] = package
+            lineage.append(record)
+    return lineage
 
 
 def discover_recipes(root: Path) -> list[Path]:

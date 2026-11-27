@@ -5,6 +5,28 @@
   "type": "object",
   "required": ["schemaVersion", "project", "experiments"],
   "additionalProperties": false,
+  "$defs": {
+    "packageIdentity": {
+      "type": "object",
+      "required": ["sha256", "size"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "resourceMeasurement": {
+      "type": "object",
+      "required": ["propertyID", "value", "unitText", "measurementTechnique", "evidence"],
+      "properties": {
+        "propertyID": { "type": "string", "minLength": 1 },
+        "value": { "type": ["number", "string"] },
+        "unitText": { "type": ["string", "null"] },
+        "measurementTechnique": { "type": "string", "minLength": 1 },
+        "evidence": { "type": ["string", "object", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schemaVersion": { "const": 2 },
     "project": {
@@ -33,12 +55,35 @@
               "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
             }
           },
-          "package": {
+          "package": { "$ref": "#/$defs/packageIdentity" },
+          "experimentIdentifier": { "type": "string", "minLength": 1 },
+          "lineage": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["relation", "reference"],
+              "properties": {
+                "relation": {
+                  "enum": ["https://www.w3.org/ns/prov#wasRevisionOf", "https://www.w3.org/ns/prov#wasDerivedFrom"]
+                },
+                "reference": { "type": "string", "minLength": 1 },
+                "package": { "$ref": "#/$defs/packageIdentity" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "lifecycle": {
             "type": "object",
-            "required": ["sha256", "size"],
+            "required": ["creativeWorkStatus", "attemptCount", "processRunCrate", "potentialActionCount", "resourceMeasurements"],
             "properties": {
-              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-              "size": { "type": "integer", "minimum": 1 }
+              "creativeWorkStatus": { "type": ["string", "object"] },
+              "attemptCount": { "type": "integer", "minimum": 0 },
+              "processRunCrate": { "type": "boolean" },
+              "potentialActionCount": { "type": "integer", "minimum": 0 },
+              "resourceMeasurements": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/resourceMeasurement" }
+              }
             }
           },
           "protocol": {
@@ -81,6 +126,19 @@
                   }
                 }
               }
+            }
+          },
+          "scientificInterpretation": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "required": ["record", "summary", "aboutAttempt"],
+              "properties": {
+                "record": { "type": "string", "minLength": 1 },
+                "summary": { "type": "string", "minLength": 1 },
+                "aboutAttempt": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
             }
           },
           "detailUrl": { "type": "string", "pattern": "^/experiments/[a-z0-9-]+/$" },
