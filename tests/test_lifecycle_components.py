@@ -120,6 +120,9 @@ class LifecycleComponentTests(unittest.TestCase):
         self.assertEqual(reader["with"]["digest-mismatch"], "error")
         self.assertEqual(set(reader["with"]), {"name", "path", "digest-mismatch"})
         self.assertEqual(producer["if"], "inputs.operation == 'alpha-provenance' && matrix.python == '3.12'")
+        verifier = next(step["run"] for step in signing["steps"]
+                        if step.get("name") == "Verify every signature against the exact producer")
+        self.assertIn("/usr/bin/gh attestation verify", verifier)
 
     def test_finalization_component_retains_amended_coverage(self):
         from experiment_compiler.core import sha256_file

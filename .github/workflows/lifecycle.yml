@@ -365,7 +365,7 @@ jobs:
           root="$RUNNER_TEMP/alpha-release"
           mkdir "$root/verification"
           for asset in "$root"/assets/*; do
-            gh attestation verify "$asset" --bundle "$BUNDLE_PATH" --repo "$GITHUB_REPOSITORY" \
+            /usr/bin/gh attestation verify "$asset" --bundle "$BUNDLE_PATH" --repo "$GITHUB_REPOSITORY" \
               --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/lifecycle.yml" \
               --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --hostname github.com \

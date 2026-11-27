@@ -19,12 +19,12 @@ Use the retained receipts for evidence and the CLI's standalone JSON for automat
 ## Alpha release provenance
 
 The owner can select `alpha-provenance` in the existing
-[lifecycle workflow](../.github/workflows/lifecycle.yml) on `main`. It uses the
-same run and attempt's Python 3.12 build to sign five verified subjects: the
-historical POC ZIP, its checksum and two scoped receipts, and the Compiler
-wheel. The signing job checks the downloaded archive digest and verifies every
-GitHub attestation against the exact source commit and workflow. The candidate,
-bundle, and signature readback are retained together on success.
+[lifecycle workflow](../.github/workflows/lifecycle.yml) on `main`. The signing
+job takes the historical POC ZIP, its checksum, two scoped receipts, and the
+Compiler wheel from the same run and attempt's Python 3.12 build. It checks
+the downloaded archive digest and verifies each GitHub attestation against the
+exact source commit and workflow. The candidate, bundle, and signature
+readback are retained together on success.
 
 The ordinary `pages` operation uses the existing Pages environment. An alpha
 provenance run prepares a new release candidate for owner review. A draft from
