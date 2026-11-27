@@ -51,7 +51,7 @@ The onboarding, doctor, and repair skills live under [`.agents/skills/`](.agents
 ## Change routing and invariants
 
 - Change recipe semantics or package identity rules in `experiment_compiler/core.py`, then update the relevant profile documentation and tests.
-- Change execution admission, receipts, bounded collection, or signal handling in `experiment_compiler/runner.py`; keep `compile` and `verify` non-executing.
+- Route admission, receipts, bounded collection, and signal handling through the runner modules listed in [the implementation map](experiment_compiler/AGENTS.md). Keep `compile` and `verify` non-executing.
 - Change public presentation through `catalog.py`, `scripts/build_pages_site.py`, or `site/`; do not hand-maintain generated catalog records.
 - Change historical compatibility only with explicit evidence review. `examples/issue-164/` and its recorded hashes are immutable regression inputs; current AdamW package work must remain intact.
 - A plan revision, attempt, or finalization is a new artifact with provenance. Never edit an archived package to attach later results.

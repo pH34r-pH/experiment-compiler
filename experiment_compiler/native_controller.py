@@ -14,7 +14,7 @@ from typing import ContextManager, Protocol
 from .actions_projection import PROFILE_LIMIT, _pinned_profile, project_actions
 from .core import PackageError, bounded_read, canonical, json_value
 from .native_receipts import _identity, finish_native_attempt, start_native_attempt
-from .runner import _read_package
+from .runner_admission import _read_package
 
 
 def _sha(data: bytes) -> str:

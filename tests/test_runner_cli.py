@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from experiment_compiler.core import PackageError, canonical, compile_package
-from experiment_compiler.runner import _defer_operator_signals
+from experiment_compiler.runner_process import _defer_operator_signals
 from experiment_compiler.runner_cli import _operator_cancellation, main
 
 from fixture_requirements import REQUIRES_RUNNER
@@ -45,11 +45,11 @@ CONTROLLER = textwrap.dedent("""\
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
     from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
-    from experiment_compiler import runner, runner_cli
+    from experiment_compiler import runner_admission, runner_cli, runner_process
     directory = Path(sys.argv[1])
     worker = sys.argv[2]
     killpg = os.killpg
-    runner_config = runner._runner_config
+    runner_config = runner_admission._runner_config
     def configure(payload):
         config = runner_config(payload)
         if sys.argv[4] == "timeout":
@@ -63,12 +63,12 @@ CONTROLLER = textwrap.dedent("""\
         (directory / "scratch").write_text(str(temporary))
         return [sys.executable, "-u", "-c", worker, str(directory)]
     with synthetic_controller_environment(directory), \\
-            patch.object(runner, "_require_bounded_tmpfs"), \\
-            patch.object(runner, "_runner_config", side_effect=configure), \\
-            patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
-            patch.object(runner, "LogCapture", partial(runner.LogCapture, stream_limit=31)), \\
-            patch.object(runner, "_run_command", side_effect=native_command), \\
-            patch.object(runner.os, "killpg", side_effect=record_signal):
+            patch.object(runner_process, "_require_bounded_tmpfs"), \\
+            patch.object(runner_admission, "_runner_config", side_effect=configure), \\
+            patch.object(runner_process, "_new_container_journal", side_effect=prepare_container_journal), \\
+            patch.object(runner_process, "LogCapture", partial(runner_process.LogCapture, stream_limit=31)), \\
+            patch.object(runner_process, "_run_command", side_effect=native_command), \\
+            patch.object(runner_process.os, "killpg", side_effect=record_signal):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)
 RETENTION_CONTROLLER = textwrap.dedent("""\
@@ -77,7 +77,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
     from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
-    from experiment_compiler import runner, runner_cli
+    from experiment_compiler import runner, runner_cli, runner_process
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
     replace = Path.replace
@@ -108,8 +108,8 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
                     time.sleep(0.01)
         return replace(path, target)
     with synthetic_controller_environment(directory), \\
-            patch.object(runner, "_execute_cwl", side_effect=execute), \\
-            patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
+            patch.object(runner_process, "_execute_cwl", side_effect=execute), \\
+            patch.object(runner_process, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(Path, "replace", new=pause_receipt):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)
@@ -120,7 +120,7 @@ class RunnerSignalContextTests(unittest.TestCase):
         stderr = io.StringIO()
         stdout = io.StringIO()
         with (tempfile.TemporaryDirectory() as temporary, redirect_stderr(stderr), redirect_stdout(stdout),
-              patch("experiment_compiler.runner._open_run_package",
+              patch("experiment_compiler.runner_admission._open_run_package",
                     side_effect=OSError("fixture-secret at /private/fixture-plan")) as opened):
             output = Path(temporary) / "result.zip"
             args = ["run", "plan.zip", "--output", str(output), "--expected-sha256", "0" * 64,
@@ -260,7 +260,7 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
                             signal.raise_signal(signal.SIGINT)
                     if phase == "replay":
                         original_install(signal.SIGTERM, replay)
-                    with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+                    with patch("experiment_compiler.runner_process.signal.signal", side_effect=install):
                         with _defer_operator_signals():
                             if phase != "install":
                                 signal.raise_signal(signal.SIGTERM)
@@ -277,7 +277,7 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
                 if number == signal.SIGTERM and restored is handler:
                     signal.raise_signal(signal.SIGTERM)
                 return result
-            with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+            with patch("experiment_compiler.runner_process.signal.signal", side_effect=install):
                 with _defer_operator_signals():
                     pass
 
@@ -294,16 +294,16 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
         def enter():
             with _defer_operator_signals():
                 entered.append(True)
-        with patch("experiment_compiler.runner.signal.signal") as install:
+        with patch("experiment_compiler.runner_process.signal.signal") as install:
             thread = threading.Thread(target=enter)
             thread.start()
             thread.join(timeout=5)
             self.assertFalse(thread.is_alive())
-            with patch("experiment_compiler.runner.signal.getsignal", return_value=signal.SIG_DFL), \
-                    patch("experiment_compiler.runner.signal.pthread_sigmask") as mask:
+            with patch("experiment_compiler.runner_process.signal.getsignal", return_value=signal.SIG_DFL), \
+                    patch("experiment_compiler.runner_process.signal.pthread_sigmask") as mask:
                 enter()
                 mask.assert_not_called()
-            with patch("experiment_compiler.runner.hasattr", return_value=False):
+            with patch("experiment_compiler.runner_process.hasattr", return_value=False):
                 enter()
             install.assert_not_called()
         self.assertEqual(entered, [True, True, True])

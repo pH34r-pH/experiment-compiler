@@ -14,7 +14,7 @@ from .core import (
     safe_path,
     unique_paths,
 )
-from .runner import _admit_job, _admit_workflow, _read_package
+from .runner_admission import _admit_job, _admit_workflow, _read_package
 
 PROFILE_LIMIT = 1024 * 1024
 _LIMITS = {"cores", "ramMiB", "tmpdirMiB", "outdirMiB", "wallSeconds"}
