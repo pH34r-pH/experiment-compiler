@@ -38,6 +38,24 @@ python -m unittest discover -s tests -v
 The `runner` extra provides PyYAML. The `trajectory` extra provides the pinned
 Long-Haul verifier and includes the JSON Schema dependency used by repository profiles.
 
+The structural quality workflow also checks first-party Python syntax and imports,
+test callback bindings, and types in the archive verifier and Linux worker
+admission modules. Run the checks from the checkout with the pinned tools.
+
+```sh
+python -m pip install 'ruff==0.16.9' 'mypy==2.4.1'
+python -m ruff check experiment_compiler --select E4,E7,E9,F
+python -m ruff check tests --select B023
+python -m mypy
+```
+
+The same workflow resolves the `runner` and `repository` extras from the
+package index on Linux and checks every resolved version against the PyPI
+advisory service with pip-audit 2.10.0. The workflow artifact retains the
+resolved versions and audit report. Resolution errors, audit errors, and
+advisories fail the job. This scope covers those extras and their transitive
+dependencies. Compile and verify remain offline.
+
 The self-contained linear-regression fixture embeds the implementation, tests, synthetic data, environment/configuration, protocol, acceptance criteria, reference result, resource evidence, Croissant metadata, and RO-Crate / Process Run Crate provenance.
 
 For the historical #164 compatibility package and its narrower claim scope, see [docs/poc-scope.md](docs/poc-scope.md).

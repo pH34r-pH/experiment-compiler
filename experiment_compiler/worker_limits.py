@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, TypeVar
 
 from .core import PackageError, json_value
 
@@ -13,6 +14,7 @@ from .core import PackageError, json_value
 WORKER_PROFILE = "systemd-cgroup-v2-cwl-v1"
 _UNIT = re.compile(r"experiment-compiler-worker-[a-z0-9][a-z0-9-]{0,63}\.service\Z")
 _LIMIT_FIELDS = {"profile", "unit", "cpuQuotaMicros", "cpuPeriodMicros", "memoryBytes", "tasks"}
+_Limit = TypeVar("_Limit", int, Fraction)
 
 
 class WorkerAdmissionError(PackageError):
@@ -71,8 +73,9 @@ def _cgroup_for_unit(membership: str, unit: str, cgroup_root: Path) -> Path:
     return cgroup_root.joinpath(*path.parts[1:])
 
 
-def _observed_limit(current: Path, root: Path, name: str, parse):
-    values = []
+def _observed_limit(current: Path, root: Path, name: str,
+                    parse: Callable[[str], _Limit | None]) -> _Limit:
+    values: list[_Limit] = []
     while current != root:
         try:
             limit = parse((current / name).read_text(encoding="ascii").strip())

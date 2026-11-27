@@ -50,6 +50,18 @@ include = ["experiment_compiler*"]
 [tool.setuptools.package-data]
 experiment_compiler = ["profiles/*.json"]
 
+[tool.mypy]
+files = [
+  "experiment_compiler/archive_policy.py",
+  "experiment_compiler/core.py",
+  "experiment_compiler/resources.py",
+  "experiment_compiler/worker_limits.py",
+]
+python_version = "3.11"
+follow_imports = "silent"
+check_untyped_defs = true
+disallow_untyped_defs = true
+
 
 [tool.irradiate]
 paths_to_mutate = "experiment_compiler"

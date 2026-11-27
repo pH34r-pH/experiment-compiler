@@ -943,7 +943,7 @@ class CompilerTests(unittest.TestCase):
             self.output.unlink(missing_ok=True)
             info = zipfile.ZipInfo(name)
             info.external_attr = (mode | 0o644) << 16
-            raw = self.mutate_zip(lambda pairs: pairs + [(info, b"target")])
+            raw = self.mutate_zip(lambda pairs, member=info: pairs + [(member, b"target")])
             with self.subTest(name=name), self.assertRaises(PackageError):
                 verify_bytes(raw)
 
