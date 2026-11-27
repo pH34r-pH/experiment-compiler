@@ -5,677 +5,28 @@ requires an exact package digest, explicit opt-in, and a declared bounded worker
 """
 from __future__ import annotations
 
-import hashlib
-import importlib.metadata
-import io
-import json
 import logging
-import math
 import os
-import platform
 import re
 import shutil
-import signal
-import stat
 import subprocess
-import sys
 import tempfile
-import threading
 import time
-import uuid
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
-from typing import Any, Container
-import zipfile
+from typing import Any
 
+from . import runner_admission, runner_process, runner_receipts
 from .archive_policy import PackageReadPolicy
-from .core import (MANIFEST, PackageError, _verify_file_stream, bounded_read, canonical,
-                   compile_package, json_value, safe_path, sha256_file, verify_bytes)
+from .core import PackageError, canonical, compile_package, json_value, sha256_file
 from .diagnostics import failure_diagnostics, report_failure
-from .runner_logs import LOG_STREAM_LIMIT, LogCapture
-from .worker_limits import observe_worker
+from .runner_receipts import sha256_bytes as sha256_bytes
 
 
 _LOGGER = logging.getLogger(__name__)
-_CONTAINER_JOURNAL_SCHEMA = "cwltool-container-journal/v1"
-_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
-_ENGINE_IMAGE_ID = re.compile(r"(?:sha256:)?([0-9a-fA-F]{64})\Z")
-_MAX_ATTEMPT_CONTAINERS = 64
-_MAX_RECOVERY_AGE_SECONDS = 7 * 24 * 60 * 60
-_RECOVERY_RESULT_NOTE = "Attempt recovery ran without re-executing science; completion is not established"
-_CWL_EXECUTION_DESCRIPTIONS = {
-    "podman": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
-    "docker": "cwltool orchestrator on worker; CWL CommandLineTool uses Docker runtime",
-}
-_ADMISSION_MEMBERS = ("dependency-closure.json", "ro-crate-metadata.json", "experiment/runner.json",
-                      "experiment/workflow.cwl", "experiment/job.yml")
 _WORKFLOW_MEMBERS = ("experiment/workflow.cwl", "experiment/job.yml")
-_MemberSource = bytes | Path | zipfile.Path
-
-
-class _AttemptStatus(StrEnum):
-    STARTED = "started"
-    FAILED = "failed"
-    TIMED_OUT = "timed-out"
-    SUCCEEDED = "succeeded"
-
-
-class _ProcessPhase(StrEnum):
-    PREFLIGHT = "preflight"
-    NOT_STARTED = "not-started"
-    LAUNCH_INTENT = "launch-intent"
-    RUNNING = "running"
-
-
-class _CleanupState(StrEnum):
-    PREPARED = "prepared"
-    RUNNING = "running"
-    CANCELLATION_REQUESTED = "cancellation-requested"
-    CLEANUP_FAILED = "cleanup-failed"
-    CLEAN = "clean"
-    UNKNOWN = "unknown"
-    NOT_STARTED = "not-started"
-
-
-class _ContainerCleanupPhase(StrEnum):
-    PENDING = "pending"
-    STOPPING = "stopping"
-    REMOVING = "removing"
-    ABSENT = "absent"
-    FAILED = "cleanup-failed"
-
-
-_RECOVERY_STATUS = {
-    _AttemptStatus.STARTED: _AttemptStatus.FAILED,
-    _AttemptStatus.FAILED: _AttemptStatus.FAILED,
-    _AttemptStatus.TIMED_OUT: _AttemptStatus.TIMED_OUT,
-}
-_PROCESS_TRANSITIONS = {
-    _ProcessPhase.PREFLIGHT: {_ProcessPhase.NOT_STARTED, _ProcessPhase.LAUNCH_INTENT},
-    _ProcessPhase.LAUNCH_INTENT: {_ProcessPhase.RUNNING},
-}
-_SETTLEMENT_STATES = {_CleanupState.UNKNOWN, _CleanupState.CLEANUP_FAILED, _CleanupState.CLEAN}
-_CLEANUP_TRANSITIONS = {
-    _CleanupState.PREPARED: _SETTLEMENT_STATES | {_CleanupState.RUNNING, _CleanupState.CANCELLATION_REQUESTED},
-    _CleanupState.RUNNING: _SETTLEMENT_STATES | {_CleanupState.CANCELLATION_REQUESTED},
-    _CleanupState.CANCELLATION_REQUESTED: _SETTLEMENT_STATES,
-    _CleanupState.UNKNOWN: _SETTLEMENT_STATES | {_CleanupState.CANCELLATION_REQUESTED},
-    _CleanupState.CLEANUP_FAILED: _SETTLEMENT_STATES,
-    _CleanupState.CLEAN: _SETTLEMENT_STATES,
-}
-
-
-def _transition_process(receipt: dict, phase: _ProcessPhase) -> None:
-    previous = receipt.get("executionPhase")
-    if phase not in _PROCESS_TRANSITIONS.get(previous, ()):
-        raise PackageError(f"Invalid runner process phase transition: {previous!r} to {phase.value}")
-    receipt.update(executionPhase=phase, executionNeverStarted=phase == _ProcessPhase.NOT_STARTED,
-                   launchIntentPersisted=phase in {_ProcessPhase.LAUNCH_INTENT, _ProcessPhase.RUNNING})
-
-
-def _finish_attempt(receipt: dict, status: _AttemptStatus) -> None:
-    if receipt.get("status") != _AttemptStatus.STARTED or status not in {
-        _AttemptStatus.FAILED, _AttemptStatus.TIMED_OUT, _AttemptStatus.SUCCEEDED,
-    }:
-        raise PackageError("A terminal attempt outcome requires a started receipt")
-    receipt["status"] = status
-
-
-def _validate_cleanup_transition(previous: str, state: _CleanupState) -> None:
-    if previous not in _CLEANUP_TRANSITIONS:
-        raise PackageError(f"Invalid runner cleanup state: {previous!r}")
-    if state != previous and state not in _CLEANUP_TRANSITIONS[previous]:
-        raise PackageError(f"Invalid runner cleanup transition: {previous!r} to {state.value}")
-
-
-def _transition_container_cleanup(cleanup: dict, phase: _ContainerCleanupPhase, **details) -> None:
-    previous = cleanup.get("status")
-    if (previous not in tuple(_ContainerCleanupPhase)
-            or previous == _ContainerCleanupPhase.ABSENT or phase == _ContainerCleanupPhase.PENDING):
-        raise PackageError(f"Invalid container cleanup transition: {previous!r} to {phase.value}")
-    cleanup.update(details, status=phase, absentAfterCleanup=phase == _ContainerCleanupPhase.ABSENT)
-
-
-def _read_package(data: bytes, expected_sha256: str,
-                  policy: PackageReadPolicy | None = None) -> tuple[dict, dict[str, bytes]]:
-    verified = verify_bytes(data, expected_sha256=expected_sha256, policy=policy)
-    if verified["profile"] != "compiled-experiment-lifecycle-v1":
-        raise PackageError("runner accepts only compiled-experiment-lifecycle-v1 plans and result artifacts")
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        payload = {name: archive.read(name) for name in archive.namelist() if name != MANIFEST}
-        manifest = json_value(archive.read(MANIFEST))
-    return manifest, payload
-
-
-@dataclass(frozen=True)
-class _VerifiedRunPackage:
-    snapshot: Path
-    manifest: dict
-    admission: dict[str, bytes]
-    members: dict[str, zipfile.Path]
-
-
-@contextmanager
-def _open_run_package(package: Path, snapshot: Path, expected_sha256: str,
-                      policy: PackageReadPolicy | None):
-    if package.is_symlink() or not package.is_file():
-        raise PackageError(f"Expected regular package file: {package}")
-    with snapshot.open("xb+") as retained:
-        with package.open("rb") as source:
-            shutil.copyfileobj(source, retained, length=1024 * 1024)
-        verified = _verify_file_stream(retained, expected_sha256=expected_sha256, policy=policy)
-        if verified["profile"] != "compiled-experiment-lifecycle-v1":
-            raise PackageError("runner accepts only compiled-experiment-lifecycle-v1 plans and result artifacts")
-        retained.seek(0)
-        with zipfile.ZipFile(retained) as archive:
-            manifest = json_value(archive.read(MANIFEST))
-            members = {name: zipfile.Path(archive, at=name) for name in archive.namelist() if name != MANIFEST}
-            admission = {name: archive.read(name) for name in _ADMISSION_MEMBERS if name in members}
-            yield _VerifiedRunPackage(snapshot, manifest, admission, members)
-
-
-def _dependency_closure(payload: dict[str, bytes], member_names: Container[str] | None = None) -> dict:
-    for required in ("dependency-closure.json", "ro-crate-metadata.json"):
-        if required not in payload:
-            raise PackageError(f"execution admission requires packaged {required}")
-    closure = json_value(payload["dependency-closure.json"])
-    if not isinstance(closure, dict) or not isinstance(closure.get("classifications"), dict):
-        raise PackageError("dependency closure has no classifications")
-    classes = closure["classifications"]
-    unavailable = classes.get("unavailable")
-    if not isinstance(unavailable, list):
-        raise PackageError("execution deferred: dependency closure requires an explicit unavailable list")
-    if unavailable:
-        raise PackageError("execution deferred: dependency closure has unavailable prerequisites")
-    if classes.get("external") != []:
-        raise PackageError("execution deferred: this local adapter admits embedded runtime dependencies only")
-    embedded = classes.get("embedded")
-    names = payload if member_names is None else member_names
-    if not isinstance(embedded, list) or any(
-        not isinstance(member, dict) or safe_path(member.get("path")) not in names for member in embedded
-    ):
-        raise PackageError("execution deferred: embedded dependencies must name packaged files")
-    if closure.get("runtimeNetworkRequired") is not False:
-        raise PackageError("execution deferred: local adapter requires a declared no-network protocol")
-    return closure
-
-
-def _runner_config(payload: dict[str, bytes]) -> dict:
-    for required in ("experiment/workflow.cwl", "experiment/job.yml", "experiment/runner.json"):
-        if required not in payload:
-            raise PackageError(f"execution deferred: plan has no admitted executable component {required}")
-    runner = json_value(payload["experiment/runner.json"])
-    if not isinstance(runner, dict) or runner.get("runner") != "cwltool" or not isinstance(runner.get("version"), str):
-        raise PackageError("runner.json must pin the cwltool runner and exact version")
-    if runner.get("executionMode") not in {"cwltool-docker", "cwltool-podman"}:
-        raise PackageError("unsupported execution mode; this adapter requires cwltool Docker or Podman execution")
-    timeout_seconds = runner.get("maxWallSeconds")
-    if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 86400:
-        raise PackageError("runner.json must declare maxWallSeconds between 1 and 86400")
-    try:
-        installed = importlib.metadata.version("cwltool")
-    except importlib.metadata.PackageNotFoundError as exc:
-        raise PackageError("pinned cwltool is not installed in this runner environment") from exc
-    if installed != runner["version"]:
-        raise PackageError(f"cwltool version mismatch: package requires {runner['version']}, installed {installed}")
-    return runner
-
-
-def _worker_admission(payload: dict[str, bytes], runner: dict,
-                      member_names: Container[str] | None = None) -> tuple[dict, str, set[str]]:
-    workflow = payload["experiment/workflow.cwl"]
-    if len(workflow) > 1024 * 1024:
-        raise PackageError("CWL workflow exceeds the execution admission size limit")
-    sandbox = os.environ.get("EXPERIMENT_RUNNER_SANDBOX")
-    image_id = os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE")
-    raw_limits = os.environ.get("EXPERIMENT_RUNNER_RESOURCE_LIMITS")
-    tmpfs_root = os.environ.get("EXPERIMENT_RUNNER_TMPFS_ROOT")
-    if not sandbox or not image_id or not raw_limits or not tmpfs_root:
-        raise PackageError("execution deferred: run inside the configured bounded worker and report its limits")
-    try:
-        import yaml
-    except ImportError as exc:
-        raise PackageError("execution admission requires the pinned CWL runner's YAML parser") from exc
-    try:
-        limits = json.loads(raw_limits)
-        workflow_document = yaml.safe_load(workflow)
-    except (ValueError, yaml.YAMLError) as exc:
-        raise PackageError(f"execution admission cannot parse worker limits or CWL: {exc}") from exc
-    input_ids = _admit_workflow(workflow_document, limits, runner.get("workerImageBase"))
-    if runner["maxWallSeconds"] > limits["wallSeconds"]:
-        raise PackageError("execution deferred: runner wall budget exceeds the approved worker limit")
-    try:
-        job_document = yaml.safe_load(payload["experiment/job.yml"])
-    except (ValueError, yaml.YAMLError) as exc:
-        raise PackageError(f"execution admission cannot parse the CWL job file: {exc}") from exc
-    job_members = _admit_job(job_document, payload if member_names is None else member_names, input_ids)
-    worker, observation = observe_worker(os.environ.get("EXPERIMENT_RUNNER_WORKER_ENVELOPE"))
-    resources = workflow_document["requirements"]["ResourceRequirement"]
-    worker.check_workload(resources["coresMax"], resources["ramMax"])
-    return {**limits, "workerObservation": observation}, tmpfs_root, job_members
-
-
-def _admit(payload: dict[str, bytes], members: Container[str]) -> tuple[dict, dict, dict, str, set[str]]:
-    closure = _dependency_closure(payload, members)
-    runner = _runner_config(payload)
-    limits, tmpfs_root, job_members = _worker_admission(payload, runner, members)
-    return closure, runner, limits, tmpfs_root, job_members
-
-
-def _finite_number(value: Any) -> bool:
-    if type(value) not in (int, float):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
-
-
-def _admit_workflow(document: Any, limits: Any, expected_image: Any, *, native_projection: bool = False) -> set[str]:
-    # This MVP intentionally supports one self-contained CommandLineTool. A
-    # Workflow can point `run` at another CWL document; inspecting only the
-    # entrypoint would let that document bypass all requirements below.
-    if not isinstance(document, dict) or document.get("class") != "CommandLineTool":
-        raise PackageError("execution deferred: only a single top-level CWL CommandLineTool is admitted")
-    declared_inputs = document.get("inputs")
-    if not isinstance(declared_inputs, dict) or any(
-            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name)
-            for name in declared_inputs):
-        raise PackageError("execution deferred: CommandLineTool inputs must be a mapping with simple names")
-
-    def reject_document_references(value: Any, seen: set[int]) -> None:
-        if isinstance(value, dict):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            for key, child in value.items():
-                if _is_document_reference_key(key):
-                    raise PackageError(f"execution deferred: CWL document reference {key!r} is outside the single-tool subset")
-                reject_document_references(child, seen)
-        elif isinstance(value, list):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            for child in value:
-                reject_document_references(child, seen)
-
-    reject_document_references(document, set())
-    required_limits = {"cores", "ramMiB", "tmpdirMiB", "outdirMiB", "wallSeconds"}
-    if not isinstance(limits, dict) or not required_limits <= set(limits):
-        raise PackageError("worker must declare CPU, memory, temporary/output storage and wall-time limits")
-    numeric_limits = {key: limits[key] for key in required_limits}
-    if any(not _finite_number(value) or value <= 0 for value in numeric_limits.values()):
-        raise PackageError("worker resource limits must be finite positive numbers")
-    tools: list[dict] = []
-
-    def walk(value: Any, seen: set[int]) -> None:
-        if isinstance(value, dict):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            if value.get("class") == "CommandLineTool":
-                tools.append(value)
-            for child in value.values():
-                walk(child, seen)
-        elif isinstance(value, list):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            for child in value:
-                walk(child, seen)
-
-    walk(document, set())
-    if not tools:
-        raise PackageError("execution admission requires at least one CWL CommandLineTool")
-    for tool in tools:
-        requirements = tool.get("requirements", {})
-        if not isinstance(requirements, dict):
-            raise PackageError("CWL requirements must be a mapping")
-        if tool.get("hints"):
-            raise PackageError("execution deferred: CWL hints are outside this adapter's reviewed subset")
-        allowed = {"NetworkAccess", "ResourceRequirement", "ToolTimeLimit", "DockerRequirement"}
-        unknown = set(requirements) - allowed
-        if unknown:
-            raise PackageError(f"execution deferred: unsupported CWL requirements: {sorted(unknown)}")
-        network = requirements.get("NetworkAccess")
-        if not isinstance(network, dict) or network.get("networkAccess") is not False:
-            raise PackageError("execution deferred: every CommandLineTool must explicitly disable network access")
-        if set(network) != {"networkAccess"}:
-            raise PackageError("execution deferred: unsupported NetworkAccess fields")
-        _admit_container_requirement(requirements, expected_image, native_projection)
-        resources = requirements.get("ResourceRequirement")
-        time_limit = requirements.get("ToolTimeLimit")
-        if not isinstance(resources, dict) or not isinstance(time_limit, dict):
-            raise PackageError("execution deferred: each CommandLineTool needs explicit resources and a time limit")
-        resource_fields = {"coresMin", "coresMax", "ramMin", "ramMax", "tmpdirMin", "tmpdirMax",
-                           "outdirMin", "outdirMax"}
-        if set(resources) != resource_fields or set(time_limit) != {"timelimit"}:
-            raise PackageError("execution deferred: unsupported or incomplete resource/time fields")
-        mapping = (("coresMin", "coresMax", "cores"),
-                   ("ramMin", "ramMax", "ramMiB"),
-                   ("tmpdirMin", "tmpdirMax", "tmpdirMiB"),
-                   ("outdirMin", "outdirMax", "outdirMiB"))
-        for minimum, maximum, worker_key in mapping:
-            requested_min = resources.get(minimum)
-            requested_max = resources.get(maximum)
-            if (not _finite_number(requested_min) or not _finite_number(requested_max) or
-                    requested_min <= 0 or requested_max < requested_min or
-                    requested_max > numeric_limits[worker_key]):
-                raise PackageError(f"execution deferred: CWL {minimum}/{maximum} exceeds or omits worker limit {worker_key}")
-        if numeric_limits["outdirMiB"] > numeric_limits["tmpdirMiB"]:
-            raise PackageError("execution deferred: output directory limit exceeds the bounded tmpfs")
-        wall_seconds = time_limit.get("timelimit")
-        if (type(wall_seconds) is not int or wall_seconds <= 0 or
-                wall_seconds > min(numeric_limits["wallSeconds"], 86400)):
-            raise PackageError("execution deferred: CWL ToolTimeLimit exceeds worker wall-time limit")
-        for value_from in _values_for_key(tool, "valueFrom"):
-            if re.search(r"\$\(|\$\{", value_from) and not re.fullmatch(
-                    r"\$\((?:inputs\.[A-Za-z][A-Za-z0-9_]*\.path|runtime\.outdir)\)", value_from):
-                raise PackageError("execution deferred: CWL expression is outside the reviewed path-only subset")
-    return set(declared_inputs)
-
-
-def _admit_container_requirement(requirements: dict, expected_image: Any, native_projection: bool) -> None:
-    if native_projection:
-        if "DockerRequirement" in requirements:
-            raise PackageError("native projection cannot remove a source-owned DockerRequirement")
-        return
-    docker = requirements.get("DockerRequirement")
-    docker_pull = docker.get("dockerPull") if isinstance(docker, dict) else None
-    if (not isinstance(docker_pull, str) or "@sha256:" not in docker_pull or
-            docker_pull != expected_image):
-        raise PackageError("execution deferred: each CommandLineTool needs a digest-pinned Docker image")
-    if set(docker) != {"dockerPull"}:
-        raise PackageError("execution deferred: unsupported DockerRequirement fields")
-
-
-def _values_for_key(value: Any, key: str, _seen: set[int] | None = None) -> list[str]:
-    seen = set() if _seen is None else _seen
-    found: list[str] = []
-    if isinstance(value, dict):
-        if id(value) in seen:
-            return found
-        seen.add(id(value))
-        if key in value:
-            if not isinstance(value[key], str):
-                raise PackageError(f"CWL {key} values must be strings")
-            found.append(value[key])
-        for child in value.values():
-            found.extend(_values_for_key(child, key, seen))
-    elif isinstance(value, list):
-        if id(value) in seen:
-            return found
-        seen.add(id(value))
-        for child in value:
-            found.extend(_values_for_key(child, key, seen))
-    return found
-
-
-def _admit_job(job: Any, members: Container[str], input_ids: set[str]) -> set[str]:
-    if not isinstance(job, dict):
-        raise PackageError("execution admission requires a mapping CWL job document")
-    if any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in job):
-        raise PackageError("execution deferred: job order keys must be declared simple input names")
-    unknown_inputs = set(job) - input_ids
-    if unknown_inputs:
-        raise PackageError(f"execution deferred: job order contains undeclared inputs or directives: {sorted(unknown_inputs)}")
-    files: list[dict] = []
-    directive_keys = {
-        "$import", "$include", "$schemas", "$graph", "$base",
-        "cwl:tool", "cwltool:overrides",
-        "https://w3id.org/cwl/cwl#tool", "https://w3id.org/cwl/cwl#overrides",
-        "https://w3id.org/cwl/cwl#base",
-    }
-
-    def walk(value: Any, seen: set[int]) -> None:
-        if isinstance(value, dict):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            if any(key in directive_keys or _is_document_reference_key(key) for key in value):
-                raise PackageError("execution deferred: job order contains a CWL document reference or override")
-            if value.get("class") == "File":
-                files.append(value)
-            if value.get("class") == "Directory":
-                raise PackageError("execution deferred: Directory inputs are outside this adapter's reviewed subset")
-            for child in value.values():
-                walk(child, seen)
-        elif isinstance(value, list):
-            if id(value) in seen:
-                return
-            seen.add(id(value))
-            for child in value:
-                walk(child, seen)
-
-    walk(job, set())
-    job_members = set()
-    for item in files:
-        path = item.get("path")
-        if set(item) - {"class", "path", "basename", "format"} or not isinstance(path, str):
-            raise PackageError("execution deferred: job File inputs must use packaged relative paths only")
-        try:
-            relative = safe_path(path)
-        except PackageError as exc:
-            raise PackageError("execution deferred: unsafe job File path") from exc
-        member = f"experiment/{relative}"
-        if member not in members:
-            raise PackageError(f"execution deferred: job File input is not embedded: {relative}")
-        job_members.add(member)
-    return job_members
-
-
-def _is_document_reference_key(key: Any) -> bool:
-    if key in {"run", "$import", "$include", "$schemas", "$graph", "$base",
-               "cwl:tool", "cwltool:overrides"}:
-        return True
-    if not isinstance(key, str):
-        return False
-    return any(key.endswith(f"#{suffix}") for suffix in
-               ("run", "import", "include", "schemas", "graph", "base", "tool", "overrides"))
-
-
-def _materialize(root: Path, payload: dict[str, _MemberSource]) -> None:
-    for relative, data in payload.items():
-        safe_path(relative)
-        target = root.joinpath(*relative.split("/"))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(data, bytes):
-            target.write_bytes(data)
-        else:
-            with data.open("rb") as source, target.open("wb") as destination:
-                shutil.copyfileobj(source, destination, length=1024 * 1024)
-
-
-def _run_command(request: _CwlCommandRequest) -> list[str]:
-    temporary, work = request.temporary, request.work
-    attempt_out, provenance, runner = request.attempt_out, request.provenance, request.runner
-    cidfile_dir, cidfile_prefix = request.cidfile_dir, request.cidfile_prefix
-    tmp_outdir_prefix = request.tmp_outdir_prefix
-    runtime_args = ["--podman"] if runner["executionMode"] == "cwltool-podman" else []
-    command = [
-        sys.executable, "-m", "cwltool", *runtime_args, "--disable-pull",
-        "--strict-memory-limit", "--strict-cpu-limit",
-        "--disable-host-provenance", "--disable-user-provenance",
-        "--leave-container", "--cidfile-dir", str(cidfile_dir),
-        "--cidfile-prefix", cidfile_prefix,
-        "--basedir", str(work / "experiment"),
-        "--tmpdir-prefix", str(temporary / "cwl-tmp-"),
-        "--tmp-outdir-prefix", str(tmp_outdir_prefix or temporary / "cwl-out-"),
-        "--outdir", str(attempt_out), "--provenance", str(provenance),
-        str(work / "experiment/workflow.cwl"), str(work / "experiment/job.yml"),
-    ]
-    return command
-
-
-def _terminate_process_group(process: Any) -> list[str]:
-    """Attempt bounded orchestrator cleanup without losing cancellation evidence."""
-    errors: list[str] = []
-    for signal_number in (15, 9):
-        try:
-            os.killpg(process.pid, signal_number)
-        except ProcessLookupError:
-            pass
-        except (OSError, KeyboardInterrupt) as exc:
-            errors.append(f"Process group signal {signal_number} failed: {type(exc).__name__}: {str(exc)[:1024]}")
-        try:
-            process.wait(timeout=5)
-        except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
-            errors.append(f"Process cleanup wait after signal {signal_number} failed: {type(exc).__name__}: {str(exc)[:1024]}")
-    # A failed wait is evidence of incomplete cleanup, not proof of termination.
-    if _process_group_exists(process.pid):
-        errors.append("CWL orchestrator process group remains after bounded TERM/KILL")
-    return errors
-
-
-def _cwl_process_identity(pid: int) -> dict:
-    """Capture the Linux process and session identity before recording running state."""
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-        fields = stat[stat.rfind(")") + 2:].split()
-        return {
-            "pid": pid, "bootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
-            "processStartTicks": fields[19], "processGroupId": int(fields[2]),
-            "sessionId": int(fields[3]),
-        }
-    except (OSError, IndexError, ValueError) as exc:
-        raise PackageError("Cannot durably identify the launched cwltool process group") from exc
-
-
-def _process_group_exists(group_id: int) -> bool:
-    proc = Path("/proc")
-    if not proc.is_dir():
-        return True
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = (entry / "stat").read_text()
-        except FileNotFoundError:
-            continue
-        except OSError:
-            return True
-        fields = stat[stat.rfind(")") + 2:].split()
-        if len(fields) > 2 and fields[0] != "Z" and fields[2].isdigit() and int(fields[2]) == group_id:
-            return True
-    return False
-
-
-def _kernel_boot_uuid() -> uuid.UUID:
-    try:
-        value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        parsed = uuid.UUID(value)
-    except (OSError, ValueError, AttributeError) as exc:
-        raise PackageError("Current Linux kernel boot ID is invalid or unavailable") from exc
-    if str(parsed) != value.lower():
-        raise PackageError("Current Linux kernel boot ID is not canonical")
-    return parsed
-
-
-def _validated_cwl_process_identity(identity: Any) -> tuple[int, int, bool]:
-    if not isinstance(identity, dict):
-        raise PackageError("Launch-intent recovery has no durable cwltool process identity")
-    pid, pgid = identity.get("pid"), identity.get("processGroupId")
-    session = identity.get("sessionId")
-    saved_boot_id = identity.get("bootId")
-    try:
-        saved_boot = uuid.UUID(saved_boot_id) if isinstance(saved_boot_id, str) else None
-    except (ValueError, AttributeError) as exc:
-        raise PackageError("Retained cwltool process identity has an invalid boot ID") from exc
-    current_boot = _kernel_boot_uuid()
-    if (saved_boot is None or str(saved_boot) != saved_boot_id.lower() or
-            type(pid) is not int or pid <= 0 or pgid != pid or session != pid or
-            not isinstance(identity.get("processStartTicks"), str) or
-            not identity["processStartTicks"].isdigit()):
-        raise PackageError("Retained cwltool process identity is malformed")
-    return pid, pgid, saved_boot != current_boot
-
-
-def _current_cwl_process_fields(pid: int) -> list[str] | None:
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise PackageError(f"Cannot verify retained cwltool process identity: {exc}") from exc
-    return stat[stat.rfind(")") + 2:].split()
-
-
-def _signal_retained_cwl_group(pgid: int) -> None:
-    for number in (15, 9):
-        try:
-            os.killpg(pgid, number)
-        except ProcessLookupError:
-            return
-        except OSError as exc:
-            raise PackageError(f"Cannot stop exact retained cwltool process group: {exc}") from exc
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and _process_group_exists(pgid):
-            time.sleep(0.05)
-        if not _process_group_exists(pgid):
-            return
-    raise PackageError("Exact retained cwltool process group remains after bounded TERM/KILL")
-
-
-def _reconcile_cwl_process_group(journal: dict) -> None:
-    identity = journal.get("cwlProcessIdentity")
-    pid, pgid, previous_boot = _validated_cwl_process_identity(identity)
-    if previous_boot:
-        # A process group cannot survive a kernel reboot. Numeric PIDs may have
-        # been reused since then, so do not inspect or signal the old PID/PGID.
-        return
-    fields = _current_cwl_process_fields(pid)
-    if fields is None:
-        if _process_group_exists(pgid):
-            raise PackageError("cwltool leader exited but its process group remains; refusing ambiguous cleanup")
-        return
-    try:
-        matches = (fields[19] == identity["processStartTicks"] and int(fields[2]) == pgid and
-                   int(fields[3]) == identity["sessionId"])
-    except (IndexError, ValueError) as exc:
-        raise PackageError("Retained cwltool process stat is malformed") from exc
-    if not matches:
-        raise PackageError("Retained cwltool PID has been reused or changed session; refusing to signal")
-    _signal_retained_cwl_group(pgid)
-
-
-@dataclass
-class _CwlExecutionPaths:
-    attempt_directory: Path
-    journal: dict
-    receipt: dict
-    output_attempt: Path | None
-    attempt_out: Path
-    provenance: Path
-    stdout_path: Path
-    stderr_path: Path
-    command: list[str]
-    work: Path
-    environment: dict[str, str]
-
-
-@dataclass
-class _CwlExecutionRequest:
-    temporary: Path
-    payload: dict[str, _MemberSource]
-    runner: dict
-    limits: dict
-    tmpfs_root: str
-    context: tuple[Path, dict, dict] | None
-
-
-@dataclass
-class _CwlCommandRequest:
-    temporary: Path
-    work: Path
-    attempt_out: Path
-    provenance: Path
-    runner: dict
-    cidfile_dir: Path
-    cidfile_prefix: str
-    tmp_outdir_prefix: Path | None = None
 
 
 @dataclass
@@ -683,7 +34,7 @@ class _AttemptExecution:
     output: Path
     source_directory: Path
     attempt_directory: Path
-    package: _VerifiedRunPackage
+    package: runner_admission._VerifiedRunPackage
     job_members: set[str]
     expected_sha256: str
     closure: dict
@@ -697,1107 +48,47 @@ class _AttemptExecution:
     started: float
 
 
-def _bounded_output_root(tmpfs_root: str, limits: dict) -> Path | None:
-    value = os.environ.get("EXPERIMENT_RUNNER_OUTPUT_TMPFS_ROOT")
-    if not value:
-        return None
-    output_root = _require_bounded_output_tmpfs(Path(value), limits["outdirMiB"])
-    scratch_root = Path(tmpfs_root).resolve(strict=True)
-    if (output_root == scratch_root or output_root.is_relative_to(scratch_root) or
-            scratch_root.is_relative_to(output_root)):
-        raise PackageError("execution deferred: bounded output tmpfs must be separate from CWL scratch storage")
-    return output_root
-
-
-def _cwl_process_environment(temporary: Path) -> dict[str, str]:
-    runner_home = temporary / "runner-home"
-    runner_home.mkdir()
-    python_lib = str(Path(sys.executable).resolve().parent.parent / "lib")
-    inherited = os.environ.get("LD_LIBRARY_PATH")
-    environment = {
-        "PATH": "/usr/bin:/bin", "HOME": str(runner_home), "TMPDIR": str(temporary),
-        "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PYTHONNOUSERSITE": "1",
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "LD_LIBRARY_PATH": f"{python_lib}:{inherited}" if inherited else python_lib,
-    }
-    for name in ("XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
-        value = os.environ.get(name)
-        if value:
-            environment[name] = value
-    return environment
-
-
-def _settle_cwl_group(process: Any, *, terminate: bool) -> tuple[bool, list[str]]:
-    if process is None or (not terminate and not _process_group_exists(process.pid)):
-        return False, []
-    errors = _terminate_process_group(process)
-    return _process_group_exists(process.pid), errors
-
-
-def _cleanup_after_cwl_exit(paths: _CwlExecutionPaths, group_remaining: bool) -> list[str]:
-    if group_remaining:
-        _journal_update(paths.attempt_directory, paths.journal, paths.receipt, state=_CleanupState.UNKNOWN)
-        report_failure(_LOGGER, "run", "cleanup", receipt=paths.receipt)
-        return ["Container cleanup skipped because the CWL process group remains alive"]
-    errors: list[str] = []
-    _cleanup_container_journal(paths.attempt_directory, paths.journal, paths.receipt, errors)
-    if errors:
-        report_failure(_LOGGER, "run", "cleanup", receipt=paths.receipt)
-    return errors
-
-
-def _handle_cwl_interrupt(paths: _CwlExecutionPaths, process: Any, interruption: KeyboardInterrupt) -> None:
-    group_remaining, errors = _settle_cwl_group(process, terminate=True)
-    for error in errors + _cleanup_after_cwl_exit(paths, group_remaining):
-        interruption.add_note(error)
-    _remove_bounded_output(paths.output_attempt, interruption)
-
-
-def _handle_cwl_error(paths: _CwlExecutionPaths, process: Any, exc: Exception) -> None:
-    group_remaining, errors = _settle_cwl_group(process, terminate=True)
-    container_errors = _cleanup_after_cwl_exit(paths, group_remaining)
-    _remove_bounded_output(paths.output_attempt, exc)
-    for error in errors + container_errors:
-        if hasattr(exc, "add_note"):
-            exc.add_note(error)
-    if not isinstance(exc, (OSError, subprocess.SubprocessError, PackageError)):
-        raise PackageError(f"CWL runner could not complete its controller handoff: {exc}") from exc
-
-
-def _record_cwl_exit(paths: _CwlExecutionPaths, return_code: int | None, *, unresolved: bool) -> None:
-    if unresolved:
-        paths.journal["cwlProcessGroupUnresolved"] = True
-        _journal_update(paths.attempt_directory, paths.journal, paths.receipt, state=_CleanupState.UNKNOWN)
-    else:
-        paths.journal["cwlProcessExit"] = {"returnCode": return_code}
-        _journal_update(paths.attempt_directory, paths.journal, paths.receipt)
-
-
-def _wait_cwl_process(paths: _CwlExecutionPaths, process: Any, timeout: int) -> tuple[int, bool, list[str]]:
-    try:
-        return_code = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        unresolved, errors = _settle_cwl_group(process, terminate=True)
-        _record_cwl_exit(paths, process.returncode, unresolved=unresolved)
-        return process.returncode or 124, True, errors
-    unresolved, errors = _settle_cwl_group(process, terminate=False)
-    _record_cwl_exit(paths, return_code, unresolved=unresolved)
-    return return_code, False, errors
-
-
-def _finish_cwl_logs(paths: _CwlExecutionPaths, capture: LogCapture,
-                     original: BaseException | None = None) -> None:
-    if paths.receipt.get("logCapture") is None:
-        with _defer_operator_signals(original):
-            capture.finish()
-            paths.receipt["logCapture"] = capture.summary()
-            paths.receipt.setdefault("collectionErrors", []).extend(capture.errors())
-
-
-@contextmanager
-def _capture_cwl_logs(paths: _CwlExecutionPaths):
-    with ExitStack() as resources:
-        capture = LogCapture(resources, paths.stdout_path, paths.stderr_path)
-        try:
-            with _defer_operator_signals():
-                capture.start()
-            yield capture
-        except BaseException as exc:
-            _finish_cwl_logs(paths, capture, exc)
-            raise
-        else:
-            _finish_cwl_logs(paths, capture)
-
-
-def _run_cwl_process(paths: _CwlExecutionPaths, timeout: int, capture: LogCapture) -> tuple[int, bool, list[str]]:
-    process = None
-    try:
-        with _defer_operator_signals():
-            process = subprocess.Popen(
-                paths.command, cwd=paths.work, env=paths.environment,
-                stdout=capture.streams["stdout"].writer, stderr=capture.streams["stderr"].writer,
-                start_new_session=True,
-            )
-            capture.close_writers()
-            paths.journal["cwlProcessIdentity"] = _cwl_process_identity(process.pid)
-            _transition_process(paths.receipt, _ProcessPhase.RUNNING)
-            _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
-                            state=_CleanupState.RUNNING, processStartedAt=datetime.now(timezone.utc).isoformat())
-        outcome = _wait_cwl_process(paths, process, timeout)
-        paths.receipt.update(exitCode=outcome[0], timedOut=outcome[1])
-        _finish_cwl_logs(paths, capture)
-        return outcome
-    except KeyboardInterrupt as interruption:
-        with _defer_operator_signals(interruption):
-            if process is not None:
-                _record_first_cancellation(paths.attempt_directory, paths.journal, paths.receipt)
-            _handle_cwl_interrupt(paths, process, interruption)
-        raise
-    except Exception as exc:
-        _handle_cwl_error(paths, process, exc)
-        raise
-
-
-def _record_first_cancellation(attempt_directory: Path, journal: dict, receipt: dict) -> None:
-    if journal["cancellation"] is None:
-        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CANCELLATION_REQUESTED,
-                        cancellation={"requestedAt": datetime.now(timezone.utc).isoformat()})
-
-
-def _remove_bounded_output(output_attempt: Path | None, error_target: BaseException) -> None:
-    if output_attempt is None or not output_attempt.exists():
-        return
-    try:
-        shutil.rmtree(output_attempt)
-    except OSError as exc:
-        note = f"bounded output tmpfs cleanup failed: {type(exc).__name__}: {str(exc)[:512]}"
-        if hasattr(error_target, "add_note"):
-            error_target.add_note(note)
-
-
-def _prepare_attempt_context(request: _CwlExecutionRequest) -> tuple[Path, dict, dict]:
-    temporary, runner = request.temporary, request.runner
-    context = request.context
-    if context is not None:
-        attempt_directory, journal, receipt = context
-        if not (attempt_directory / "engine-cids").exists():
-            (attempt_directory / "engine-cids").mkdir(mode=0o700)
-        return attempt_directory, journal, receipt
-    attempt_directory, journal, receipt = None, None, None
-    if attempt_directory is None:
-        attempt_directory = temporary / "attempt-evidence"
-        attempt_directory.mkdir(mode=0o700)
-    cid_directory = attempt_directory / "engine-cids"
-    if not cid_directory.exists():
-        cid_directory.mkdir(mode=0o700)
-    if journal is None:
-        journal = {
-            "schema": _CONTAINER_JOURNAL_SCHEMA, "attemptId": "test-attempt",
-            "engine": _container_engine(runner),
-            "enginePath": "/usr/bin/podman" if runner["executionMode"] == "cwltool-podman" else "/usr/bin/docker",
-            "workerImageRef": runner.get("workerImageBase"), "workerImageId": None,
-            "reportedWorkerImageId": "unspecified", "state": _CleanupState.PREPARED,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
-            "cidfilePrefix": "test-attempt-", "containers": [], "cancellation": None,
-        }
-    return attempt_directory, journal, {"executionPhase": _ProcessPhase.LAUNCH_INTENT}
-
-
-def _prepare_cwl_paths(request: _CwlExecutionRequest) -> _CwlExecutionPaths:
-    temporary, payload = request.temporary, request.payload
-    runner, limits, tmpfs_root = request.runner, request.limits, request.tmpfs_root
-    attempt_directory, journal, receipt = _prepare_attempt_context(request)
-    _require_bounded_tmpfs(temporary, Path(tmpfs_root), limits["tmpdirMiB"])
-    output_root = _bounded_output_root(tmpfs_root, limits)
-    work = temporary / "package"
-    work.mkdir()
-    _materialize(work, payload)
-    output_attempt = output_root / journal["attemptId"] if output_root else None
-    if output_attempt is not None:
-        if output_attempt.exists() or output_attempt.is_symlink():
-            raise PackageError("bounded output attempt path already exists; refusing reuse")
-        output_attempt.mkdir(mode=0o700)
-    attempt_out = output_attempt / "outputs" if output_attempt else temporary / "outputs"
-    prefix = output_attempt / "cwl-out-" if output_attempt else None
-    provenance = temporary / "cwlprov"
-    command = _run_command(_CwlCommandRequest(
-        temporary, work, attempt_out, provenance, runner,
-        attempt_directory / "engine-cids", journal["cidfilePrefix"], prefix,
-    ))
-    return _CwlExecutionPaths(
-        attempt_directory, journal, receipt, output_attempt, attempt_out, provenance,
-        temporary / "stdout.log", temporary / "stderr.log", command, work,
-        _cwl_process_environment(temporary),
-    )
-
-
-def _execute_cwl(request: _CwlExecutionRequest) -> dict:
-    limits = request.limits
-    paths = _prepare_cwl_paths(request)
-    with _capture_cwl_logs(paths) as capture:
-        return_code, timed_out, cleanup_errors = _run_cwl_process(paths, request.runner["maxWallSeconds"], capture)
-    attempt_directory, journal, receipt = paths.attempt_directory, paths.journal, paths.receipt
-    output_attempt, attempt_out, provenance = paths.output_attempt, paths.attempt_out, paths.provenance
-    stdout_path, stderr_path = paths.stdout_path, paths.stderr_path
-    collection_errors = [*cleanup_errors, *receipt["collectionErrors"]]
-    if journal.get("cwlProcessGroupUnresolved") is True:
-        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.UNKNOWN)
-        collection_errors.append("Container cleanup skipped because the CWL process group remains alive")
-    else:
-        _cleanup_container_journal(attempt_directory, journal, receipt, collection_errors)
-    receipt["containerCleanup"] = _container_cleanup_summary(journal)
-    _journal_receipt_reference(attempt_directory, journal, receipt)
-    # Execution collection is bounded by the reviewed worker/CWL resource
-    # envelope, not by a Compiled Experiment archive-size policy.
-    output_budget = limits.get("outdirMiB", limits["tmpdirMiB"]) * 1024 * 1024
-    provenance_budget = limits["tmpdirMiB"] * 1024 * 1024
-    output_files = _collect_execution_tree(
-        attempt_out, "output", collection_errors, output_budget
-    )
-    provenance_files = _collect_execution_tree(
-        provenance, "provenance", collection_errors, provenance_budget
-    )
-    if output_attempt is not None and output_attempt.exists():
-        try:
-            shutil.rmtree(output_attempt)
-        except OSError as exc:
-            collection_errors.append(f"bounded output tmpfs cleanup failed: {type(exc).__name__}: {str(exc)[:512]}")
-    if not output_files and return_code == 0:
-        collection_errors.append("CWL runner succeeded without producing any admitted result files")
-    return {
-        "returnCode": return_code,
-        "timedOut": timed_out,
-        "stdout": _read_execution_log(stdout_path, "stdout", collection_errors),
-        "stderr": _read_execution_log(stderr_path, "stderr", collection_errors),
-        "outputs": output_files,
-        "provenance": provenance_files,
-        "collectionErrors": collection_errors,
-        "logCapture": receipt["logCapture"],
-        "containerJournal": receipt.get("containerJournal"),
-        "containerCleanup": _container_cleanup_summary(journal),
-        "scratchStorage": {"enforcement": "dedicated-mounted-tmpfs", "capMiB": limits["tmpdirMiB"]},
-        "outputStorage": ({"enforcement": "separate-mounted-tmpfs", "capMiB": limits["outdirMiB"]}
-                          if output_attempt is not None else {"enforcement": "worker-tmpfs-only", "hardCap": False}),
-    }
-
-
-def _collect_execution_tree(root: Path, label: str, errors: list[str],
-                            max_bytes: int | None = None) -> dict[str, bytes]:
-    collected: dict[str, bytes] = {}
-    if not root.exists():
-        return collected
-    try:
-        _collect_tree(root, collected, max_bytes)
-    except (PackageError, OSError) as exc:
-        collected.clear()
-        errors.append(f"{label} collection rejected: {exc}")
-    return collected
-
-
-def _read_execution_log(path: Path, label: str, errors: list[str]) -> bytes:
-    try:
-        return bounded_read(path, LOG_STREAM_LIMIT)
-    except (PackageError, OSError) as exc:
-        errors.append(f"{label} rejected: {exc}")
-        return b""
-
-
-def _container_engine(runner: dict) -> str:
-    mode = runner.get("executionMode")
-    if mode == "cwltool-podman":
-        return "podman"
-    if mode == "cwltool-docker":
-        return "docker"
-    raise PackageError("unsupported container engine in runner configuration")
-
-
-def _normalize_engine_image_id(value: str) -> str | None:
-    """Canonicalize a complete engine image ID; never accept a short ID."""
-    if not isinstance(value, str):
-        return None
-    match = _ENGINE_IMAGE_ID.fullmatch(value.strip())
-    if not match:
-        return None
-    return f"sha256:{match.group(1).lower()}"
-
-
-def _engine_image_reference_matches(observed: str, pinned: str) -> bool:
-    """Allow Podman to omit a tag while preserving the pinned repository and digest."""
-    if not isinstance(observed, str) or not isinstance(pinned, str):
-        return False
-    digest_pattern = re.compile(r"^(.+)@(sha256:[0-9a-f]{64})$")
-    observed_match = digest_pattern.fullmatch(observed)
-    pinned_match = digest_pattern.fullmatch(pinned)
-    if observed_match is None or pinned_match is None:
-        return False
-    if observed == pinned:
-        return True
-    pinned_name, pinned_digest = pinned_match.groups()
-    observed_name, observed_digest = observed_match.groups()
-    if observed_digest != pinned_digest:
-        return False
-    # A registry port is before the final slash; only a colon in the final
-    # path component can be the optional image tag.
-    last_slash = pinned_name.rfind("/")
-    tag_separator = pinned_name.rfind(":")
-    if tag_separator <= last_slash:
-        return False
-    tag = pinned_name[tag_separator + 1:]
-    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):
-        return False
-    return observed_name == pinned_name[:tag_separator]
-
-
-def _write_container_journal(attempt_directory: Path, journal: dict) -> str:
-    """Durably replace the controller-owned journal and return its digest."""
-    if journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA:
-        raise PackageError("container journal schema mismatch")
-    path = attempt_directory / "container-journal.json"
-    pending = attempt_directory / "container-journal.json.tmp"
-    encoded = canonical(journal)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(pending, flags, 0o600)
-    try:
-        with os.fdopen(fd, "wb", closefd=False) as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-    finally:
-        os.close(fd)
-    pending.replace(path)
-    _fsync_directory(attempt_directory)
-    return sha256_bytes(encoded)
-
-
-def _fsync_directory(directory: Path) -> None:
-    if os.name != "posix":
-        return
-    directory_fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
-
-
-def _journal_receipt_reference(attempt_directory: Path, journal: dict, receipt: dict) -> str:
-    encoded = canonical(journal)
-    digest = sha256_bytes(encoded)
-    previous = receipt.get("containerJournal")
-    previous_digest = previous.get("sha256") if isinstance(previous, dict) else None
-    marker = {
-        "schema": "cwltool-container-journal-transaction/v1",
-        "attemptId": journal.get("attemptId"),
-        "fromSha256": previous_digest,
-        "toSha256": digest,
-    }
-    marker_path = attempt_directory / "container-journal.pending"
-    marker_tmp = attempt_directory / "container-journal.pending.tmp"
-    fd = os.open(marker_tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
-    with os.fdopen(fd, "wb") as stream:
-        stream.write(canonical(marker))
-        stream.flush()
-        os.fsync(stream.fileno())
-    marker_tmp.replace(marker_path)
-    _fsync_directory(attempt_directory)
-    digest = _write_container_journal(attempt_directory, journal)
-    receipt["containerJournal"] = {"path": "container-journal.json", "sha256": digest}
-    _persist_attempt_receipt(attempt_directory, receipt)
-    marker_path.unlink(missing_ok=True)
-    _fsync_directory(attempt_directory)
-    return digest
-
-
-def _retain_journal_snapshot(attempt_directory: Path, digest: str) -> str:
-    """Keep an immutable private copy for any result receipt that cites this digest."""
-    current = attempt_directory / "container-journal.json"
-    if current.is_symlink() or not current.is_file():
-        raise PackageError("Container journal is not a regular private sidecar")
-    data = bounded_read(current, 1024 * 1024)
-    if sha256_bytes(data) != digest:
-        raise PackageError("Container journal changed before its digest snapshot could be retained")
-    history = attempt_directory / "container-journal-history"
-    history.mkdir(mode=0o700, exist_ok=True)
-    if (history.is_symlink() or not history.is_dir() or
-            (os.name == "posix" and history.stat().st_mode & 0o077) or
-            (hasattr(os, "getuid") and history.stat().st_uid != os.getuid())):
-        raise PackageError("Container journal history directory is unsafe")
-    snapshot = history / f"{digest}.json"
-    if not os.path.lexists(snapshot):
-        _publish_journal_snapshot(history, snapshot, data)
-    _validate_private_file(snapshot, "Existing container journal history snapshot")
-    if sha256_bytes(bounded_read(snapshot, 1024 * 1024)) != digest:
-        raise PackageError("Existing container journal history digest does not match its filename")
-    _fsync_directory(history)
-    _fsync_directory(attempt_directory)
-    return f"container-journal-history/{digest}.json"
-
-
-def _publish_journal_snapshot(history: Path, snapshot: Path, data: bytes) -> None:
-    with tempfile.NamedTemporaryFile(prefix=".journal-", dir=history, delete=False) as stream:
-        staged = Path(stream.name)
-        try:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-            stream.close()
-            try:
-                os.link(staged, snapshot)
-            except FileExistsError:
-                # The caller validates the snapshot that won the race.
-                pass
-        finally:
-            stream.close()
-            staged.unlink(missing_ok=True)
-
-
-def _container_cleanup_summary(journal: dict) -> dict:
-    containers = journal.get("containers", [])
-    state = journal.get("state")
-    if not isinstance(state, str) or state not in tuple(_CleanupState):
-        state = _CleanupState.UNKNOWN
-    engine = journal.get("engine")
-    entries = containers if isinstance(containers, list) else []
-    absent = sum(1 for entry in entries if isinstance(entry, dict)
-                 and isinstance(entry.get("cleanup"), dict) and entry["cleanup"].get("absentAfterCleanup") is True)
-    return {
-        "engine": engine if engine in ("docker", "podman") else None,
-        "state": state,
-        "containerCount": len(entries),
-        "absentCount": absent,
-        "allAbsent": (state == _CleanupState.CLEAN and
-                      isinstance(containers, list) and absent == len(entries)),
-    }
-
-
-def _new_container_journal(attempt_directory: Path, attempt_id: str, runner: dict) -> dict:
-    cid_directory = attempt_directory / "engine-cids"
-    cid_directory.mkdir(mode=0o700)
-    cid_directory.chmod(0o700)
-    if cid_directory.is_symlink() or not cid_directory.is_dir():
-        raise PackageError("container cidfile directory is not a regular controller-owned directory")
-    if hasattr(os, "getuid") and cid_directory.stat().st_uid != os.getuid():
-        raise PackageError("container cidfile directory is not owned by the current runner")
-    engine = _container_engine(runner)
-    engine_path = shutil.which(engine, path="/usr/bin:/bin")
-    if not engine_path or not Path(engine_path).is_absolute():
-        raise PackageError(f"Configured container engine {engine!r} is not available on the trusted PATH")
-    journal = {
-        "schema": _CONTAINER_JOURNAL_SCHEMA,
-        "attemptId": attempt_id,
-        "engine": engine,
-        "enginePath": str(Path(engine_path).resolve(strict=True)),
-        "workerImageRef": runner.get("workerImageBase"),
-        "reportedWorkerImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-        "workerImageId": None,
-        "controller": _controller_identity(),
-        "state": _CleanupState.PREPARED,
-        "createdAt": datetime.now(timezone.utc).isoformat(),
-        "updatedAt": datetime.now(timezone.utc).isoformat(),
-        "cidfilePrefix": f"{attempt_id}-",
-        "containers": [],
-        "cancellation": None,
-    }
-    image = _engine_call(attempt_directory, journal,
-                         ["image", "inspect", "--format", "{{.Id}}", str(journal["workerImageRef"])])
-    image_id = _normalize_engine_image_id(image.stdout)
-    if image.returncode != 0 or image_id is None:
-        raise PackageError("Pinned workflow image could not be verified by the configured engine")
-    journal["workerImageId"] = image_id
-    return journal
-
-
-def _controller_identity() -> dict:
-    identity = {"pid": os.getpid(), "bootId": None, "processStartTicks": None}
-    try:
-        identity["bootId"] = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        stat = Path(f"/proc/{os.getpid()}/stat").read_text()
-        identity["processStartTicks"] = stat[stat.rfind(")") + 2:].split()[19]
-    except (OSError, IndexError):
-        pass
-    return identity
-
-
-def _controller_is_alive(identity: Any) -> bool:
-    if not isinstance(identity, dict) or type(identity.get("pid")) is not int or identity["pid"] <= 0:
-        raise PackageError("Attempt journal has no trusted controller process identity")
-    current = _controller_identity()
-    if (not isinstance(identity.get("bootId"), str) or
-            not re.fullmatch(r"[0-9a-fA-F-]{36}", identity["bootId"]) or
-            not isinstance(identity.get("processStartTicks"), str) or
-            not identity["processStartTicks"].isdigit() or
-            not isinstance(current.get("bootId"), str) or
-            not isinstance(current.get("processStartTicks"), str)):
-        raise PackageError("Attempt journal lacks a verifiable Linux controller identity")
-    if identity.get("bootId") != current.get("bootId"):
-        return False
-    pid = identity["pid"]
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return False
-    except OSError as exc:
-        raise PackageError(f"Cannot verify prior controller process state: {exc}") from exc
-    try:
-        ticks = stat[stat.rfind(")") + 2:].split()[19]
-    except IndexError as exc:
-        raise PackageError("Prior controller process identity is malformed") from exc
-    if ticks != identity.get("processStartTicks"):
-        return False
-    raise PackageError("The original attempt controller is still alive; refusing concurrent cleanup")
-
-
-def _journal_update(attempt_directory: Path, journal: dict, receipt: dict, **changes) -> None:
-    if "state" in changes:
-        _validate_cleanup_transition(journal.get("state"), changes["state"])
-    journal.update(changes)
-    journal["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    _journal_receipt_reference(attempt_directory, journal, receipt)
-
-
-def _discover_container_ids(attempt_directory: Path, journal: dict,
-                            receipt: dict, errors: list[str]) -> None:
-    cid_directory = attempt_directory / "engine-cids"
-    if cid_directory.is_symlink() or not cid_directory.is_dir():
-        errors.append("Container cidfile directory is missing or unsafe")
-        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CLEANUP_FAILED)
-        return
-    files = sorted(cid_directory.glob(f"{journal['cidfilePrefix']}*.cid"))
-    if len(files) > _MAX_ATTEMPT_CONTAINERS:
-        errors.append("Container journal exceeds its bounded CID count")
-        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CLEANUP_FAILED)
-        return
-    known = {entry.get("id") for entry in journal["containers"] if isinstance(entry, dict)}
-    for path in files:
-        try:
-            if path.is_symlink() or not path.is_file():
-                raise PackageError("CID file is not a regular file")
-            if path.stat().st_size > 128:
-                raise PackageError("CID file exceeds its limit")
-            container_id = path.read_text(encoding="ascii").strip()
-            if not _CONTAINER_ID.fullmatch(container_id):
-                raise PackageError("CID file does not contain a full lowercase container ID")
-        except (OSError, UnicodeError, PackageError) as exc:
-            errors.append(f"Container CID evidence rejected ({path.name}): {exc}")
-            continue
-        if container_id in known:
-            continue
-        entry = {
-            "engine": journal["engine"],
-            "id": container_id,
-            "imageId": journal["workerImageId"],
-            "imageRef": journal["workerImageRef"],
-            "cidfile": f"engine-cids/{path.name}",
-            "discoveredAt": datetime.now(timezone.utc).isoformat(),
-            "inspectState": "unknown",
-            "cleanup": {"status": _ContainerCleanupPhase.PENDING, "absentAfterCleanup": False},
-        }
-        journal["containers"].append(entry)
-        known.add(container_id)
-        # Record every newly discovered engine identity before contacting it.
-        _journal_update(attempt_directory, journal, receipt)
-
-
-def _container_engine_environment(attempt_directory: Path) -> dict[str, str]:
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(attempt_directory / "runner-home"),
-           "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PYTHONNOUSERSITE": "1"}
-    for name in ("XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "LD_LIBRARY_PATH"):
-        value = os.environ.get(name)
-        if value:
-            env[name] = value
-    return env
-
-
-def _engine_call(attempt_directory: Path, journal: dict, arguments: list[str]) -> subprocess.CompletedProcess:
-    executable = journal.get("enginePath")
-    expected = shutil.which(journal.get("engine", ""), path="/usr/bin:/bin")
-    if (not isinstance(executable, str) or not Path(executable).is_absolute() or
-            not expected or Path(executable).resolve(strict=True) != Path(expected).resolve(strict=True)):
-        raise PackageError("Container cleanup engine path differs from the trusted engine binary")
-    try:
-        return subprocess.run([executable, *arguments], stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, timeout=8, check=False,
-                              env=_container_engine_environment(attempt_directory))
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise PackageError(f"Container engine request failed: {type(exc).__name__}: {str(exc)[:512]}") from exc
-
-
-def _container_present(attempt_directory: Path, journal: dict, container_id: str) -> tuple[bool, str | None]:
-    inspected = _engine_call(attempt_directory, journal,
-                             ["inspect", "--format", "{{.Id}} {{.State.Status}} {{.Image}} {{.Config.Image}}", container_id])
-    if inspected.returncode == 0:
-        fields = inspected.stdout.strip().split()
-        if len(fields) != 4 or fields[0].lower() != container_id:
-            raise PackageError("Container inspect returned a different or malformed ID")
-        inspected_image_id = _normalize_engine_image_id(fields[2])
-        if (inspected_image_id != journal["workerImageId"]
-                or not _engine_image_reference_matches(fields[3], journal["workerImageRef"])):
-            raise PackageError("Journaled container image differs from the pinned and receipt-bound worker image")
-        return True, fields[1].lower()
-    listing = _engine_call(attempt_directory, journal, ["ps", "--all", "--no-trunc", "--format", "{{.ID}}"])
-    ids = {line.strip().lower() for line in listing.stdout.splitlines() if line.strip()}
-    if listing.returncode != 0 or any(not _CONTAINER_ID.fullmatch(item) for item in ids):
-        raise PackageError("Container engine could not prove whether the exact journaled ID remains")
-    if container_id in ids:
-        raise PackageError("Container engine lists the ID but inspect cannot establish its state")
-    return False, None
-
-
-def _cleanup_container_journal(attempt_directory: Path, journal: dict, receipt: dict,
-                               errors: list[str]) -> None:
-    _discover_container_ids(attempt_directory, journal, receipt, errors)
-    for entry in journal["containers"]:
-        container_id = entry["id"]
-        cleanup = entry["cleanup"]
-        if cleanup.get("absentAfterCleanup") is True:
-            continue
-        try:
-            present, state = _container_present(attempt_directory, journal, container_id)
-            entry["inspectState"] = state or "absent"
-            if present and state == "running":
-                _transition_container_cleanup(cleanup, _ContainerCleanupPhase.STOPPING,
-                                              requestedAt=datetime.now(timezone.utc).isoformat())
-                _journal_update(attempt_directory, journal, receipt)
-                stopped = _engine_call(attempt_directory, journal,
-                                       ["stop", "--time", "5", container_id])
-                present, state = _container_present(attempt_directory, journal, container_id)
-                if present and state == "running":
-                    raise PackageError(f"Container stop did not stop exact ID (exit {stopped.returncode})")
-            if present:
-                if state not in {"created", "exited", "stopped"}:
-                    raise PackageError(f"Container state {state!r} is busy or unknown; refusing removal")
-                _transition_container_cleanup(cleanup, _ContainerCleanupPhase.REMOVING,
-                                              removeRequestedAt=datetime.now(timezone.utc).isoformat())
-                _journal_update(attempt_directory, journal, receipt)
-                removed = _engine_call(attempt_directory, journal, ["rm", container_id])
-                present, state = _container_present(attempt_directory, journal, container_id)
-                if present:
-                    raise PackageError(f"Container removal did not remove exact ID (exit {removed.returncode}, state {state})")
-            _transition_container_cleanup(cleanup, _ContainerCleanupPhase.ABSENT,
-                                          completedAt=datetime.now(timezone.utc).isoformat())
-            entry["inspectState"] = "absent"
-            _journal_update(attempt_directory, journal, receipt)
-        except PackageError as exc:
-            _transition_container_cleanup(cleanup, _ContainerCleanupPhase.FAILED,
-                                          error=f"{type(exc).__name__}: {str(exc)[:512]}")
-            errors.append(f"Container cleanup failed for exact ID {container_id}: {exc}")
-            _journal_update(attempt_directory, journal, receipt)
-    state = _CleanupState.CLEANUP_FAILED if errors else _CleanupState.CLEAN
-    if journal.get("state") != state:
-        _journal_update(attempt_directory, journal, receipt, state=state)
-
-
-def _validate_current_journal_marker(marker: Any, attempt_id: str, journal_digest: str) -> None:
-    marker_from = marker.get("fromSha256") if isinstance(marker, dict) else None
-    marker_to = marker.get("toSha256") if isinstance(marker, dict) else None
-    valid = (
-        isinstance(marker, dict) and
-        marker.get("schema") == "cwltool-container-journal-transaction/v1" and
-        marker.get("attemptId") == attempt_id and
-        isinstance(marker_to, str) and re.fullmatch(r"[0-9a-f]{64}", marker_to) and
-        (marker_to == journal_digest or marker_from == journal_digest)
-    )
-    if not valid:
-        raise PackageError("Journal transaction marker does not match the retained journal")
-
-
-def _validate_recovery_journal_identity(receipt: dict, journal: dict) -> str:
-    attempt_id = receipt.get("attemptId")
-    if (journal.get("schema") != _CONTAINER_JOURNAL_SCHEMA or
-            not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{12}", attempt_id) or
-            journal.get("attemptId") != attempt_id or journal.get("cidfilePrefix") != f"{attempt_id}-"):
-        raise PackageError("Container journal belongs to a different attempt")
-    return attempt_id
-
-
-def _validated_recovery_marker(attempt_directory: Path, receipt: dict, attempt_id: str,
-                               journal_digest: str) -> Path | None:
-    reference = receipt.get("containerJournal")
-    if (not isinstance(reference, dict) or reference.get("path") != "container-journal.json" or
-            not isinstance(reference.get("sha256"), str) or
-            not re.fullmatch(r"[0-9a-f]{64}", reference["sha256"])):
-        raise PackageError("Container journal is not bound by the retained runner receipt")
-    marker_path = attempt_directory / "container-journal.pending"
-    marker = None
-    if os.path.lexists(marker_path):
-        _validate_private_file(marker_path, "Container journal transaction marker")
-        marker = json_value(bounded_read(marker_path, 4096))
-        if not isinstance(marker, dict):
-            raise PackageError("Container journal transaction marker is not a JSON object")
-    if journal_digest != reference["sha256"]:
-        if (not isinstance(marker, dict) or
-                marker.get("schema") != "cwltool-container-journal-transaction/v1" or
-                marker.get("attemptId") != attempt_id or
-                marker.get("fromSha256") != reference["sha256"] or marker.get("toSha256") != journal_digest):
-            raise PackageError("Journal/receipt mismatch has no matching durable update marker")
-    elif marker is not None:
-        _validate_current_journal_marker(marker, attempt_id, journal_digest)
-    return marker_path if marker is not None else None
-
-
-def _settle_recovery_marker(attempt_directory: Path, receipt: dict, journal_digest: str,
-                            marker: Path | None) -> None:
-    if marker is None:
-        return
-    if receipt["containerJournal"]["sha256"] != journal_digest:
-        receipt["containerJournal"] = {"path": "container-journal.json", "sha256": journal_digest}
-        _persist_attempt_receipt(attempt_directory, receipt)
-    marker.unlink()
-    _fsync_directory(attempt_directory)
-
-
-def _load_recovery_state(attempt_directory: Path) -> tuple[dict, dict, str, Path | None]:
-    """Read the private receipt, journal and pending binding without modifying them."""
-    if attempt_directory.is_symlink() or not attempt_directory.is_dir():
-        raise PackageError("Recovery requires an existing regular attempt directory")
-    if hasattr(os, "getuid") and attempt_directory.stat().st_uid != os.getuid():
-        raise PackageError("Recovery attempt directory must be owned by the current runner user")
-    if attempt_directory.stat().st_mode & 0o077:
-        raise PackageError("Recovery attempt directory must not be accessible to group or other users")
-    receipt_path = attempt_directory / "runner-receipt.json"
-    journal_path = attempt_directory / "container-journal.json"
-    _validate_private_file(receipt_path, "Recovery receipt")
-    _validate_private_file(journal_path, "Recovery journal")
-    for name in ("container-journal.json.tmp", "container-journal.pending.tmp"):
-        staging = attempt_directory / name
-        if os.path.lexists(staging):
-            _validate_private_file(staging, "Recovery journal staging file")
-    _validate_receipt_staging_files(attempt_directory)
-    receipt_bytes = bounded_read(receipt_path, 1024 * 1024)
-    journal_bytes = bounded_read(journal_path, 1024 * 1024)
-    receipt = json_value(receipt_bytes)
-    journal = json_value(journal_bytes)
-    if not isinstance(receipt, dict) or not isinstance(journal, dict):
-        raise PackageError("Recovery receipt and journal must be JSON objects")
-    attempt_id = _validate_recovery_journal_identity(receipt, journal)
-    journal_digest = sha256_bytes(journal_bytes)
-    marker = _validated_recovery_marker(attempt_directory, receipt, attempt_id, journal_digest)
-    return receipt, journal, journal_digest, marker
-
-
-def _receipt_engine(receipt: dict) -> str | None:
-    return next((engine for engine, description in _CWL_EXECUTION_DESCRIPTIONS.items()
-                 if receipt.get("executionMode") == description), None)
-
-
-def _preflight_receipt_engine(receipt: dict) -> str:
-    engine = _receipt_engine(receipt)
-    if (engine is None or
-            not isinstance(receipt.get("attemptId"), str) or
-            not re.fullmatch(r"[0-9a-f]{12}", receipt["attemptId"]) or
-            not isinstance(receipt.get("planPackageSha256"), str) or
-            not re.fullmatch(r"[0-9a-f]{64}", receipt["planPackageSha256"]) or
-            not isinstance(receipt.get("runner"), dict) or receipt["runner"].get("name") != "cwltool"):
-        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
-    return engine
-
-
-def _validate_not_started_cleanup(receipt: dict, engine: str) -> None:
-    cleanup = receipt.get("containerCleanup")
-    expected = {"state": _CleanupState.NOT_STARTED, "engine": engine, "containerCount": 0,
-                "absentCount": 0, "allAbsent": False}
-    if (receipt.get("status") != _AttemptStatus.FAILED or
-            receipt.get("executionPhase") != _ProcessPhase.NOT_STARTED or
-            receipt.get("executionNeverStarted") is not True or
-            receipt.get("launchIntentPersisted") is not False or cleanup != expected):
-        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
-
-
-def _validate_not_started_receipt(receipt: Any) -> None:
-    if not isinstance(receipt, dict):
-        raise PackageError("Retained receipt does not prove a typed preflight no-start outcome")
-    engine = _preflight_receipt_engine(receipt)
-    _validate_not_started_cleanup(receipt, engine)
-
-
-def _require_empty_preflight_cid_directory(attempt_directory: Path) -> None:
-    cid_directory = attempt_directory / "engine-cids"
-    if (cid_directory.is_symlink() or not cid_directory.is_dir() or cid_directory.stat().st_mode & 0o077
-            or (hasattr(os, "getuid") and cid_directory.stat().st_uid != os.getuid())
-            or any(cid_directory.iterdir())):
-        raise PackageError("Preflight CID directory is unsafe or contains possible container evidence")
-
-
-def _load_not_started_receipt(attempt_directory: Path) -> dict:
-    """Accept only the durable typed preflight outcome, never missing state alone."""
-    if (attempt_directory.is_symlink() or not attempt_directory.is_dir() or
-            (hasattr(os, "getuid") and attempt_directory.stat().st_uid != os.getuid()) or
-            attempt_directory.stat().st_mode & 0o077):
-        raise PackageError("Recovery requires an owned private attempt directory")
-    receipt_path = attempt_directory / "runner-receipt.json"
-    _validate_private_file(receipt_path, "Preflight recovery receipt")
-    if any(os.path.lexists(attempt_directory / name) for name in
-           ("container-journal.json", "container-journal.pending",
-            "container-journal.json.tmp", "container-journal.pending.tmp")):
-        raise PackageError("Preflight no-start receipt conflicts with container journal state")
-    _validate_receipt_staging_files(attempt_directory)
-    receipt = json_value(bounded_read(receipt_path, 1024 * 1024))
-    _validate_not_started_receipt(receipt)
-    _require_empty_preflight_cid_directory(attempt_directory)
-    receipt["containerJournal"] = {
-        "availability": "not-applicable-not-started", "storePath": None, "sha256": None,
-    }
-    return receipt
-
-
-def _validate_recovery_age_and_controller(journal: dict) -> None:
-    try:
-        created = datetime.fromisoformat(journal["createdAt"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise PackageError("Recovery journal has no valid creation time") from exc
-    if created.tzinfo is None:
-        raise PackageError("Recovery journal creation time needs an explicit timezone")
-    age = (datetime.now(timezone.utc) - created).total_seconds()
-    if age < -300 or age > _MAX_RECOVERY_AGE_SECONDS:
-        raise PackageError("Recovery journal is stale or has a future timestamp")
-    _controller_is_alive(journal.get("controller"))
-
-
-def _validate_recovery_directories(attempt_directory: Path) -> None:
-    for protected_name in ("engine-cids", "runner-home"):
-        protected = attempt_directory / protected_name
-        if (protected.is_symlink() or not protected.is_dir() or protected.stat().st_mode & 0o077 or
-                (hasattr(os, "getuid") and protected.stat().st_uid != os.getuid())):
-            raise PackageError(f"Protected {protected_name} directory is absent or unsafe; refusing recovery")
-
-
-def _validate_recovery_container_inventory(attempt_directory: Path, journal: dict) -> None:
-    containers = journal.get("containers")
-    if not isinstance(containers, list) or len(containers) > _MAX_ATTEMPT_CONTAINERS:
-        raise PackageError("Recovery journal has an invalid bounded container list")
-    state = journal.get("state")
-    if not isinstance(state, str) or state not in tuple(_CleanupState) or state == _CleanupState.NOT_STARTED:
-        raise PackageError("Recovery journal has an invalid cleanup state")
-    for entry in containers:
-        _validate_recovery_container(entry, journal)
-    _validate_recovery_directories(attempt_directory)
-
-
-def _validate_recovery_container(entry: Any, journal: dict) -> None:
-    cidfile = entry.get("cidfile") if isinstance(entry, dict) else None
-    if (not isinstance(entry, dict) or entry.get("engine") != journal["engine"] or
-            not isinstance(entry.get("id"), str) or not _CONTAINER_ID.fullmatch(entry["id"]) or
-            entry.get("imageId") != journal["workerImageId"] or
-            entry.get("imageRef") != journal["workerImageRef"] or
-            not isinstance(cidfile, str) or not re.fullmatch(r"engine-cids/[A-Za-z0-9_.-]+\.cid", cidfile) or
-            not Path(cidfile).name.startswith(journal["cidfilePrefix"])):
-        raise PackageError("Recovery journal contains an unknown, malformed, or cross-attempt container ID")
-    cleanup = entry.get("cleanup")
-    if not isinstance(cleanup, dict) or cleanup.get("status") not in tuple(_ContainerCleanupPhase):
-        raise PackageError("Recovery journal has an invalid container cleanup record")
-    if cleanup.get("absentAfterCleanup") is not (cleanup["status"] == _ContainerCleanupPhase.ABSENT):
-        raise PackageError("Recovery journal has inconsistent container absence evidence")
-
-
-def _validate_recovery_receipt_worker(receipt: dict, journal: dict) -> None:
-    status = receipt.get("status")
-    if not isinstance(status, str) or status not in _RECOVERY_STATUS:
-        raise PackageError("Only incomplete, failed, or timed-out attempts can be recovered")
-    plan_digest = receipt.get("planPackageSha256")
-    runner = receipt.get("runner")
-    worker = receipt.get("workerContext")
-    if (not isinstance(plan_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", plan_digest) or
-            not isinstance(runner, dict) or runner.get("name") != "cwltool" or
-            not isinstance(worker, dict) or not isinstance(worker.get("reportedImageId"), str) or
-            worker.get("reportedImageId") in {"", "unknown"} or
-            worker.get("reportedImageId") != journal.get("reportedWorkerImageId")):
-        raise PackageError("Recovery journal does not match the retained plan and worker identity")
-
-
-def _validate_recovery_engine(receipt: dict, journal: dict) -> None:
-    expected_engine = _receipt_engine(receipt)
-    if (expected_engine is None or journal.get("engine") != expected_engine or
-            journal.get("workerImageRef") != receipt["runner"].get("workerImageBase") or
-            not isinstance(journal.get("workerImageId"), str) or
-            not re.fullmatch(r"sha256:[0-9a-f]{64}", journal["workerImageId"])):
-        raise PackageError("Recovery engine or pinned image identity differs from the retained receipt")
-
-
-def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: dict) -> None:
-    """Require the retained plan identity, worker image, and container inventory to match."""
-    _validate_recovery_receipt_worker(receipt, journal)
-    _validate_recovery_process_evidence(receipt)
-    _validate_recovery_engine(receipt, journal)
-    _validate_recovery_age_and_controller(journal)
-    _validate_recovery_container_inventory(attempt_directory, journal)
-    image = _engine_call(attempt_directory, journal,
-                         ["image", "inspect", "--format", "{{.Id}}", journal["workerImageRef"]])
-    if (image.returncode != 0 or
-            _normalize_engine_image_id(image.stdout) != journal["workerImageId"]):
-        raise PackageError("Recovery engine no longer resolves the exact retained workflow image ID")
-
-
-@contextmanager
-def _exclusive_recovery(attempt_directory: Path):
-    if os.name != "posix":
-        yield
-        return
-    import fcntl
-
-    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(attempt_directory, flags)
-    try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise PackageError("Another recovery is active for this attempt") from exc
-        yield
-    finally:
-        os.close(descriptor)
-
-
 def recover_attempt(attempt_directory: Path) -> dict:
     """Reconcile one retained attempt's exact CWL containers without running science."""
-    with failure_diagnostics(_LOGGER, "recover", "reconciliation"), _exclusive_recovery(attempt_directory):
+    with (
+        failure_diagnostics(_LOGGER, "recover", "reconciliation"),
+        runner_receipts._exclusive_recovery(attempt_directory),
+    ):
         return _recover_retained_attempt(attempt_directory)
 
 
 def _recover_retained_attempt(attempt_directory: Path) -> dict:
     if not os.path.lexists(attempt_directory / "container-journal.json"):
-        return _load_not_started_receipt(attempt_directory)
-    receipt, journal, original_journal_sha, marker = _load_recovery_state(attempt_directory)
-    _validate_recovery_worker(attempt_directory, receipt, journal)
-    _settle_recovery_marker(attempt_directory, receipt, original_journal_sha, marker)
-    _retain_journal_snapshot(attempt_directory, original_journal_sha)
+        return runner_receipts._load_not_started_receipt(attempt_directory)
+    receipt, journal, original_journal_sha, marker = runner_receipts._load_recovery_state(attempt_directory)
+    runner_process._validate_recovery_worker(attempt_directory, receipt, journal)
+    runner_receipts._settle_recovery_marker(attempt_directory, receipt, original_journal_sha, marker)
+    runner_receipts._retain_journal_snapshot(attempt_directory, original_journal_sha)
     errors: list[str] = []
     process_error = None
     try:
-        _reconcile_cwl_process_group(journal)
+        runner_process._reconcile_cwl_process_group(journal)
     except (PackageError, OSError) as exc:
         process_error = exc
         errors.append(f"cwltool process recovery remains unresolved: {type(exc).__name__}: {str(exc)[:512]}")
     cid_directory = attempt_directory / "engine-cids"
     cid_files = list(cid_directory.glob(f"{journal['cidfilePrefix']}*.cid"))
-    if errors or (_possible_workflow_launch(receipt, journal) and
+    if errors or (runner_receipts._possible_workflow_launch(receipt, journal) and
                   not journal.get("containers") and not cid_files):
         if not errors:
             errors.append("Hard loss after launch intent has no container identity; cleanup remains unknown")
-        if journal.get("state") != _CleanupState.UNKNOWN:
-            _journal_update(attempt_directory, journal, receipt, state=_CleanupState.UNKNOWN)
+        if journal.get("state") != runner_receipts._CleanupState.UNKNOWN:
+            runner_receipts._journal_update(
+                attempt_directory, journal, receipt, state=runner_receipts._CleanupState.UNKNOWN,
+            )
     else:
-        _cleanup_container_journal(attempt_directory, journal, receipt, errors)
-    if journal.get("state") != _CleanupState.CLEAN:
+        runner_process._cleanup_container_journal(attempt_directory, journal, receipt, errors)
+    if journal.get("state") != runner_receipts._CleanupState.CLEAN:
         report_failure(_LOGGER, "recover", "cleanup", receipt=receipt, error=process_error)
-    return _record_recovery_result(attempt_directory, receipt, journal, errors)
+    return runner_receipts._record_recovery_result(attempt_directory, receipt, journal, errors)
 
 
-def _validate_recovery_process_evidence(receipt: dict) -> None:
-    phase = receipt.get("executionPhase")
-    if phase is not None and phase not in tuple(_ProcessPhase):
-        raise PackageError("Retained receipt has an unknown process phase")
-    if phase == _ProcessPhase.NOT_STARTED or receipt.get("executionNeverStarted") is True:
-        raise PackageError("Retained preflight no-start receipt conflicts with the journal")
-    expectation = {
-        _ProcessPhase.PREFLIGHT: False,
-        _ProcessPhase.LAUNCH_INTENT: True,
-        _ProcessPhase.RUNNING: True,
-    }
-    if phase in expectation and receipt.get("launchIntentPersisted") is not expectation[phase]:
-        raise PackageError("Retained process phase disagrees with the launch intent flag")
-
-
-def _possible_workflow_launch(receipt: dict, journal: dict) -> bool:
-    # Older receipts omit the launch flags. A running or unsettled journal is
-    # still evidence of a possible launch, even when no container was recorded.
-    return (
-        journal.get("state") in {
-            _CleanupState.RUNNING, _CleanupState.CANCELLATION_REQUESTED,
-            _CleanupState.UNKNOWN, _CleanupState.CLEANUP_FAILED,
-        }
-        or receipt.get("launchIntentPersisted") is True
-        or journal.get("launchIntentPersisted") is True
-        or any(journal.get(key) is not None for key in ("cwlProcessIdentity", "cwlProcessExit", "processStartedAt"))
-    )
-
-
-def _record_recovery_result(attempt_directory: Path, receipt: dict, journal: dict,
-                            errors: list[str]) -> dict:
-    prior_errors = receipt.get("collectionErrors", [])
-    if not isinstance(prior_errors, list):
-        prior_errors = []
-    new_errors = [error for error in dict.fromkeys([_RECOVERY_RESULT_NOTE, *errors]) if error not in prior_errors]
-    cleanup = _container_cleanup_summary(journal)
-    cleanup.pop("engine")  # Existing recovery receipts record the engine in the journal.
-    recovered = {
-        **receipt,
-        "status": _RECOVERY_STATUS[receipt["status"]],
-        "endedAt": receipt.get("endedAt") or datetime.now(timezone.utc).isoformat(),
-        "collectionErrors": prior_errors + new_errors,
-        "containerCleanup": cleanup,
-    }
-    _retain_journal_snapshot(attempt_directory, recovered["containerJournal"]["sha256"])
-    if recovered != receipt:
-        _persist_attempt_receipt(attempt_directory, recovered)
-    return recovered
-
-
-def _attempt_receipt_runtime(runner: dict, execution: dict) -> dict:
-    journal = execution.get("containerJournal")
-    container_journal = (
-        {"availability": "private-store", "storePath": execution.get("containerJournalStorePath"),
-         "sha256": journal["sha256"]}
-        if isinstance(journal, dict) and isinstance(journal.get("sha256"), str)
-        else {"availability": "unavailable"}
-    )
-    return {
-        "runner": {"name": "cwltool", "version": runner["version"],
-                   "python": platform.python_version(), "workerImageBase": runner.get("workerImageBase")},
-        "executionMode": _CWL_EXECUTION_DESCRIPTIONS[_container_engine(runner)],
-        "workerContext": {
-            "reportedSandbox": os.environ.get("EXPERIMENT_RUNNER_SANDBOX", "unspecified by caller"),
-            "reportedImageId": os.environ.get("EXPERIMENT_RUNNER_WORKER_IMAGE", "unknown"),
-            "attestation": "caller-reported; not independently verified by the adapter",
-            "outerWorker": execution.get("workerObservation", {"status": "unverified"}),
-        },
-        "status": (_AttemptStatus.TIMED_OUT if execution["timedOut"] else
-                   _AttemptStatus.FAILED if execution["returnCode"] != 0 or execution["collectionErrors"]
-                   else _AttemptStatus.SUCCEEDED),
-        "collectionErrors": execution["collectionErrors"],
-        "logCapture": execution.get("logCapture"),
-        "containerJournal": container_journal,
-        "containerCleanup": execution.get("containerCleanup", {"state": "unknown", "allAbsent": False}),
-        "scratchStorage": execution.get("scratchStorage", {"enforcement": "unverified"}),
-        "outputStorage": execution.get("outputStorage", {"enforcement": "worker-tmpfs-only", "hardCap": False}),
-    }
-
-
-def _attempt_evidence(package: _VerifiedRunPackage, expected_sha256: str,
-                      closure: dict, runner: dict, execution: dict,
-                      timing: dict) -> tuple[dict[str, _MemberSource], str, list[str]]:
-    created = timing["created"]
-    ended = timing["ended"]
-    elapsed = timing["elapsed"]
-    run_id = hashlib.sha256((expected_sha256 + created.isoformat()).encode()).hexdigest()[:12]
-    evidence_root = f"evidence/attempts/{run_id}"
-    augmented: dict[str, _MemberSource] = {**package.members, **package.admission}
-    plan_archive = f"{evidence_root}/plan-package.zip"
-    output_files = execution["outputs"]
-    provenance_files = execution["provenance"]
-    augmented[plan_archive] = package.snapshot
-    augmented.update({f"{evidence_root}/{name}": value for name, value in output_files.items()})
-    augmented.update({
-        f"{evidence_root}/workflow-run/{name}": value
-        for name, value in provenance_files.items()
-    })
-    augmented[f"{evidence_root}/stdout.log"] = execution["stdout"]
-    augmented[f"{evidence_root}/stderr.log"] = execution["stderr"]
-    output_index = [
-        {"@id": f"{evidence_root}/{name}", "sha256": sha256_bytes(value), "contentSize": len(value)}
-        for name, value in sorted(output_files.items())
-    ]
-    receipt = {
-        "schemaVersion": 1,
-        "attemptId": run_id,
-        "planPackageSha256": expected_sha256,
-        "planPackageArchive": {
-            "@id": plan_archive, "sha256": expected_sha256, "contentSize": package.snapshot.stat().st_size,
-        },
-        "workflowSha256": sha256_bytes(package.admission["experiment/workflow.cwl"]),
-        "jobSha256": sha256_bytes(package.admission["experiment/job.yml"]),
-        "networkPolicy": "CWL NetworkAccess=false is applied to tool containers; cwltool host expressions are not independently network-isolated",
-        **_attempt_receipt_runtime(runner, execution),
-        "exitCode": execution["returnCode"],
-        "timedOut": execution["timedOut"],
-        "startedAt": created.isoformat(),
-        "endedAt": ended.isoformat(),
-        "wallSeconds": elapsed,
-        "resourceMeasurements": {"peakProcessMemory": "unknown; not measured by this adapter"},
-        "outputs": output_index,
-        "workflowRunCrateFiles": sorted(provenance_files),
-        "availableClosure": closure["classifications"],
-    }
-    receipt_path = f"{evidence_root}/runner-receipt.json"
-    augmented[receipt_path] = canonical(receipt)
-    attempt_members = [f"{evidence_root}/{name}" for name in output_files]
-    attempt_members += [f"{evidence_root}/workflow-run/{name}" for name in provenance_files]
-    attempt_members += [
-        plan_archive, f"{evidence_root}/stdout.log", f"{evidence_root}/stderr.log", receipt_path,
-    ]
-    return augmented, run_id, attempt_members
-
-
-def _augment_result_crate(augmented: dict[str, _MemberSource], expected_sha256: str, run_id: str,
+def _augment_result_crate(augmented: dict[str, runner_admission._MemberSource], expected_sha256: str, run_id: str,
                           attempt_members: list[str], created: datetime, ended: datetime,
                           execution: dict) -> tuple[str, str]:
     crate = json_value(augmented["ro-crate-metadata.json"])
@@ -1868,7 +159,7 @@ def _augment_result_crate(augmented: dict[str, _MemberSource], expected_sha256: 
     return experiment_id, title
 
 
-def _attempt_recipe(stage: Path, state: _AttemptExecution, augmented: dict[str, _MemberSource],
+def _attempt_recipe(stage: Path, state: _AttemptExecution, augmented: dict[str, runner_admission._MemberSource],
                     run_id: str, experiment_id: str, title: str) -> dict:
     manifest = state.package.manifest
     members = []
@@ -1892,7 +183,7 @@ def _attempt_recipe(stage: Path, state: _AttemptExecution, augmented: dict[str, 
     }
 
 
-def _compile_attempt_result(state: _AttemptExecution, augmented: dict[str, _MemberSource],
+def _compile_attempt_result(state: _AttemptExecution, augmented: dict[str, runner_admission._MemberSource],
                             run_id: str, experiment_id: str, title: str, execution: dict) -> dict:
     output, source_directory = state.output, state.source_directory
     # Prepare the ZIP before exposing either publication destination. Claim
@@ -1903,7 +194,7 @@ def _compile_attempt_result(state: _AttemptExecution, augmented: dict[str, _Memb
     with tempfile.TemporaryDirectory(prefix=".compiled-experiment-result-", dir=output.parent) as package_temp:
         publication_stage = Path(package_temp)
         stage = publication_stage / "result-source"
-        _materialize(stage, augmented)
+        runner_process._materialize(stage, augmented)
         recipe_path = stage / "experiment.json"
         recipe_path.write_bytes(canonical(_attempt_recipe(stage, state, augmented, run_id, experiment_id, title)))
         prepared_package = publication_stage / "result.zip"
@@ -1938,136 +229,9 @@ def _compile_attempt_result(state: _AttemptExecution, augmented: dict[str, _Memb
     return result
 
 
-def _validate_private_file(path: Path, description: str) -> os.stat_result:
-    try:
-        info = path.lstat()
-    except FileNotFoundError as exc:
-        raise PackageError(f"{description} is absent") from exc
-    if not stat.S_ISREG(info.st_mode) or path.is_symlink():
-        raise PackageError(f"{description} is not a regular file")
-    if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600):
-        raise PackageError(f"{description} is not owned by the current runner with mode 0600")
-    return info
-
-
-def _validate_receipt_staging_files(attempt_directory: Path) -> None:
-    """Retain interrupted private staging files while rejecting unsafe entries."""
-    staging = [path for path in attempt_directory.iterdir()
-               if path.name == "runner-receipt.json.tmp" or
-               path.name.startswith("runner-receipt.json.tmp.")]
-    if len(staging) > 64:
-        raise PackageError("Attempt has too many retained receipt staging files")
-    for path in staging:
-        info = _validate_private_file(path, "Retained attempt receipt staging file")
-        if info.st_size > 1024 * 1024:
-            raise PackageError("Retained attempt receipt staging file exceeds its size limit")
-
-
-def _persist_attempt_receipt(attempt_directory: Path, value: dict) -> None:
-    if attempt_directory.is_symlink() or not attempt_directory.is_dir():
-        raise PackageError("Attempt receipt directory is missing or unsafe")
-    if os.name == "posix":
-        directory_info = attempt_directory.stat()
-        if (directory_info.st_uid != os.getuid() or directory_info.st_mode & 0o077):
-            raise PackageError("Attempt receipt directory is not private to the current runner")
-    _validate_receipt_staging_files(attempt_directory)
-    pending = attempt_directory / f"runner-receipt.json.tmp.{uuid.uuid4().hex}"
-    target = attempt_directory / "runner-receipt.json"
-    try:
-        existing = target.lstat()
-    except FileNotFoundError:
-        existing = None
-    if existing is not None:
-        _validate_private_file(target, "Existing attempt receipt")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(pending, flags, 0o600)
-    except FileExistsError as exc:
-        raise PackageError("Attempt receipt pending file already exists; refusing to overwrite it") from exc
-    try:
-        if os.name == "posix":
-            os.fchmod(descriptor, 0o600)
-            created = os.fstat(descriptor)
-            if (not stat.S_ISREG(created.st_mode) or created.st_uid != os.getuid() or
-                    stat.S_IMODE(created.st_mode) != 0o600):
-                raise PackageError("Attempt receipt staging file is not a private regular file")
-        with os.fdopen(descriptor, "wb") as stream:
-            descriptor = -1
-            stream.write(canonical(value))
-            stream.flush()
-            os.fsync(stream.fileno())
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-    _validate_private_file(pending, "Attempt receipt staging file")
-    pending.replace(target)
-    _fsync_directory(attempt_directory)
-
-
-def _replay_operator_signal(handler, pending, original, failure):
-    number, frame = pending
-    try:
-        handler(number, frame)
-    except KeyboardInterrupt as interruption:
-        if not isinstance(original, KeyboardInterrupt):
-            if failure is not None:
-                interruption.add_note(f"Attempt evidence write failed: {type(failure).__name__}: {str(failure)[:1024]}")
-            raise
-        original.add_note(f"Deferred signal during evidence retention: {str(interruption)[:1024]}")
-    # Raise outside the deferred handler's except block so an earlier
-    # interruption stays its exception context/cause and retains its notes.
-    if isinstance(original, KeyboardInterrupt):
-        if failure is not None:
-            original.add_note(f"Attempt evidence write failed: {type(failure).__name__}: {str(failure)[:1024]}")
-        raise original
-
-
-@contextmanager
-def _defer_operator_signals(original: BaseException | None = None):
-    """Deliver the first handled signal after controller evidence writes finish."""
-    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "pthread_sigmask"):
-        yield
-        return
-    handlers = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)
-                if callable(signal.getsignal(number))}
-    if not handlers:
-        yield
-        return
-    pending = None
-    failure = None
-
-    def defer(number, frame):
-        nonlocal pending
-        if pending is None:
-            pending = (number, frame)
-
-    try:
-        installation_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handlers)
-        try:
-            for number in handlers:
-                signal.signal(number, defer)
-        finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, installation_mask)
-        yield
-    except (Exception, KeyboardInterrupt) as exc:
-        failure = exc
-        raise
-    finally:
-        # The evidence phase records delivery order. Block only the short
-        # restore/replay transition so a later signal cannot replace its first.
-        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handlers)
-        try:
-            for number, handler in handlers.items():
-                signal.signal(number, handler)
-            if pending is not None:
-                _replay_operator_signal(handlers[pending[0]], pending, original, failure)
-        finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
-
-
 def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: dict,
                            started: float, exc: BaseException) -> None:
-    _finish_attempt(receipt, _AttemptStatus.FAILED)
+    runner_receipts._finish_attempt(receipt, runner_receipts._AttemptStatus.FAILED)
     receipt.update(endedAt=datetime.now(timezone.utc).isoformat(), wallSeconds=time.monotonic() - started)
     receipt["collectionErrors"] = list(receipt["collectionErrors"]) + [
         f"Attempt failed: {type(exc).__name__}: {str(exc)[:4096]}"
@@ -2079,34 +243,36 @@ def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: di
     for label in ("stdout", "stderr"):
         path = temporary / f"{label}.log"
         if path.exists():
-            data = _read_execution_log(path, label, receipt["collectionErrors"])
+            data = runner_process._read_execution_log(path, label, receipt["collectionErrors"])
             (attempt_directory / f"{label}.log").write_bytes(data)
-    _persist_attempt_receipt(attempt_directory, receipt)
+    runner_receipts._persist_attempt_receipt(attempt_directory, receipt)
 
 
 def _run_retained_attempt(state: _AttemptExecution) -> dict:
-    runtime_payload: dict[str, _MemberSource] = {name: state.package.members[name] for name in state.job_members}
+    runtime_payload: dict[str, runner_admission._MemberSource] = {
+        name: state.package.members[name] for name in state.job_members
+    }
     runtime_payload.update({name: state.package.admission[name] for name in _WORKFLOW_MEMBERS})
     with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary_value:
         temporary = Path(temporary_value)
         phase = "execution"
         try:
-            execution = _execute_cwl(_CwlExecutionRequest(
+            execution = runner_process._execute_cwl(runner_process._CwlExecutionRequest(
                 temporary, runtime_payload, state.runner, state.limits, state.tmpfs_root,
                 (state.attempt_directory, state.journal, state.receipt),
             ))
             execution["workerObservation"] = state.limits["workerObservation"]
             execution.setdefault("containerJournal", state.receipt.get("containerJournal"))
-            execution.setdefault("containerCleanup", _container_cleanup_summary(state.journal))
+            execution.setdefault("containerCleanup", runner_receipts._container_cleanup_summary(state.journal))
             phase = "journal-persistence"
-            execution["containerJournalStorePath"] = _retain_journal_snapshot(
+            execution["containerJournalStorePath"] = runner_receipts._retain_journal_snapshot(
                 state.attempt_directory, execution["containerJournal"]["sha256"]
             )
             phase = "evidence-assembly"
             ended = datetime.now(timezone.utc)
             timing = {"created": state.created, "ended": ended,
                       "elapsed": time.monotonic() - state.started}
-            augmented, run_id, attempt_members = _attempt_evidence(
+            augmented, run_id, attempt_members = runner_receipts._attempt_evidence(
                 state.package, state.expected_sha256, state.closure, state.runner, execution, timing,
             )
             archived_receipt = json_value(augmented[state.receipt_key])
@@ -2118,7 +284,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             phase = "receipt-persistence"
             for label in ("stdout", "stderr"):
                 (state.attempt_directory / f"{label}.log").write_bytes(execution[label])
-            _persist_attempt_receipt(state.attempt_directory, state.receipt)
+            runner_receipts._persist_attempt_receipt(state.attempt_directory, state.receipt)
             phase = "result-packaging"
             experiment_id, title = _augment_result_crate(
                 augmented, state.expected_sha256, run_id, attempt_members,
@@ -2126,16 +292,16 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             )
             result = _compile_attempt_result(state, augmented, run_id, experiment_id, title, execution)
         except (Exception, KeyboardInterrupt) as exc:
-            with _defer_operator_signals(exc):
+            with runner_process._defer_operator_signals(exc):
                 report_failure(_LOGGER, "run", phase, receipt=state.receipt, error=exc)
                 with failure_diagnostics(_LOGGER, "run", "failure-receipt", receipt=state.receipt):
                     _retain_failed_attempt(state.attempt_directory, temporary, state.receipt, state.started, exc)
             raise
-        with (_defer_operator_signals(),
+        with (runner_process._defer_operator_signals(),
               failure_diagnostics(_LOGGER, "run", "terminal-receipt", receipt=state.receipt)):
-            _finish_attempt(state.receipt, _AttemptStatus(archived_receipt["status"]))
+            runner_receipts._finish_attempt(state.receipt, runner_receipts._AttemptStatus(archived_receipt["status"]))
             state.receipt.update(endedAt=archived_receipt["endedAt"], wallSeconds=archived_receipt["wallSeconds"])
-            _persist_attempt_receipt(state.attempt_directory, state.receipt)
+            runner_receipts._persist_attempt_receipt(state.attempt_directory, state.receipt)
         return result
 
 
@@ -2156,14 +322,16 @@ def run_package(package: Path, output: Path, *, expected_sha256: str,
                 tempfile.TemporaryDirectory(prefix=".compiled-experiment-intake-", dir=staging_parent)
             )
             snapshot = Path(intake) / "plan.zip"
-            opened = resources.enter_context(_open_run_package(package, snapshot, expected_sha256, policy))
+            opened = resources.enter_context(
+                runner_admission._open_run_package(package, snapshot, expected_sha256, policy)
+            )
         return _run_verified_package(opened, output, source_directory, expected_sha256)
 
 
-def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_directory: Path,
+def _run_verified_package(package: runner_admission._VerifiedRunPackage, output: Path, source_directory: Path,
                           expected_sha256: str) -> dict:
     with failure_diagnostics(_LOGGER, "run", "admission", digest=expected_sha256):
-        closure, runner, limits, tmpfs_root, job_members = _admit(package.admission, package.members)
+        closure, runner, limits, tmpfs_root, job_members = runner_admission._admit(package.admission, package.members)
         attempt_directory = output.with_name(output.stem + ".attempt")
         if attempt_directory.exists():
             raise PackageError("run attempt directory already exists; attempts are never overwritten")
@@ -2173,37 +341,37 @@ def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_dir
                  "outputs": {}, "provenance": {}, "collectionErrors": [],
                  "workerObservation": limits["workerObservation"]}
     timing = {"created": created, "ended": created, "elapsed": 0}
-    initial, run_id, _ = _attempt_evidence(
+    initial, run_id, _ = runner_receipts._attempt_evidence(
         package, expected_sha256, closure, runner, execution, timing,
     )
     receipt_key = f"evidence/attempts/{run_id}/runner-receipt.json"
     receipt = json_value(initial[receipt_key])
-    receipt.update(status=_AttemptStatus.STARTED, endedAt=None, wallSeconds=None,
-                   executionPhase=_ProcessPhase.PREFLIGHT, executionNeverStarted=False,
+    receipt.update(status=runner_receipts._AttemptStatus.STARTED, endedAt=None, wallSeconds=None,
+                   executionPhase=runner_receipts._ProcessPhase.PREFLIGHT, executionNeverStarted=False,
                    launchIntentPersisted=False)
     with failure_diagnostics(_LOGGER, "run", "initial-receipt", receipt=receipt):
         attempt_directory.mkdir(parents=True)
         attempt_directory.chmod(0o700)
         (attempt_directory / "runner-home").mkdir(mode=0o700)
         (attempt_directory / "runner-home").chmod(0o700)
-        _persist_attempt_receipt(attempt_directory, receipt)
+        runner_receipts._persist_attempt_receipt(attempt_directory, receipt)
     try:
-        journal = _new_container_journal(attempt_directory, run_id, runner)
+        journal = runner_process._new_container_journal(attempt_directory, run_id, runner)
     except (PackageError, OSError, subprocess.SubprocessError) as exc:
         report_failure(_LOGGER, "run", "controller-preflight", receipt=receipt, error=exc)
-        _transition_process(receipt, _ProcessPhase.NOT_STARTED)
-        _finish_attempt(receipt, _AttemptStatus.FAILED)
+        runner_receipts._transition_process(receipt, runner_receipts._ProcessPhase.NOT_STARTED)
+        runner_receipts._finish_attempt(receipt, runner_receipts._AttemptStatus.FAILED)
         receipt.update(endedAt=datetime.now(timezone.utc).isoformat(),
-                       containerCleanup={"state": _CleanupState.NOT_STARTED, "engine": _container_engine(runner),
+                       containerCleanup={"state": runner_receipts._CleanupState.NOT_STARTED, "engine": runner_admission._container_engine(runner),
                                         "containerCount": 0, "absentCount": 0, "allAbsent": False},
                        collectionErrors=[f"Attempt preflight failed before workflow launch: {type(exc).__name__}: {str(exc)[:1024]}"])
         with failure_diagnostics(_LOGGER, "run", "failure-receipt", receipt=receipt):
-            _persist_attempt_receipt(attempt_directory, receipt)
+            runner_receipts._persist_attempt_receipt(attempt_directory, receipt)
         raise
     journal["launchIntentPersisted"] = True
-    _transition_process(receipt, _ProcessPhase.LAUNCH_INTENT)
+    runner_receipts._transition_process(receipt, runner_receipts._ProcessPhase.LAUNCH_INTENT)
     with failure_diagnostics(_LOGGER, "run", "launch-journal", receipt=receipt):
-        _journal_receipt_reference(attempt_directory, journal, receipt)
+        runner_receipts._journal_receipt_reference(attempt_directory, journal, receipt)
     return _run_retained_attempt(_AttemptExecution(
         output=output, source_directory=source_directory, attempt_directory=attempt_directory,
         package=package, job_members=job_members,
@@ -2211,75 +379,6 @@ def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_dir
         tmpfs_root=tmpfs_root, journal=journal, receipt=receipt, receipt_key=receipt_key,
         created=created, started=started,
     ))
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _collect_tree(root: Path, collected: dict[str, bytes], max_bytes: int | None) -> None:
-    total = sum(len(value) for value in collected.values())
-    for path in sorted(root.rglob("*")):
-        if path.is_symlink():
-            raise PackageError("CWL output contains a symlink")
-        if not path.is_file():
-            continue
-        relative = path.relative_to(root).as_posix()
-        safe_path(relative)
-        remaining = None if max_bytes is None else max_bytes - total
-        if remaining is not None and (remaining < 0 or path.stat().st_size > remaining):
-            raise PackageError("CWL output exceeds the declared worker resource budget")
-        content = bounded_read(path, remaining)
-        total += len(content)
-        if max_bytes is not None and total > max_bytes:
-            raise PackageError("CWL output exceeds the declared worker resource budget")
-        collected[relative] = content
-
-
-def _require_bounded_tmpfs(temporary: Path, root: Path, limit_mib: int) -> None:
-    resolved_root = root.resolve(strict=True)
-    resolved_temporary = temporary.resolve(strict=True)
-    if not resolved_temporary.is_relative_to(resolved_root):
-        raise PackageError("execution deferred: runner temporary directory is outside the declared tmpfs")
-    _require_dedicated_tmpfs(root, limit_mib, "scratch")
-    if resolved_temporary.stat().st_dev != resolved_root.stat().st_dev:
-        raise PackageError("execution deferred: runner temporary directory must use the admitted scratch filesystem")
-
-
-def _require_bounded_output_tmpfs(root: Path, limit_mib: int) -> Path:
-    return _require_dedicated_tmpfs(root, limit_mib, "output")
-
-
-def _require_dedicated_tmpfs(root: Path, limit_mib: int, role: str) -> Path:
-    if root.is_symlink() or not root.is_dir():
-        raise PackageError(f"execution deferred: {role} root must be an existing regular directory")
-    resolved = root.resolve(strict=True)
-    current = root.absolute()
-    while current != current.parent:
-        if current.is_symlink():
-            raise PackageError(f"execution deferred: {role} root path contains a symlink")
-        current = current.parent
-    try:
-        entries = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        raise PackageError(f"execution deferred: cannot verify the {role} tmpfs mount") from exc
-    mount_types = []
-    for line in entries:
-        try:
-            before, after = line.split(" - ", 1)
-            fields = before.split()
-            mountpoint = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), fields[4])
-            if Path(mountpoint) == resolved:
-                mount_types.append(after.split()[0])
-        except (IndexError, ValueError):
-            continue
-    if mount_types != ["tmpfs"]:
-        raise PackageError(f"execution deferred: {role} root must be an unambiguous dedicated tmpfs mountpoint")
-    capacity = shutil.disk_usage(resolved).total
-    cap_bytes = int(limit_mib * 1024 * 1024)
-    if capacity != cap_bytes:
-        raise PackageError(f"execution deferred: {role} tmpfs size must exactly match the declared worker {role} cap")
-    return resolved
 
 
 def _refs(value: Any) -> list[dict]:

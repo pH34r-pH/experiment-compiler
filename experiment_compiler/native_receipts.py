@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .core import PackageError, bounded_read, canonical, json_value
-from .runner import _persist_attempt_receipt
+from .runner_receipts import _persist_attempt_receipt
 
 PRODUCER = "experiment-compiler.native-runner/v1"
 IDENTITY_FIELDS = {"attemptId", "planPackageSha256", "profileSha256", "runtimeSha256",

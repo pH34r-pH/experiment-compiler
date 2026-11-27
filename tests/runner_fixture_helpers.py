@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from fractions import Fraction
 from unittest.mock import patch
 
-from experiment_compiler.runner import _persist_attempt_receipt, _write_container_journal
+from experiment_compiler.runner_receipts import _persist_attempt_receipt, _write_container_journal
 from experiment_compiler.worker_limits import ObservedWorker
 
 
@@ -30,8 +30,8 @@ def synthetic_controller_environment(directory):
             "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
                 '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
             "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-    }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
-            patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation):
+    }), patch("experiment_compiler.runner_admission.importlib.metadata.version", return_value="3.2.20260720092025"), \
+            patch("experiment_compiler.runner_admission.observe_worker", side_effect=synthetic_worker_observation):
         yield
 
 

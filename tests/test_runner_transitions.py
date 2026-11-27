@@ -16,7 +16,7 @@ try:
 except ImportError as exc:
     raise unittest.SkipTest("install the optional hypothesis tooling for generated runner checks") from exc
 
-from experiment_compiler import runner
+from experiment_compiler import runner, runner_process, runner_receipts
 from experiment_compiler.core import json_value
 from runner_fixture_helpers import RECOVERY_IDENTITY, prepare_recovery_attempt
 
@@ -46,7 +46,7 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
         self.journal = prepare_recovery_attempt(self.attempt, RECOVERY_IDENTITY, before_launch=True)
         self.receipt = self._read("runner-receipt.json")
         self.receipt.update(executionPhase="preflight", launchIntentPersisted=False, executionNeverStarted=False)
-        runner._persist_attempt_receipt(self.attempt, self.receipt)
+        runner_receipts._persist_attempt_receipt(self.attempt, self.receipt)
         self.controller_alive = True
         self.has_launch_evidence = False
         self.cid_retained = False
@@ -82,8 +82,8 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
     @precondition(lambda self: self.controller_alive and self.receipt["executionPhase"] == "preflight")
     @rule(cut=_CUTS)
     def publish_launch_intent(self, cut):
-        runner._transition_process(self.receipt, runner._ProcessPhase.LAUNCH_INTENT)
-        self._publish(cut, lambda: runner._journal_update(
+        runner_receipts._transition_process(self.receipt, runner_receipts._ProcessPhase.LAUNCH_INTENT)
+        self._publish(cut, lambda: runner_receipts._journal_update(
             self.attempt, self.journal, self.receipt, launchIntentPersisted=True,
         ))
         self.has_launch_evidence = cut in {"none", "receipt"}
@@ -91,9 +91,9 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
     @precondition(lambda self: self.controller_alive and self.receipt["executionPhase"] == "launch-intent")
     @rule(cut=_CUTS)
     def record_running(self, cut):
-        runner._transition_process(self.receipt, runner._ProcessPhase.RUNNING)
-        self._publish(cut, lambda: runner._journal_update(
-            self.attempt, self.journal, self.receipt, state=runner._CleanupState.RUNNING,
+        runner_receipts._transition_process(self.receipt, runner_receipts._ProcessPhase.RUNNING)
+        self._publish(cut, lambda: runner_receipts._journal_update(
+            self.attempt, self.journal, self.receipt, state=runner_receipts._CleanupState.RUNNING,
         ))
 
     @precondition(lambda self: self.controller_alive and self.receipt["executionPhase"] == "running")
@@ -101,7 +101,7 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
     def request_cancellation(self, cut):
         first = self.journal["cancellation"]
         self._publish(cut if first is None else "none",
-                      lambda: runner._record_first_cancellation(self.attempt, self.journal, self.receipt))
+                      lambda: runner_receipts._record_first_cancellation(self.attempt, self.journal, self.receipt))
         if first is not None:
             assert self.journal["cancellation"] == first
 
@@ -109,9 +109,9 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
     @rule(terminal_cut=st.booleans())
     def observe_timeout(self, terminal_cut):
         self.receipt.update(exitCode=124, timedOut=True)
-        runner._finish_attempt(self.receipt, runner._AttemptStatus.TIMED_OUT)
+        runner_receipts._finish_attempt(self.receipt, runner_receipts._AttemptStatus.TIMED_OUT)
         self._publish("receipt" if terminal_cut else "none",
-                      lambda: runner._persist_attempt_receipt(self.attempt, self.receipt))
+                      lambda: runner_receipts._persist_attempt_receipt(self.attempt, self.receipt))
         self.controller_alive = False
         if not terminal_cut:
             self.expected_status = "timed-out"
@@ -148,10 +148,10 @@ class RetainedAttemptMachine(RuleBasedStateMachine):
     @precondition(lambda self: not self.controller_alive)
     @rule()
     def recover_retained_attempt(self):
-        with patch.object(runner, "_controller_is_alive", return_value=False), \
-                patch.object(runner, "_reconcile_cwl_process_group"), \
-                patch.object(runner, "_engine_call", side_effect=self._engine_call), \
-                patch.object(runner.subprocess, "Popen", side_effect=AssertionError("recovery launched a process")):
+        with patch.object(runner_process, "_controller_is_alive", return_value=False), \
+                patch.object(runner_process, "_reconcile_cwl_process_group"), \
+                patch.object(runner_process, "_engine_call", side_effect=self._engine_call), \
+                patch.object(runner_process.subprocess, "Popen", side_effect=AssertionError("recovery launched a process")):
             result = runner.recover_attempt(self.attempt)
         assert result["status"] == self.expected_status
         summary = result["containerCleanup"]

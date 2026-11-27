@@ -17,22 +17,47 @@ from experiment_compiler.archive_policy import PackageReadPolicy, ResourcePolicy
 from experiment_compiler.core import (PackageError, canonical, compile_package, json_value, load_recipe,
                                       sha256_file, verify_bytes)
 from experiment_compiler.catalog import describe_catalog
-from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest, _admit_workflow, _collect_execution_tree, _collect_tree, _execute_cwl,
-                                        _cleanup_container_journal, _require_bounded_output_tmpfs,
-                                        _require_bounded_tmpfs, _run_command, _terminate_process_group,
-                                        _new_container_journal, _container_present, _validate_recovery_worker,
-                                        _engine_image_reference_matches,
-                                        _admit_container_requirement, _persist_attempt_receipt,
-                                        _dependency_closure, _worker_admission,
-                                        _materialize, _open_run_package,
-                                        _write_container_journal, _journal_receipt_reference, _retain_journal_snapshot,
-                                        _container_cleanup_summary,
-                                        _AttemptStatus, _CleanupState, _ProcessPhase, _ContainerCleanupPhase,
-                                        _finish_attempt, _transition_process, _transition_container_cleanup,
-                                        _validate_cleanup_transition,
-                                        _augment_result_crate,
-                                        recover_attempt, run_package)
-from experiment_compiler.runner import sha256_bytes
+from experiment_compiler.runner_process import (
+    _CwlCommandRequest,
+    _CwlExecutionRequest,
+    _collect_execution_tree,
+    _collect_tree,
+    _execute_cwl,
+    _cleanup_container_journal,
+    _require_bounded_output_tmpfs,
+    _require_bounded_tmpfs,
+    _run_command,
+    _terminate_process_group,
+    _new_container_journal,
+    _container_present,
+    _validate_recovery_worker,
+    _engine_image_reference_matches,
+    _materialize,
+)
+from experiment_compiler.runner_admission import (
+    _admit_workflow,
+    _admit_container_requirement,
+    _dependency_closure,
+    _worker_admission,
+    _open_run_package,
+)
+from experiment_compiler.runner_receipts import (
+    _persist_attempt_receipt,
+    _write_container_journal,
+    _journal_receipt_reference,
+    _retain_journal_snapshot,
+    _container_cleanup_summary,
+    _AttemptStatus,
+    _CleanupState,
+    _ProcessPhase,
+    _ContainerCleanupPhase,
+    _finish_attempt,
+    _transition_process,
+    _transition_container_cleanup,
+    _validate_cleanup_transition,
+)
+from experiment_compiler.runner import _augment_result_crate, recover_attempt, run_package
+from experiment_compiler.runner_receipts import sha256_bytes
 from experiment_compiler.runner_logs import LogCapture
 from fixture_requirements import REQUIRES_RUNNER
 from runner_fixture_helpers import (RECOVERY_IDENTITY, prepare_container_journal, prepare_recovery_attempt,
@@ -51,21 +76,21 @@ def _retained_files(attempt: Path) -> dict[str, str]:
 
 class RunnerBoundaryTests(unittest.TestCase):
     def setUp(self):
-        worker = patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation)
+        worker = patch("experiment_compiler.runner_admission.observe_worker", side_effect=synthetic_worker_observation)
         worker.start()
         self.addCleanup(worker.stop)
         self.process_identity_patch = patch(
-            "experiment_compiler.runner._cwl_process_identity",
+            "experiment_compiler.runner_process._cwl_process_identity",
             return_value={"pid": 98765, "bootId": "fixture", "processStartTicks": "1",
                           "processGroupId": 98765, "sessionId": 98765},
         )
         self.process_identity_patch.start()
         self.addCleanup(self.process_identity_patch.stop)
-        self.process_group_patch = patch("experiment_compiler.runner._process_group_exists", return_value=False)
+        self.process_group_patch = patch("experiment_compiler.runner_process._process_group_exists", return_value=False)
         self.process_group_patch.start()
         self.addCleanup(self.process_group_patch.stop)
         self.engine_journal_patch = patch(
-            "experiment_compiler.runner._new_container_journal",
+            "experiment_compiler.runner_process._new_container_journal",
             side_effect=self._fixture_container_journal,
         )
         self.engine_journal_patch.start()
@@ -75,7 +100,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         return prepare_container_journal(attempt_directory, attempt_id, runner)
 
     def test_engine_image_ids_accept_only_complete_sha256_and_canonicalize_podman_output(self):
-        from experiment_compiler.runner import _normalize_engine_image_id
+        from experiment_compiler.runner_process import _normalize_engine_image_id
         image_id = "a" * 64
         self.assertEqual(_normalize_engine_image_id(image_id), "sha256:" + image_id)
         self.assertEqual(_normalize_engine_image_id("sha256:" + image_id.upper()), "sha256:" + image_id)
@@ -112,7 +137,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             attempt = Path(value) / "attempt"
             attempt.mkdir(mode=0o700)
             with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
-                    patch("experiment_compiler.runner._engine_call",
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id + "\n")):
                 journal = _new_container_journal(attempt, "0123456789ab", runner)
             self.assertEqual(journal["workerImageRef"], image_ref)
@@ -122,7 +147,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 attempt = Path(value) / "attempt"
                 attempt.mkdir(mode=0o700)
                 with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
-                        patch("experiment_compiler.runner._engine_call",
+                        patch("experiment_compiler.runner_process._engine_call",
                               return_value=SimpleNamespace(returncode=0, stdout=invalid)):
                     with self.assertRaisesRegex(PackageError, "Pinned workflow image"):
                         _new_container_journal(attempt, "0123456789ab", runner)
@@ -138,15 +163,15 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value)
             bare_inspect = f"{cid} running {'a' * 64} {image_ref}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=bare_inspect)):
                 self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
             tag_elided_inspect = f"{cid} running {'a' * 64} registry.example/tool@sha256:{'d' * 64}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=tag_elided_inspect)):
                 self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
             wrong_inspect = f"{cid} running {'c' * 64} {image_ref}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=wrong_inspect)):
                 with self.assertRaisesRegex(PackageError, "differs from the pinned"):
                     _container_present(attempt, journal, cid)
@@ -158,14 +183,14 @@ class RunnerBoundaryTests(unittest.TestCase):
                        "runner": {"name": "cwltool", "workerImageBase": image_ref},
                        "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
                        "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"}
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_receipts._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
                 _validate_recovery_worker(attempt, receipt, journal)
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_receipts._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="c" * 64 + "\n")):
                 with self.assertRaisesRegex(PackageError, "exact retained workflow image ID"):
                     _validate_recovery_worker(attempt, receipt, journal)
@@ -269,9 +294,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                 sha256_bytes((attempt / "container-journal.json").read_bytes()),
             )
 
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -290,7 +315,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_accepts_only_typed_preflight_not_started_receipt(self):
-        from experiment_compiler.runner import _persist_attempt_receipt
+        from experiment_compiler.runner_receipts import _persist_attempt_receipt
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
             attempt.mkdir(mode=0o700)
@@ -318,7 +343,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_rejects_missing_journal_without_typed_no_start_receipt(self):
-        from experiment_compiler.runner import _persist_attempt_receipt
+        from experiment_compiler.runner_receipts import _persist_attempt_receipt
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "result.attempt"
             attempt.mkdir(mode=0o700)
@@ -342,9 +367,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
                 },
             )
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id)):
                 with self.assertLogs("experiment_compiler.runner", level="WARNING") as diagnostics:
                     recovered = recover_attempt(attempt)
@@ -375,7 +400,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     journal = prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
                     receipt = json_value((attempt / "runner-receipt.json").read_bytes())
                     journal.update(changes, state="unknown")
-                    with patch("experiment_compiler.runner._persist_attempt_receipt",
+                    with patch("experiment_compiler.runner_receipts._persist_attempt_receipt",
                                side_effect=OSError("fixture receipt interruption")):
                         with self.assertRaisesRegex(OSError, "fixture receipt interruption"):
                             _journal_receipt_reference(attempt, journal, receipt)
@@ -387,7 +412,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     elif mode == "permissive-journal":
                         (attempt / "container-journal.json").chmod(0o644)
                     retained = _retained_files(attempt)
-                    with patch("experiment_compiler.runner._engine_call") as engine:
+                    with patch("experiment_compiler.runner_process._engine_call") as engine:
                         with self.assertRaisesRegex(PackageError, expected):
                             recover_attempt(attempt)
                     engine.assert_not_called()
@@ -402,9 +427,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             receipt = json_value((attempt / "runner-receipt.json").read_bytes())
             journal.pop("launchIntentPersisted")
             _journal_receipt_reference(attempt, journal, receipt)
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])) as engine:
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -419,7 +444,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         )
         for listing in statuses:
             with self.subTest(listing=listing), patch(
-                "experiment_compiler.runner._engine_call",
+                "experiment_compiler.runner_process._engine_call",
                 side_effect=[SimpleNamespace(returncode=1, stdout=""), listing],
             ):
                 with self.assertRaisesRegex(PackageError, "could not prove"):
@@ -463,9 +488,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                         with self.assertRaisesRegex(OSError, "fixture journal publication interruption"):
                             _journal_receipt_reference(attempt, journal, receipt)
                     self.assertEqual(receipt_path.read_bytes(), receipt_bytes)
-                    with patch("experiment_compiler.runner._controller_is_alive"), \
-                            patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                            patch("experiment_compiler.runner._engine_call",
+                    with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                            patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                            patch("experiment_compiler.runner_process._engine_call",
                                   return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])):
                         recovered = recover_attempt(attempt)
                     retained = json_value((attempt / "container-journal.json").read_bytes())
@@ -497,9 +522,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             receipt = json_value((attempt / "runner-receipt.json").read_bytes())
             receipt.update(status="timed-out", endedAt="2026-01-01T00:00:00+00:00", exitCode=124, timedOut=True)
             _persist_attempt_receipt(attempt, receipt)
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])):
                 recovered = recover_attempt(attempt)
             for key in ("status", "endedAt", "timedOut", "exitCode"):
@@ -517,7 +542,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             descriptor = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                with patch("experiment_compiler.runner._engine_call") as engine:
+                with patch("experiment_compiler.runner_process._engine_call") as engine:
                     with self.assertRaisesRegex(PackageError, "Another recovery is active"):
                         recover_attempt(attempt)
                 engine.assert_not_called()
@@ -580,13 +605,13 @@ class RunnerBoundaryTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout="")
                 return SimpleNamespace(returncode=0, stdout="")
 
-            with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=current_boot), \
-                    patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._current_cwl_process_fields",
+            with patch("experiment_compiler.runner_process._kernel_boot_uuid", return_value=current_boot), \
+                    patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._current_cwl_process_fields",
                           side_effect=AssertionError("must not inspect a potentially reused PID")), \
-                    patch("experiment_compiler.runner._signal_retained_cwl_group",
+                    patch("experiment_compiler.runner_process._signal_retained_cwl_group",
                           side_effect=AssertionError("must not signal a potentially reused process group")), \
-                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+                    patch("experiment_compiler.runner_process._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
 
             self.assertEqual(recovered["containerCleanup"]["state"], "clean")
@@ -596,7 +621,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                                 if call.args[2][0] == "inspect"))
 
     def test_same_boot_cwl_pid_reuse_still_refuses_to_signal(self):
-        from experiment_compiler.runner import _reconcile_cwl_process_group
+        from experiment_compiler.runner_process import _reconcile_cwl_process_group
 
         boot_id = uuid.uuid4()
         journal = {"cwlProcessIdentity": {
@@ -604,9 +629,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             "processGroupId": 2345, "sessionId": 2345,
         }}
         fields = ["S", "1", "2345", "2345"] + ["0"] * 15 + ["21"]
-        with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=boot_id), \
-                patch("experiment_compiler.runner._current_cwl_process_fields", return_value=fields), \
-                patch("experiment_compiler.runner._signal_retained_cwl_group") as signal_group, \
+        with patch("experiment_compiler.runner_process._kernel_boot_uuid", return_value=boot_id), \
+                patch("experiment_compiler.runner_process._current_cwl_process_fields", return_value=fields), \
+                patch("experiment_compiler.runner_process._signal_retained_cwl_group") as signal_group, \
                 self.assertRaisesRegex(PackageError, "PID has been reused"):
             _reconcile_cwl_process_group(journal)
         signal_group.assert_not_called()
@@ -627,8 +652,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "cwl_boot_id": "not-a-uuid", "container_id": "c" * 64,
                 },
             )
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="sha256:" + "b" * 64)) as engine:
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -662,8 +687,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             }
             receipt = {}
             states = iter(((True, "running"), (True, "exited"), (False, None)))
-            with patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
-                    patch("experiment_compiler.runner._engine_call", return_value=SimpleNamespace(returncode=0)) as engine:
+            with patch("experiment_compiler.runner_process._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner_process._engine_call", return_value=SimpleNamespace(returncode=0)) as engine:
                 errors = []
                 _cleanup_container_journal(attempt, journal, receipt, errors)
             self.assertEqual(errors, [])
@@ -677,7 +702,7 @@ class RunnerBoundaryTests(unittest.TestCase):
     def test_hard_loss_recovery_discovers_unjournaled_cidfile_and_binds_receipt(self):
         from datetime import datetime, timezone
         from types import SimpleNamespace
-        from experiment_compiler.runner import _persist_attempt_receipt
+        from experiment_compiler.runner_receipts import _persist_attempt_receipt
         attempt_id = "0123456789ab"
         container_id = "c" * 64
         image_id = "sha256:" + "b" * 64
@@ -721,10 +746,10 @@ class RunnerBoundaryTests(unittest.TestCase):
                 if arguments[:2] == ["image", "inspect"]:
                     return SimpleNamespace(returncode=0, stdout=image_id)
                 return SimpleNamespace(returncode=0, stdout="")
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
-                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+            with patch("experiment_compiler.runner_process._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_process._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner_process._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
                 retained = _retained_files(attempt)
                 repeated = recover_attempt(attempt)
@@ -806,10 +831,10 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "TMPDIR": str(tmpfs),
                     }),
                     patch("experiment_compiler.runner.tempfile.tempdir", str(tmpfs)),
-                    patch("experiment_compiler.runner._require_bounded_tmpfs"),
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+                    patch("experiment_compiler.runner_process._require_bounded_tmpfs"),
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"),
-                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen),
+                    patch("experiment_compiler.runner_process.subprocess.Popen", side_effect=fake_popen),
                     patch("experiment_compiler.runner.compile_package", side_effect=record_package_path),
             ):
                 run_package(plan, output, expected_sha256=built["packageSha256"],
@@ -821,7 +846,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def test_attempt_result_upgrades_file_only_workflow_in_completed_and_failed_crates(self):
         from datetime import datetime, timezone
-        from experiment_compiler.runner import _read_package
+        from experiment_compiler.runner_admission import _read_package
 
         for return_code, expected_status in ((0, "https://schema.org/CompletedActionStatus"),
                                              (9, "https://schema.org/FailedActionStatus")):
@@ -949,8 +974,8 @@ class RunnerBoundaryTests(unittest.TestCase):
     def test_timeout_with_live_orphan_skips_container_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            with patch("experiment_compiler.runner._process_group_exists", side_effect=[True, True]), \
-                    patch("experiment_compiler.runner._cleanup_container_journal") as cleanup:
+            with patch("experiment_compiler.runner_process._process_group_exists", side_effect=[True, True]), \
+                    patch("experiment_compiler.runner_process._cleanup_container_journal") as cleanup:
                 self._check_attempt_scenario("timeout-orphan", directory)
             cleanup.assert_not_called()
             journal = json.loads((directory / "result.attempt/container-journal.json").read_text())
@@ -1050,10 +1075,10 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
                     '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                 "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-        }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
-                patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                patch("experiment_compiler.runner.LogCapture", capture), \
-                patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
+        }), patch("experiment_compiler.runner_admission.importlib.metadata.version", return_value="3.2.20260720092025"), \
+                patch("experiment_compiler.runner_process._require_bounded_tmpfs"), \
+                patch("experiment_compiler.runner_process.LogCapture", capture), \
+                patch("experiment_compiler.runner_process.subprocess.Popen", side_effect=launch), \
                 patch("experiment_compiler.runner.os.killpg") as kill_group, \
                 patch.object(Path, "replace", new=replace_receipt), \
                 patch("experiment_compiler.runner.shutil.copytree", side_effect=copy_source), \
@@ -1079,7 +1104,7 @@ class RunnerBoundaryTests(unittest.TestCase):
 
     def _assert_retained_attempt_refuses_rerun(self, plan, output, digest):
         retained = _retained_files(output.parent)
-        with patch("experiment_compiler.runner.subprocess.Popen") as launch:
+        with patch("experiment_compiler.runner_process.subprocess.Popen") as launch:
             with self.assertRaisesRegex(PackageError, "attempts are never overwritten"):
                 run_package(plan, output, expected_sha256=digest, allow_workflow_execution=True)
         launch.assert_not_called()
@@ -1165,9 +1190,9 @@ class RunnerBoundaryTests(unittest.TestCase):
         attempt = output.with_suffix(".attempt")
         snapshot = attempt / published["containerJournal"]["storePath"]
         protected = {output: sha256_file(output), snapshot: sha256_file(snapshot)}
-        with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                patch("experiment_compiler.runner._engine_call",
+        with patch("experiment_compiler.runner_process._validate_recovery_age_and_controller"), \
+                patch("experiment_compiler.runner_process._reconcile_cwl_process_group"), \
+                patch("experiment_compiler.runner_process._engine_call",
                       return_value=SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64)):
             recovered = recover_attempt(attempt)
         self.assertEqual(recovered["status"], "failed")
@@ -1191,7 +1216,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         process = Mock(pid=8124)
         process.wait.return_value = -9
         with patch("experiment_compiler.runner.os.killpg", side_effect=OSError("permission denied")), \
-                patch("experiment_compiler.runner._process_group_exists", return_value=False):
+                patch("experiment_compiler.runner_process._process_group_exists", return_value=False):
             errors = _terminate_process_group(process)
         self.assertEqual(len(errors), 2)
         self.assertTrue(all("signal " in error and "OSError" in error for error in errors))
@@ -1337,8 +1362,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(root)}
             output = root / "attempt.zip"
             with patch.dict(os.environ, environment), patch.object(zipfile.ZipFile, "read", checked_read), \
-                    patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
-                    patch("experiment_compiler.runner._execute_cwl", side_effect=execute):
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version", return_value="3.2.20260720092025"), \
+                    patch("experiment_compiler.runner_process._execute_cwl", side_effect=execute):
                 result = run_package(package, output, expected_sha256=package_digest, allow_workflow_execution=True,
                                      policy=PackageReadPolicy(max_total_bytes=6 * MIB))
             self.assertEqual(result["executionStatus"], "succeeded")
@@ -1462,9 +1487,9 @@ class: CommandLineTool
                             '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                         "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                         "TMPDIR": str(directory),
-                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                }), patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
-                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                        patch("experiment_compiler.runner_process.subprocess.Popen") as popen:
                     with self.assertRaisesRegex(PackageError, "execution deferred:"):
                         run_package(plan, directory / "result.zip",
                                     expected_sha256=built["packageSha256"],
@@ -1507,9 +1532,9 @@ class: CommandLineTool
                             '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                         "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                         "TMPDIR": str(directory),
-                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                }), patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
-                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                        patch("experiment_compiler.runner_process.subprocess.Popen") as popen:
                     with self.assertRaisesRegex(PackageError, "execution deferred:"):
                         run_package(plan, directory / "result.zip",
                                     expected_sha256=built["packageSha256"],
@@ -1593,10 +1618,10 @@ class: CommandLineTool
                     "CONTAINER_HOST": "ssh://private/host",
                     "DOCKER_HOST": "tcp://private/host",
                     "PODMAN_CONNECTIONS_CONF": "/private/host-connections",
-            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+            }), patch("experiment_compiler.runner_process._require_bounded_tmpfs"), \
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
-                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
+                    patch("experiment_compiler.runner_process.subprocess.Popen", side_effect=fake_popen):
                 outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
                                       allow_workflow_execution=True)
             self.assertEqual(outcome["executionStatus"], "succeeded")
@@ -1613,8 +1638,8 @@ class: CommandLineTool
             with self.subTest(environment=environment), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
                 with patch.dict(os.environ, environment, clear=True), \
-                        patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                        patch("experiment_compiler.runner.subprocess.Popen") as popen:
+                        patch("experiment_compiler.runner_process._require_bounded_tmpfs"), \
+                        patch("experiment_compiler.runner_process.subprocess.Popen") as popen:
                     popen.return_value.wait.return_value = 0
                     _execute_cwl(_CwlExecutionRequest(
                         directory, {}, {"executionMode": "cwltool-podman", "maxWallSeconds": 1},
@@ -1686,10 +1711,10 @@ class: CommandLineTool
                         '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                     "TMPDIR": str(directory),
-            }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+            }), patch("experiment_compiler.runner_process._require_bounded_tmpfs"), \
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                       return_value="3.2.20260720092025"), \
-                    patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
+                    patch("experiment_compiler.runner_process.subprocess.Popen", side_effect=fake_popen):
                 run_result = run_package(plan, result, expected_sha256=original_sha,
                                          allow_workflow_execution=True)
             self.assertEqual(plan.read_bytes(), plan_bytes)
