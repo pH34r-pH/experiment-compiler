@@ -28,8 +28,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=ROOT / "_site")
     args = parser.parse_args()
+    count = build_site(args.output, ROOT / "examples")
+    print(json.dumps({"experimentCount": count, "site": str(args.output)}, sort_keys=True))
+    return 0
 
-    destination = args.output
+
+def build_site(destination: Path, recipes_root: Path) -> int:
+    """Generate the catalog, detail pages, and ZIPs from the supplied recipe tree."""
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
@@ -40,7 +45,6 @@ def main() -> int:
     shutil.copy2(ROOT / "site/data/article-reference-v1.schema.json",
                  destination / "data/article-reference-v1.schema.json")
 
-    recipes_root = ROOT / "examples"
     catalog = describe_catalog(recipes_root)
     package_dir = destination / "packages"
     package_dir.mkdir(parents=True)
@@ -74,8 +78,7 @@ def main() -> int:
     data_dir = destination / "data"
     (data_dir / "experiments.json").write_bytes(canonical(data))
     (destination / ".nojekyll").write_text("")
-    print(json.dumps({"experimentCount": len(catalog["experiments"]), "site": str(destination)}, sort_keys=True))
-    return 0
+    return len(catalog["experiments"])
 
 
 def _family_groups(experiments: list[dict]) -> list[tuple[dict | None, list[dict]]]:
@@ -347,7 +350,8 @@ def render_detail(experiment: dict) -> str:
                         if package_hash else "Package identity not declared")
     provenance = html.escape(f"{source_repository}@{source_commit}")
     records = html.escape(json.dumps({key: experiment.get(key) for key in
-        ("lifecycle", "executionAttempts", "acceptance", "result", "scientificInterpretation", "environment", "resources", "contents")
+        ("experimentIdentifier", "lineage", "lifecycle", "executionAttempts", "acceptance", "result",
+         "scientificInterpretation", "environment", "resources", "contents")
         if experiment.get(key) is not None}, indent=2, sort_keys=True))
     backlinks = experiment.get("backlinks", [])
     _validate_related_articles(backlinks)
