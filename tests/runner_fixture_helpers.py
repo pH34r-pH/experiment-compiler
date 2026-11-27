@@ -9,6 +9,15 @@ from experiment_compiler.runner import _persist_attempt_receipt, _write_containe
 from experiment_compiler.worker_limits import ObservedWorker
 
 
+RECOVERY_IDENTITY = {
+    "attempt_id": "0123456789ab",
+    "image_ref": "registry.example/tool@sha256:" + "d" * 64,
+    "image_id": "sha256:" + "a" * 64,
+    "reported_image_id": "sha256:" + "e" * 64,
+    "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+}
+
+
 def synthetic_worker_observation(_approval):
     return ObservedWorker(Fraction(1), 64 * 1024 * 1024, 128), {"observationSource": "synthetic fixture"}
 
@@ -42,7 +51,7 @@ def prepare_container_journal(attempt_directory, attempt_id, config):
     }
 
 
-def prepare_recovery_attempt(attempt_directory, identity):
+def prepare_recovery_attempt(attempt_directory, identity, *, before_launch=False):
     """Build a private retained attempt fixture without contacting a container engine."""
     from datetime import datetime, timezone
 
@@ -63,7 +72,7 @@ def prepare_recovery_attempt(attempt_directory, identity):
         "engine": "podman", "enginePath": "/usr/bin/podman",
         "workerImageRef": image_ref, "workerImageId": image_id,
         "reportedWorkerImageId": reported_image_id, "controller": controller,
-        "state": "running", "launchIntentPersisted": True,
+        "state": "prepared" if before_launch else "running", "launchIntentPersisted": not before_launch,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,

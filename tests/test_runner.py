@@ -27,12 +27,16 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _materialize, _open_run_package,
                                         _write_container_journal, _journal_receipt_reference, _retain_journal_snapshot,
                                         _container_cleanup_summary,
+                                        _AttemptStatus, _CleanupState, _ProcessPhase, _ContainerCleanupPhase,
+                                        _finish_attempt, _transition_process, _transition_container_cleanup,
+                                        _validate_cleanup_transition,
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
 from experiment_compiler.runner_logs import LogCapture
 from fixture_requirements import REQUIRES_RUNNER
-from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt, synthetic_worker_observation
+from runner_fixture_helpers import (RECOVERY_IDENTITY, prepare_container_journal, prepare_recovery_attempt,
+                                    synthetic_worker_observation)
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
@@ -40,15 +44,6 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 ATTEMPT_DIAGNOSTIC = b"bounded diagnostic"
 ATTEMPT_LOG_OVERFLOW = b" extra diagnostic"
 TRUNCATED_ATTEMPT_LOGS = {"oversized-log", "timeout", "compile", "cancelled"}
-RECOVERY_IDENTITY = {
-    "attempt_id": "0123456789ab",
-    "image_ref": "registry.example/tool@sha256:" + "d" * 64,
-    "image_id": "sha256:" + "a" * 64,
-    "reported_image_id": "sha256:" + "e" * 64,
-    "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
-}
-
-
 def _retained_files(attempt: Path) -> dict[str, str]:
     return {path.relative_to(attempt).as_posix(): sha256_file(path)
             for path in attempt.rglob("*") if path.is_file()}
@@ -365,6 +360,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         cases = (
             ("worker", {"reportedWorkerImageId": "different-worker"}, "plan and worker identity"),
             ("expired", {"createdAt": "2000-01-01T00:00:00+00:00"}, "journal is stale"),
+            ("cross-attempt", {"attemptId": "a" * 12}, "different attempt"),
             ("missing-marker", {}, "no matching durable update marker"),
             ("permissive-marker", {}, "transaction marker.*mode 0600"),
             ("permissive-journal", {}, "Recovery journal.*mode 0600"),
@@ -394,6 +390,51 @@ class RunnerBoundaryTests(unittest.TestCase):
                     engine.assert_not_called()
                     self.assertEqual(_retained_files(attempt), retained)
                     self.assertFalse((attempt / "container-journal-history").exists())
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_legacy_running_journal_without_launch_flags_keeps_cleanup_unknown(self):
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            journal = prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+            receipt = json_value((attempt / "runner-receipt.json").read_bytes())
+            journal.pop("launchIntentPersisted")
+            _journal_receipt_reference(attempt, journal, receipt)
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])) as engine:
+                recovered = recover_attempt(attempt)
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+            self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+            self.assertEqual(recovered["status"], "failed")
+            self.assertEqual(engine.call_count, 1)
+
+    def test_invalid_listing_cannot_prove_exact_container_absence(self):
+        statuses = (
+            SimpleNamespace(returncode=1, stdout=""),
+            SimpleNamespace(returncode=0, stdout="incomplete listing\n"),
+        )
+        for listing in statuses:
+            with self.subTest(listing=listing), patch(
+                "experiment_compiler.runner._engine_call",
+                side_effect=[SimpleNamespace(returncode=1, stdout=""), listing],
+            ):
+                with self.assertRaisesRegex(PackageError, "could not prove"):
+                    _container_present(Path("."), {}, "c" * 64)
+
+    def test_terminal_states_cannot_restart_the_attempt_or_container_cleanup(self):
+        receipt = {"status": "timed-out", "executionPhase": "running"}
+        cleanup = {"status": "absent", "absentAfterCleanup": True}
+        with self.assertRaisesRegex(PackageError, "started receipt"):
+            _finish_attempt(receipt, _AttemptStatus.SUCCEEDED)
+        with self.assertRaisesRegex(PackageError, "process phase transition"):
+            _transition_process(receipt, _ProcessPhase.PREFLIGHT)
+        with self.assertRaisesRegex(PackageError, "runner cleanup transition"):
+            _validate_cleanup_transition("clean", _CleanupState.RUNNING)
+        with self.assertRaisesRegex(PackageError, "container cleanup transition"):
+            _transition_container_cleanup(cleanup, _ContainerCleanupPhase.STOPPING)
+        self.assertEqual(receipt, {"status": "timed-out", "executionPhase": "running"})
+        self.assertEqual(cleanup, {"status": "absent", "absentAfterCleanup": True})
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_before_and_after_journal_publication(self):
@@ -1092,6 +1133,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             if scenario == "terminal-persist":
                 self.assertEqual(terminal_failure, [True])
                 self.assertEqual(receipt["collectionErrors"], [])
+                self._check_result_survives_recovery(output, published)
             else:
                 for key, value in receipt.items():
                     if key not in {"containerJournal", "containerCleanup", "executionPhase",
@@ -1100,6 +1142,19 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(published["containerJournal"]["availability"], "private-store")
                 self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
                 self.assertTrue(published["containerCleanup"]["allAbsent"])
+
+    def _check_result_survives_recovery(self, output, published):
+        attempt = output.with_suffix(".attempt")
+        snapshot = attempt / published["containerJournal"]["storePath"]
+        protected = {output: sha256_file(output), snapshot: sha256_file(snapshot)}
+        with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
+                patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                patch("experiment_compiler.runner._engine_call",
+                      return_value=SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64)):
+            recovered = recover_attempt(attempt)
+        self.assertEqual(recovered["status"], "failed")
+        self.assertEqual(recovered["attemptId"], published["attemptId"])
+        self.assertEqual({path: sha256_file(path) for path in protected}, protected)
 
     @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_process_cleanup_escalates_and_bounds_each_wait(self):

@@ -96,6 +96,11 @@ settling a pending update. Recovery retains the original journal snapshot
 and records cleanup separately from the attempt outcome. An unresolved
 launch keeps cleanup unknown. Failed and timed-out outcomes stay visible,
 and repeating recovery with the same evidence preserves the settled receipt.
+Recovery treats a retained running or unresolved journal as evidence of a
+possible launch even when an older receipt lacks the launch flag. A cleanup
+result requires either verified container absence or evidence that launch
+never began. The runner preserves the first cancellation record through
+later settlement and recovery.
 
 ### Revising a plan after an attempt
 
