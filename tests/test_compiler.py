@@ -684,6 +684,24 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             compile_package(recipe_path, self.root / "false-run-claim.zip")
 
+    def test_process_run_profile_on_root_uses_base_version_on_descriptor(self):
+        recipe_path, recipe, graph = self.lifecycle_fixture(process_run=True)
+        graph[1]["conformsTo"] = {"@id": "https://w3id.org/ro/wfrun/process/0.6"}
+        metadata = recipe_path.parent / "ro-crate-metadata.json"
+        def write_recipe():
+            metadata.write_bytes(canonical({"@context": ["https://w3id.org/ro/crate/1.3/context"], "@graph": graph}))
+            recipe["members"][3]["sha256"] = sha256(metadata.read_bytes())
+            recipe["members"][3]["size"] = metadata.stat().st_size
+            recipe_path.write_bytes(canonical(recipe))
+        write_recipe()
+        result = compile_package(recipe_path, self.root / "process-only-profile.zip")
+        self.assertTrue(result["lifecycle"]["processRunCrate"])
+        self.assertEqual(result["scientificReproduction"], "not-run")
+        del graph[0]["conformsTo"]
+        write_recipe()
+        with self.assertRaises(PackageError):
+            compile_package(recipe_path, self.root / "missing-base-descriptor.zip")
+
     def test_lifecycle_rejects_execution_with_undescribed_instrument(self):
         recipe_path, recipe, graph = self.lifecycle_fixture(
             action_status="https://schema.org/ActiveActionStatus", process_run=True)

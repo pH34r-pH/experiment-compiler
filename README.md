@@ -11,6 +11,10 @@ Experiment Compiler packages explicit source bytes, standards metadata, dependen
 
 It does **not** define the science, fill in a missing method, infer a conclusion, or require a hosted service.
 
+## Releases
+
+The published alpha release [`v0.1.0a1`](https://github.com/pH34r-pH/experiment-compiler/releases/tag/v0.1.0a1) provides the attested wheel, historical compatibility ZIP (`15,296` bytes, SHA-256 `45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341`), `SHA256SUMS`, and scoped build/verification receipts as a convenient download path. The checked-in recipes under `examples/` remain the reproducible source of truth.
+
 ## Quick start
 
 Use Python 3.11.4 or later. Clean source reconstruction uses the standard library's

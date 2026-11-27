@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
       - name: Install the pinned workflow runner
@@ -48,7 +48,7 @@ jobs:
         run: bash scripts/check_lifecycle_pipeline.sh
       - name: Retain final package and catalog source closure
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: compiled-experiment-pipeline-runs-${{ github.sha }}
           path: |
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python }}
       - name: Test the core without optional dependencies
@@ -140,7 +140,7 @@ jobs:
           "$RUNNER_TEMP/compiler-install/bin/experiment-compiler" verify "$RUNNER_TEMP/installed-linear.zip" --recipe "$GITHUB_WORKSPACE/examples/linear-regression-v1/experiment.json"
           "$RUNNER_TEMP/compiler-install/bin/experiment-runner" --help
       - name: Retain compiled package, wheel and scoped receipts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: compiled-experiment-poc-python-${{ matrix.python }}-${{ github.sha }}
           path: dist/
@@ -151,7 +151,7 @@ jobs:
         run: python scripts/stage_alpha_release_assets.py --input dist --output "$RUNNER_TEMP/alpha-assets"
       - name: Retain exact alpha inputs for the signing job
         if: inputs.operation == 'alpha-provenance' && matrix.python == '3.12'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: alpha-release-inputs-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/alpha-assets/
@@ -168,7 +168,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
       - name: Install test dependencies and bounded mutation toolchain
@@ -200,7 +200,7 @@ jobs:
             --require-file experiment_compiler/worker_limits.py
       - name: Retain standard mutation report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: experiment-compiler-mutation-report-${{ github.sha }}
           path: |
@@ -218,7 +218,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
       - name: Build the pinned self-contained package
@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
       - name: Derive metadata and build static site
@@ -266,7 +266,7 @@ jobs:
           python -m playwright install --with-deps chromium
           python scripts/check_site_mobile.py "$RUNNER_TEMP/site"
       - name: Retain site preview
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: experiment-compiler-site-${{ github.sha }}
           path: ${{ runner.temp }}/site/
@@ -291,7 +291,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
       - name: Build derived Pages artifact
@@ -308,21 +308,21 @@ jobs:
         run: python scripts/verify_publication_attestations.py --source-commit "$GITHUB_SHA" --site "$RUNNER_TEMP/site" --output "$RUNNER_TEMP/publication-evidence"
       - name: Retain clean rebuild and signed provenance receipts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: publication-verification-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/publication-evidence/
           if-no-files-found: error
           retention-days: 7
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/site
       - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   alpha-provenance:
     name: Sign and verify alpha release candidates
@@ -341,7 +341,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -375,7 +375,7 @@ jobs:
           cp -- "$BUNDLE_PATH" "$root/verification/attestation.jsonl"
           (cd "$root/assets" && sha256sum -- *) > "$root/asset-sha256.txt"
       - name: Retain verified alpha candidate and signatures
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: verified-alpha-release-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/alpha-release/
