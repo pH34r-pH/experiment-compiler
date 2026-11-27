@@ -167,11 +167,25 @@ jobs:
             --verify-survivors --workers 2
       - name: Validate Mutation Testing Elements report
         run: python scripts/validate_mutation_report.py "$RUNNER_TEMP/irradiate-report.json" --require-mutants
+      - name: Mutate verifier resource policy and worker admission
+        timeout-minutes: 4
+        run: |
+          irradiate run experiment_compiler/archive_policy.py experiment_compiler/worker_limits.py \
+            --report json --output "$RUNNER_TEMP/irradiate-admission-report.json" \
+            --verify-survivors --workers 2 \
+            --pytest-args=-k --pytest-args='archive_policy or verifier_opens_lifecycle or WorkerLimitTests'
+      - name: Verify both admission mutation targets
+        run: |
+          python scripts/validate_mutation_report.py "$RUNNER_TEMP/irradiate-admission-report.json" \
+            --require-file experiment_compiler/archive_policy.py \
+            --require-file experiment_compiler/worker_limits.py
       - name: Retain standard mutation report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: experiment-compiler-mutation-report-${{ github.sha }}
-          path: ${{ runner.temp }}/irradiate-report.json
+          path: |
+            ${{ runner.temp }}/irradiate-report.json
+            ${{ runner.temp }}/irradiate-admission-report.json
           if-no-files-found: error
           retention-days: 7
 
