@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,38 @@ from fixture_requirements import HAS_RUNNER
 from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _retained_attempt_digests(attempt: Path) -> dict[Path, str]:
+    source = attempt.with_suffix(".source")
+    receipt = attempt.with_suffix(".attempt") / "runner-receipt.json"
+    files = {attempt, attempt.with_name("plan.zip"), receipt, source / "experiment.json"}
+    files.update(path for path in source.rglob("*") if path.is_file())
+    return {path: sha256(path.read_bytes()) for path in files}
+
+
+def _fail_package_write(output: Path):
+    copy_file = shutil.copyfileobj
+
+    def fail_selected_write(source, destination, length=0):
+        if Path(destination.name) == output:
+            destination.write(b"incomplete fixture")
+            raise OSError("synthetic package write error")
+        return copy_file(source, destination, length)
+
+    return patch.object(shutil, "copyfileobj", side_effect=fail_selected_write)
+
+
+def _publish_concurrent_output(output: Path, content: bytes):
+    open_path = Path.open
+
+    def open_with_existing_output(path, mode="r", *args, **kwargs):
+        if path == output and mode == "xb":
+            with open_path(path, "xb") as other_writer:
+                other_writer.write(content)
+        return open_path(path, mode, *args, **kwargs)
+
+    return patch.object(Path, "open", new=open_with_existing_output)
 
 
 class RevisionTests(unittest.TestCase):
@@ -98,6 +131,7 @@ class RevisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             attempt, _, attempt_bytes, attempt_id = self._attempt(directory)
+            retained = _retained_attempt_digests(attempt)
             attempt_package_bytes = attempt.read_bytes()
             attempt_sha = sha256(attempt_package_bytes)
             recipe = self._revision_recipe(directory)
@@ -107,7 +141,9 @@ class RevisionTests(unittest.TestCase):
                                     expected_sha256=attempt_sha, attempt_id=attempt_id)
 
             self.assertEqual(attempt.read_bytes(), attempt_package_bytes)
+            self.assertEqual(_retained_attempt_digests(attempt), retained)
             self.assertNotEqual(attempt_bytes, attempt_package_bytes)
+            self.assertNotEqual(result["packageSha256"], attempt_sha)
             self.assertEqual(result["parentPackageSha256"], attempt_sha)
             self.assertEqual(result["selectedAttemptId"], attempt_id)
             verified = verify_bytes(revised.read_bytes(), recipe=load_recipe(
@@ -183,6 +219,7 @@ class RevisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             attempt, _, _, attempt_id = self._attempt(directory)
+            retained = _retained_attempt_digests(attempt)
             attempt_bytes = attempt.read_bytes()
             attempt_sha = sha256(attempt_bytes)
             decision = directory / "decision.md"
@@ -201,11 +238,14 @@ class RevisionTests(unittest.TestCase):
             )
 
             self.assertEqual(attempt.read_bytes(), attempt_bytes)
+            self.assertEqual(_retained_attempt_digests(attempt), retained)
             self.assertEqual(result["parentPackageSha256"], attempt_sha)
+            self.assertNotEqual(result["packageSha256"], attempt_sha)
             recipe_path = final.with_name("final.source") / "experiment.json"
             verified = verify_bytes(final.read_bytes(), recipe=load_recipe(recipe_path))
             self.assertEqual(verified["lifecycle"]["creativeWorkStatus"], "Draft")
             self.assertEqual(verified["lifecycle"]["attemptCount"], 1)
+            self.assertEqual(verified["scientificReproduction"], "not-run")
             profile_check = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/validate_current_ro_profiles.py"),
                  str(recipe_path.parent)], capture_output=True, text=True)
@@ -226,6 +266,42 @@ class RevisionTests(unittest.TestCase):
             interpretation = catalog["experiments"][0]["scientificInterpretation"]
             self.assertEqual(interpretation[0]["summary"],
                              "Operational success is recorded; the scientific finding remains inconclusive.")
+
+    def test_lifecycle_output_failures_preserve_archived_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            attempt, _, _, attempt_id = self._attempt(directory)
+            retained = _retained_attempt_digests(attempt)
+            parent = {"expected_sha256": retained[attempt], "attempt_id": attempt_id}
+            decision = directory / "decision.md"
+            decision.write_text("The finding is inconclusive.\n")
+            review = directory / "review.md"
+            review.write_text("The synthetic fixture is shareable.\n")
+            revision = partial(revise_package, attempt, self._revision_recipe(directory), **parent)
+            finalization = partial(
+                finalize_package, attempt, **parent, experiment_id="linear-regression-final-v1",
+                title="Final pipeline fixture", decision_path=decision, decision_summary="Inconclusive.",
+                review_path=review, review_summary="Approved for this test.", reviewer_name="Fixture reviewer",
+            )
+
+            for name, operation in (("revision", revision), ("finalization", finalization)):
+                with self.subTest(operation=name):
+                    output = directory / f"{name}.zip"
+                    with _fail_package_write(output), self.assertRaisesRegex(OSError, "synthetic package write"):
+                        operation(output)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(output.with_suffix(".source").exists())
+                    self.assertEqual(_retained_attempt_digests(attempt), retained)
+
+                    prior_output = b"previous artifact"
+                    with _publish_concurrent_output(output, prior_output), self.assertRaises(FileExistsError):
+                        operation(output)
+                    self.assertEqual(output.read_bytes(), prior_output)
+                    self.assertFalse(output.with_suffix(".source").exists())
+                    with self.assertRaisesRegex(PackageError, "already exists"):
+                        operation(output)
+                    self.assertEqual(output.read_bytes(), prior_output)
+                    self.assertEqual(_retained_attempt_digests(attempt), retained)
 
     def test_catalog_rejects_tampered_finalization_source_closure(self):
         with tempfile.TemporaryDirectory() as temporary:

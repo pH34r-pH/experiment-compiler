@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from offline_fixture_helpers import offline_operations
 from repository_profile_helpers import composed_records, retained_trajectory
 
 from experiment_compiler.agent_profiles import SOURCE, projection_fingerprint
@@ -19,6 +20,7 @@ from experiment_compiler.core import (
     canonical,
     compile_package,
     sha256,
+    verify_bytes,
     verify_package,
 )
 from experiment_compiler.trajectory import BOUND_QUALIFICATION, TRACE_REFERENCE, TRAJECTORY_SOURCE, verify_trajectory
@@ -68,10 +70,11 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         return compile_package(path, output), output
 
     def test_exact_real_upstream_packet_packages_without_execution_or_self_acceptance(self):
-        with patch("subprocess.Popen", side_effect=AssertionError("no process")), \
-                patch("socket.socket", side_effect=AssertionError("no network")):
+        with offline_operations():
             report, package = self.package()
             verified = verify_package(package, expected_sha256=report["packageSha256"])
+            raw = package.read_bytes()
+            self.assertEqual(verify_bytes(raw, expected_sha256=report["packageSha256"]), verified)
         self.assertEqual(verified["repositoryAgent"]["scope"], "schema-identity-and-disclosure-only")
         self.assertEqual(verified["repositoryAgent"]["acceptance"], "not-evaluated")
         self.assertEqual(verified["repositoryAgent"]["trainingEligibility"], "not-granted")
@@ -180,8 +183,7 @@ class RepositoryAgentProfileTests(unittest.TestCase):
 
     @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
     def test_verified_trajectory_reports_exact_attempt_without_running_package(self):
-        with patch("subprocess.Popen", side_effect=AssertionError("no process")), \
-                patch("socket.socket", side_effect=AssertionError("no network")):
+        with offline_operations():
             paths, pins = self.trajectory_package()
             receipt = verify_trajectory(*paths, **pins)
         self.assertEqual(receipt["eventCount"], 1)

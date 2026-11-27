@@ -6,7 +6,6 @@ import io
 import json
 import os
 import shutil
-import socket
 import stat
 import subprocess
 import sys
@@ -17,6 +16,8 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
+
+from offline_fixture_helpers import offline_operations
 
 from experiment_compiler.archive_policy import ArchiveMemberReader, PackageReadPolicy, ResourcePolicyError
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
@@ -156,12 +157,27 @@ class CompilerTests(unittest.TestCase):
         # Same output is idempotent rather than an overwrite/error.
         compile_package(self.recipe_path, self.output)
 
-    def test_offline_build_has_no_subprocess_or_network(self):
-        with patch.object(socket, "socket", side_effect=AssertionError("network")), \
-             patch.object(subprocess, "Popen", side_effect=AssertionError("execution")):
-            result = compile_package(self.recipe_path, self.output)
-        self.assertEqual(result["scope"], "package-integrity-only")
-        self.assertEqual(result["scientificReproduction"], "not-run")
+    def test_compile_and_both_verifiers_are_offline_for_all_profiles(self):
+        lifecycle_recipe, _, _ = self.lifecycle_fixture()
+        for path in (self.recipe_path, SELF_CONTAINED / "experiment.json", lifecycle_recipe):
+            recipe = load_recipe(path)
+            output = self.root / f"{recipe['profile']}.zip"
+            with self.subTest(profile=recipe["profile"]), offline_operations():
+                built = compile_package(path, output)
+                raw = output.read_bytes()
+                checked = verify_package(output, recipe=recipe)
+                self.assertEqual(verify_bytes(raw, recipe=recipe), checked)
+                self.assertEqual(checked["packageSha256"], built["packageSha256"])
+                self.assertEqual(checked["scope"], "package-integrity-only")
+                self.assertEqual(checked["scientificReproduction"], "not-run")
+                with self.assertRaisesRegex(PackageError, "SHA-256 mismatch"):
+                    verify_package(output, expected_sha256="0" * 64)
+                with self.assertRaisesRegex(PackageError, "SHA-256 mismatch"):
+                    verify_bytes(raw, expected_sha256="0" * 64)
+                self.assertEqual(output.read_bytes(), raw)
+
+        with zipfile.ZipFile(self.root / "compiled-experiment-lifecycle-v1.zip") as archive:
+            self.assertIn(b"raise AssertionError", archive.read("experiment/runner.py"))
 
     def test_generic_second_recipe_has_no_issue164_assumptions(self):
         recipe = self.recipe()
@@ -193,7 +209,7 @@ class CompilerTests(unittest.TestCase):
         files = {
             "README.md": b"# Prospective example\n\n## Hypothesis\nA testable hypothesis.\n",
             "protocol.md": b"# Protocol\n\n## Question\nCan a plan be packaged without a result?\n\n## Method\nNo execution has occurred.\n",
-            "runner.py": b"# Example executable identity\n",
+            "runner.py": b"raise AssertionError('A packaged member was executed')\n",
         }
         action = {"@id": "#planned-run", "@type": "CreateAction",
                   "actionStatus": "https://schema.org/PotentialActionStatus"}
@@ -745,10 +761,42 @@ class CompilerTests(unittest.TestCase):
 
     def test_verifier_distinguishes_external_digest_from_self_consistency(self):
         raw = self.build()
-        self.assertFalse(verify_bytes(raw)["matchedExpectedPackage"])
-        self.assertTrue(verify_bytes(raw, expected_sha256=EXPECTED)["matchedExpectedPackage"])
-        with self.assertRaises(PackageError):
+        pinned_recipe = load_recipe(self.recipe_path)
+        unpinned_recipe = {key: value for key, value in pinned_recipe.items() if key != "expectedPackage"}
+        for options, basis, matched_recipe, matched_package in (
+            ({}, "internal-consistency", False, False),
+            ({"recipe": unpinned_recipe}, "reviewed-recipe", True, False),
+            ({"expected_sha256": EXPECTED}, "complete-package-sha256", False, True),
+            ({"recipe": pinned_recipe}, "complete-package-sha256", True, True),
+            ({"recipe": unpinned_recipe, "expected_sha256": EXPECTED}, "complete-package-sha256", True, True),
+            ({"recipe": pinned_recipe, "expected_sha256": EXPECTED}, "complete-package-sha256", True, True),
+        ):
+            with self.subTest(basis=basis, recipe=matched_recipe, keys=list(options)):
+                result = verify_bytes(raw, **options)
+                self.assertEqual(result["verificationBasis"], basis)
+                self.assertIs(result["matchedReviewedRecipe"], matched_recipe)
+                self.assertIs(result["matchedExpectedPackage"], matched_package)
+        with self.assertRaisesRegex(PackageError, "SHA-256 mismatch"):
             verify_bytes(raw, expected_sha256="0" * 64)
+        with self.assertRaisesRegex(PackageError, "SHA-256 mismatch"):
+            verify_bytes(raw, recipe=pinned_recipe, expected_sha256="0" * 64)
+        wrong_pin = {**pinned_recipe, "expectedPackage": {"sha256": "0" * 64, "size": len(raw)}}
+        with self.assertRaisesRegex(PackageError, "recipe compatibility target"):
+            verify_bytes(raw, recipe=wrong_pin, expected_sha256=EXPECTED)
+
+    def test_recipe_inventory_match_allows_different_zip_encoding(self):
+        raw = self.build()
+        recipe = load_recipe(self.recipe_path)
+        recipe.pop("expectedPackage")
+        repackaged = io.BytesIO(raw)
+        with zipfile.ZipFile(repackaged, "a") as archive:
+            archive.comment = b"Equivalent inventory with a different ZIP encoding."
+        result = verify_bytes(repackaged.getvalue(), recipe=recipe)
+        self.assertEqual(result["verificationBasis"], "reviewed-recipe")
+        self.assertFalse(result["matchedExpectedPackage"])
+        self.assertNotEqual(result["packageSha256"], EXPECTED)
+        with self.assertRaisesRegex(PackageError, "SHA-256 mismatch"):
+            verify_bytes(repackaged.getvalue(), recipe=recipe, expected_sha256=EXPECTED)
 
     def test_verifier_rejects_changed_member(self):
         raw = self.mutate_zip(lambda pairs: [(i, b"changed" if i.filename.endswith("VALIDATION.md") else b) for i, b in pairs])
@@ -798,7 +846,7 @@ class CompilerTests(unittest.TestCase):
         recipe.pop("expectedPackage")
         recipe["manifest"]["source"]["commit"] = "b" * 40
         with self.assertRaises(PackageError):
-            verify_bytes(raw, recipe=recipe)
+            verify_bytes(raw, recipe=recipe, expected_sha256=EXPECTED)
 
     def test_large_artifact_exceeding_former_limits_compiles_and_verifies(self):
         fixture = self.root / "large-artifact"
@@ -822,13 +870,15 @@ class CompilerTests(unittest.TestCase):
 
         package = self.root / "large-artifact.zip"
         built = compile_package(recipe_path, package)
-        verified = verify_package(package, recipe=load_recipe(recipe_path))
+        reviewed_recipe = load_recipe(recipe_path)
+        verified = verify_package(package, recipe=reviewed_recipe)
         self.assertEqual(verified["packageSha256"], built["packageSha256"])
         self.assertGreater(member["size"], former_total_limit)
         with zipfile.ZipFile(package) as archive:
             self.assertEqual(archive.getinfo("experiment/data.csv").file_size, member["size"])
             total_bytes = sum(info.file_size for info in archive.infolist())
-        self.assertEqual(verify_package(package, policy=PackageReadPolicy(max_total_bytes=total_bytes)), verified)
+            self.assertEqual(verify_package(package, recipe=reviewed_recipe,
+                                           policy=PackageReadPolicy(max_total_bytes=total_bytes)), verified)
 
     def test_archive_policy_accepts_exact_inclusive_limits_and_rejects_smaller_limits(self):
         raw = self.build()
@@ -909,9 +959,14 @@ class CompilerTests(unittest.TestCase):
         result = subprocess.run(command + ["compile", str(self.recipe_path), "--output", str(self.output)],
                                 cwd=ROOT, check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(result.stdout)["packageSha256"], EXPECTED)
-        result = subprocess.run(command + ["verify", str(self.output), "--recipe", str(self.recipe_path)],
+        receipt = self.root / "verify-receipt.json"
+        result = subprocess.run(command + ["verify", str(self.output), "--recipe", str(self.recipe_path),
+                                            "--receipt", str(receipt)],
                                 cwd=ROOT, check=True, capture_output=True, text=True)
-        self.assertEqual(json.loads(result.stdout)["status"], "integrity-verified")
+        verified = json.loads(result.stdout)
+        self.assertEqual(verified, json.loads(receipt.read_bytes()))
+        self.assertEqual(verified["status"], "integrity-verified")
+        self.assertEqual(verified["verificationBasis"], "complete-package-sha256")
         result = subprocess.run(command + ["verify", str(self.output), "--expected-sha256", "bad"],
                                 cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
