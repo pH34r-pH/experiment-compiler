@@ -9,6 +9,7 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import logging
 import math
 import os
 import platform
@@ -33,10 +34,12 @@ import zipfile
 from .archive_policy import PackageReadPolicy
 from .core import (MANIFEST, PackageError, _verify_file_stream, bounded_read, canonical,
                    compile_package, json_value, safe_path, sha256_file, verify_bytes)
+from .diagnostics import failure_diagnostics, report_failure
 from .runner_logs import LOG_STREAM_LIMIT, LogCapture
 from .worker_limits import observe_worker
 
 
+_LOGGER = logging.getLogger(__name__)
 _CONTAINER_JOURNAL_SCHEMA = "cwltool-container-journal/v1"
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _ENGINE_IMAGE_ID = re.compile(r"(?:sha256:)?([0-9a-fA-F]{64})\Z")
@@ -734,9 +737,12 @@ def _settle_cwl_group(process: Any, *, terminate: bool) -> tuple[bool, list[str]
 def _cleanup_after_cwl_exit(paths: _CwlExecutionPaths, group_remaining: bool) -> list[str]:
     if group_remaining:
         _journal_update(paths.attempt_directory, paths.journal, paths.receipt, state=_CleanupState.UNKNOWN)
+        report_failure(_LOGGER, "run", "cleanup", receipt=paths.receipt)
         return ["Container cleanup skipped because the CWL process group remains alive"]
     errors: list[str] = []
     _cleanup_container_journal(paths.attempt_directory, paths.journal, paths.receipt, errors)
+    if errors:
+        report_failure(_LOGGER, "run", "cleanup", receipt=paths.receipt)
     return errors
 
 
@@ -1623,7 +1629,7 @@ def _exclusive_recovery(attempt_directory: Path):
 
 def recover_attempt(attempt_directory: Path) -> dict:
     """Reconcile one retained attempt's exact CWL containers without running science."""
-    with _exclusive_recovery(attempt_directory):
+    with failure_diagnostics(_LOGGER, "recover", "reconciliation"), _exclusive_recovery(attempt_directory):
         return _recover_retained_attempt(attempt_directory)
 
 
@@ -1635,9 +1641,11 @@ def _recover_retained_attempt(attempt_directory: Path) -> dict:
     _settle_recovery_marker(attempt_directory, receipt, original_journal_sha, marker)
     _retain_journal_snapshot(attempt_directory, original_journal_sha)
     errors: list[str] = []
+    process_error = None
     try:
         _reconcile_cwl_process_group(journal)
     except (PackageError, OSError) as exc:
+        process_error = exc
         errors.append(f"cwltool process recovery remains unresolved: {type(exc).__name__}: {str(exc)[:512]}")
     cid_directory = attempt_directory / "engine-cids"
     cid_files = list(cid_directory.glob(f"{journal['cidfilePrefix']}*.cid"))
@@ -1649,6 +1657,8 @@ def _recover_retained_attempt(attempt_directory: Path) -> dict:
             _journal_update(attempt_directory, journal, receipt, state=_CleanupState.UNKNOWN)
     else:
         _cleanup_container_journal(attempt_directory, journal, receipt, errors)
+    if journal.get("state") != _CleanupState.CLEAN:
+        report_failure(_LOGGER, "recover", "cleanup", receipt=receipt, error=process_error)
     return _record_recovery_result(attempt_directory, receipt, journal, errors)
 
 
@@ -2079,6 +2089,7 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
     runtime_payload.update({name: state.package.admission[name] for name in _WORKFLOW_MEMBERS})
     with tempfile.TemporaryDirectory(prefix="compiled-experiment-run-") as temporary_value:
         temporary = Path(temporary_value)
+        phase = "execution"
         try:
             execution = _execute_cwl(_CwlExecutionRequest(
                 temporary, runtime_payload, state.runner, state.limits, state.tmpfs_root,
@@ -2087,9 +2098,11 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             execution["workerObservation"] = state.limits["workerObservation"]
             execution.setdefault("containerJournal", state.receipt.get("containerJournal"))
             execution.setdefault("containerCleanup", _container_cleanup_summary(state.journal))
+            phase = "journal-persistence"
             execution["containerJournalStorePath"] = _retain_journal_snapshot(
                 state.attempt_directory, execution["containerJournal"]["sha256"]
             )
+            phase = "evidence-assembly"
             ended = datetime.now(timezone.utc)
             timing = {"created": state.created, "ended": ended,
                       "elapsed": time.monotonic() - state.started}
@@ -2102,9 +2115,11 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             state.receipt["containerCleanup"] = execution.get(
                 "containerCleanup", {"state": "unknown", "allAbsent": False}
             )
+            phase = "receipt-persistence"
             for label in ("stdout", "stderr"):
                 (state.attempt_directory / f"{label}.log").write_bytes(execution[label])
             _persist_attempt_receipt(state.attempt_directory, state.receipt)
+            phase = "result-packaging"
             experiment_id, title = _augment_result_crate(
                 augmented, state.expected_sha256, run_id, attempt_members,
                 state.created, ended, execution,
@@ -2112,9 +2127,12 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
             result = _compile_attempt_result(state, augmented, run_id, experiment_id, title, execution)
         except (Exception, KeyboardInterrupt) as exc:
             with _defer_operator_signals(exc):
-                _retain_failed_attempt(state.attempt_directory, temporary, state.receipt, state.started, exc)
+                report_failure(_LOGGER, "run", phase, receipt=state.receipt, error=exc)
+                with failure_diagnostics(_LOGGER, "run", "failure-receipt", receipt=state.receipt):
+                    _retain_failed_attempt(state.attempt_directory, temporary, state.receipt, state.started, exc)
             raise
-        with _defer_operator_signals():
+        with (_defer_operator_signals(),
+              failure_diagnostics(_LOGGER, "run", "terminal-receipt", receipt=state.receipt)):
             _finish_attempt(state.receipt, _AttemptStatus(archived_receipt["status"]))
             state.receipt.update(endedAt=archived_receipt["endedAt"], wallSeconds=archived_receipt["wallSeconds"])
             _persist_attempt_receipt(state.attempt_directory, state.receipt)
@@ -2124,26 +2142,31 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
 def run_package(package: Path, output: Path, *, expected_sha256: str,
                 allow_workflow_execution: bool = False, policy: PackageReadPolicy | None = None) -> dict:
     """Run a digest-pinned lifecycle package and create a new immutable result package."""
-    if not allow_workflow_execution:
-        raise PackageError("workflow execution requires explicit opt-in after reviewing the package")
-    source_directory = output.with_name(output.stem + ".source")
-    if output.exists() or source_directory.exists():
-        raise PackageError("run output package or source directory already exists; attempts are never overwritten")
-    staging_parent = next((parent for parent in output.absolute().parents if parent.is_dir()), None)
-    if staging_parent is None:
-        raise PackageError("run output must have an accessible parent directory for package intake")
-    with tempfile.TemporaryDirectory(prefix=".compiled-experiment-intake-", dir=staging_parent) as intake:
-        snapshot = Path(intake) / "plan.zip"
-        with _open_run_package(package, snapshot, expected_sha256, policy) as opened:
-            return _run_verified_package(opened, output, source_directory, expected_sha256)
+    with ExitStack() as resources:
+        with failure_diagnostics(_LOGGER, "run", "admission", digest=expected_sha256):
+            if not allow_workflow_execution:
+                raise PackageError("workflow execution requires explicit opt-in after reviewing the package")
+            source_directory = output.with_name(output.stem + ".source")
+            if output.exists() or source_directory.exists():
+                raise PackageError("run output package or source directory already exists; attempts are never overwritten")
+            staging_parent = next((parent for parent in output.absolute().parents if parent.is_dir()), None)
+            if staging_parent is None:
+                raise PackageError("run output must have an accessible parent directory for package intake")
+            intake = resources.enter_context(
+                tempfile.TemporaryDirectory(prefix=".compiled-experiment-intake-", dir=staging_parent)
+            )
+            snapshot = Path(intake) / "plan.zip"
+            opened = resources.enter_context(_open_run_package(package, snapshot, expected_sha256, policy))
+        return _run_verified_package(opened, output, source_directory, expected_sha256)
 
 
 def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_directory: Path,
                           expected_sha256: str) -> dict:
-    closure, runner, limits, tmpfs_root, job_members = _admit(package.admission, package.members)
-    attempt_directory = output.with_name(output.stem + ".attempt")
-    if attempt_directory.exists():
-        raise PackageError("run attempt directory already exists; attempts are never overwritten")
+    with failure_diagnostics(_LOGGER, "run", "admission", digest=expected_sha256):
+        closure, runner, limits, tmpfs_root, job_members = _admit(package.admission, package.members)
+        attempt_directory = output.with_name(output.stem + ".attempt")
+        if attempt_directory.exists():
+            raise PackageError("run attempt directory already exists; attempts are never overwritten")
     created = datetime.now(timezone.utc)
     started = time.monotonic()
     execution = {"returnCode": None, "timedOut": False, "stdout": b"", "stderr": b"",
@@ -2158,25 +2181,29 @@ def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_dir
     receipt.update(status=_AttemptStatus.STARTED, endedAt=None, wallSeconds=None,
                    executionPhase=_ProcessPhase.PREFLIGHT, executionNeverStarted=False,
                    launchIntentPersisted=False)
-    attempt_directory.mkdir(parents=True)
-    attempt_directory.chmod(0o700)
-    (attempt_directory / "runner-home").mkdir(mode=0o700)
-    (attempt_directory / "runner-home").chmod(0o700)
-    _persist_attempt_receipt(attempt_directory, receipt)
+    with failure_diagnostics(_LOGGER, "run", "initial-receipt", receipt=receipt):
+        attempt_directory.mkdir(parents=True)
+        attempt_directory.chmod(0o700)
+        (attempt_directory / "runner-home").mkdir(mode=0o700)
+        (attempt_directory / "runner-home").chmod(0o700)
+        _persist_attempt_receipt(attempt_directory, receipt)
     try:
         journal = _new_container_journal(attempt_directory, run_id, runner)
     except (PackageError, OSError, subprocess.SubprocessError) as exc:
+        report_failure(_LOGGER, "run", "controller-preflight", receipt=receipt, error=exc)
         _transition_process(receipt, _ProcessPhase.NOT_STARTED)
         _finish_attempt(receipt, _AttemptStatus.FAILED)
         receipt.update(endedAt=datetime.now(timezone.utc).isoformat(),
                        containerCleanup={"state": _CleanupState.NOT_STARTED, "engine": _container_engine(runner),
                                         "containerCount": 0, "absentCount": 0, "allAbsent": False},
                        collectionErrors=[f"Attempt preflight failed before workflow launch: {type(exc).__name__}: {str(exc)[:1024]}"])
-        _persist_attempt_receipt(attempt_directory, receipt)
+        with failure_diagnostics(_LOGGER, "run", "failure-receipt", receipt=receipt):
+            _persist_attempt_receipt(attempt_directory, receipt)
         raise
     journal["launchIntentPersisted"] = True
     _transition_process(receipt, _ProcessPhase.LAUNCH_INTENT)
-    _journal_receipt_reference(attempt_directory, journal, receipt)
+    with failure_diagnostics(_LOGGER, "run", "launch-journal", receipt=receipt):
+        _journal_receipt_reference(attempt_directory, journal, receipt)
     return _run_retained_attempt(_AttemptExecution(
         output=output, source_directory=source_directory, attempt_directory=attempt_directory,
         package=package, job_members=job_members,

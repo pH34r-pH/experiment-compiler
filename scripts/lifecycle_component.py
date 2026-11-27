@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from experiment_compiler.core import PackageError, canonical, json_value
+from experiment_compiler.diagnostics import cli_diagnostics
 from experiment_compiler.lifecycle_components import component_command
 
 
@@ -21,9 +22,10 @@ def main():
         required = {"package", "expected-sha256", "repository", "source-commit", "signer-workflow", "output"}
         if not isinstance(parameters, dict) or set(parameters) != required:
             raise PackageError("Publication verification parameters are incomplete")
-        report = verify_attestation(parameters["package"], parameters["expected-sha256"],
-            repository=parameters["repository"], source_commit=parameters["source-commit"],
-            signer_workflow=parameters["signer-workflow"], output=parameters["output"])
+        with cli_diagnostics("--verbose" in sys.argv[2:]):
+            report = verify_attestation(parameters["package"], parameters["expected-sha256"],
+                repository=parameters["repository"], source_commit=parameters["source-commit"],
+                signer_workflow=parameters["signer-workflow"], output=parameters["output"])
         print(canonical(report).decode(), end="")
         return 0
     command = component_command(stage, parameters)
@@ -34,6 +36,13 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (PackageError, KeyError, ValueError) as exc:
-        print("Lifecycle component rejected: " + str(exc), file=sys.stderr)
+    except (PackageError, KeyError, ValueError, OSError) as exc:
+        verbose_publication = sys.argv[1:2] == ["publication"] and "--verbose" in sys.argv[2:]
+        if isinstance(exc, OSError) and not verbose_publication:
+            raise
+        if verbose_publication:
+            print("Publication component rejected. Inspect retained verification evidence when available.",
+                  file=sys.stderr)
+        else:
+            print("Lifecycle component rejected: " + str(exc), file=sys.stderr)
         raise SystemExit(1)

@@ -346,9 +346,12 @@ class RunnerBoundaryTests(unittest.TestCase):
                     patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
                     patch("experiment_compiler.runner._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id)):
-                recovered = recover_attempt(attempt)
+                with self.assertLogs("experiment_compiler.runner", level="WARNING") as diagnostics:
+                    recovered = recover_attempt(attempt)
                 retained = _retained_files(attempt)
                 repeated = recover_attempt(attempt)
+            self.assertIn("phase=cleanup attempt_id=" + attempt_id, diagnostics.output[0])
+            self.assertNotIn(str(attempt), diagnostics.output[0])
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
             self.assertFalse(recovered["containerCleanup"]["allAbsent"])
             self.assertEqual(recovered["status"], "failed")
@@ -925,6 +928,21 @@ class RunnerBoundaryTests(unittest.TestCase):
         for scenario in scenarios:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
+
+    @REQUIRES_RUNNER
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution requires POSIX")
+    def test_attempt_diagnostics_distinguish_execution_and_terminal_receipt_failures(self):
+        for scenario, phase in (("launch", "execution"), ("terminal-persist", "terminal-receipt")):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                with self.assertLogs("experiment_compiler.runner", level="WARNING") as diagnostics:
+                    self._check_attempt_scenario(scenario, directory)
+                receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_bytes())
+                rendered, = [line for line in diagnostics.output if f"operation=run phase={phase} " in line]
+                self.assertIn(f"phase={phase} attempt_id={receipt['attemptId']}", rendered)
+                self.assertIn("package_sha256=" + receipt["planPackageSha256"], rendered)
+                self.assertIn("exception=OSError", rendered)
+                self.assertNotIn(str(directory), rendered)
 
     @REQUIRES_RUNNER
     @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
