@@ -76,11 +76,63 @@ class _CleanupState(StrEnum):
     NOT_STARTED = "not-started"
 
 
+class _ContainerCleanupPhase(StrEnum):
+    PENDING = "pending"
+    STOPPING = "stopping"
+    REMOVING = "removing"
+    ABSENT = "absent"
+    FAILED = "cleanup-failed"
+
+
 _RECOVERY_STATUS = {
     _AttemptStatus.STARTED: _AttemptStatus.FAILED,
     _AttemptStatus.FAILED: _AttemptStatus.FAILED,
     _AttemptStatus.TIMED_OUT: _AttemptStatus.TIMED_OUT,
 }
+_PROCESS_TRANSITIONS = {
+    _ProcessPhase.PREFLIGHT: {_ProcessPhase.NOT_STARTED, _ProcessPhase.LAUNCH_INTENT},
+    _ProcessPhase.LAUNCH_INTENT: {_ProcessPhase.RUNNING},
+}
+_SETTLEMENT_STATES = {_CleanupState.UNKNOWN, _CleanupState.CLEANUP_FAILED, _CleanupState.CLEAN}
+_CLEANUP_TRANSITIONS = {
+    _CleanupState.PREPARED: _SETTLEMENT_STATES | {_CleanupState.RUNNING, _CleanupState.CANCELLATION_REQUESTED},
+    _CleanupState.RUNNING: _SETTLEMENT_STATES | {_CleanupState.CANCELLATION_REQUESTED},
+    _CleanupState.CANCELLATION_REQUESTED: _SETTLEMENT_STATES,
+    _CleanupState.UNKNOWN: _SETTLEMENT_STATES | {_CleanupState.CANCELLATION_REQUESTED},
+    _CleanupState.CLEANUP_FAILED: _SETTLEMENT_STATES,
+    _CleanupState.CLEAN: _SETTLEMENT_STATES,
+}
+
+
+def _transition_process(receipt: dict, phase: _ProcessPhase) -> None:
+    previous = receipt.get("executionPhase")
+    if phase not in _PROCESS_TRANSITIONS.get(previous, ()):
+        raise PackageError(f"Invalid runner process phase transition: {previous!r} to {phase.value}")
+    receipt.update(executionPhase=phase, executionNeverStarted=phase == _ProcessPhase.NOT_STARTED,
+                   launchIntentPersisted=phase in {_ProcessPhase.LAUNCH_INTENT, _ProcessPhase.RUNNING})
+
+
+def _finish_attempt(receipt: dict, status: _AttemptStatus) -> None:
+    if receipt.get("status") != _AttemptStatus.STARTED or status not in {
+        _AttemptStatus.FAILED, _AttemptStatus.TIMED_OUT, _AttemptStatus.SUCCEEDED,
+    }:
+        raise PackageError("A terminal attempt outcome requires a started receipt")
+    receipt["status"] = status
+
+
+def _validate_cleanup_transition(previous: str, state: _CleanupState) -> None:
+    if previous not in _CLEANUP_TRANSITIONS:
+        raise PackageError(f"Invalid runner cleanup state: {previous!r}")
+    if state != previous and state not in _CLEANUP_TRANSITIONS[previous]:
+        raise PackageError(f"Invalid runner cleanup transition: {previous!r} to {state.value}")
+
+
+def _transition_container_cleanup(cleanup: dict, phase: _ContainerCleanupPhase, **details) -> None:
+    previous = cleanup.get("status")
+    if (previous not in tuple(_ContainerCleanupPhase)
+            or previous == _ContainerCleanupPhase.ABSENT or phase == _ContainerCleanupPhase.PENDING):
+        raise PackageError(f"Invalid container cleanup transition: {previous!r} to {phase.value}")
+    cleanup.update(details, status=phase, absentAfterCleanup=phase == _ContainerCleanupPhase.ABSENT)
 
 
 def _read_package(data: bytes, expected_sha256: str,
@@ -761,8 +813,7 @@ def _run_cwl_process(paths: _CwlExecutionPaths, timeout: int, capture: LogCaptur
             )
             capture.close_writers()
             paths.journal["cwlProcessIdentity"] = _cwl_process_identity(process.pid)
-            paths.receipt.update(executionPhase=_ProcessPhase.RUNNING, executionNeverStarted=False,
-                                 launchIntentPersisted=True)
+            _transition_process(paths.receipt, _ProcessPhase.RUNNING)
             _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
                             state=_CleanupState.RUNNING, processStartedAt=datetime.now(timezone.utc).isoformat())
         outcome = _wait_cwl_process(paths, process, timeout)
@@ -771,15 +822,19 @@ def _run_cwl_process(paths: _CwlExecutionPaths, timeout: int, capture: LogCaptur
         return outcome
     except KeyboardInterrupt as interruption:
         with _defer_operator_signals(interruption):
-            if process is not None and paths.journal["cancellation"] is None:
-                paths.journal["cancellation"] = {"requestedAt": datetime.now(timezone.utc).isoformat()}
-                _journal_update(paths.attempt_directory, paths.journal, paths.receipt,
-                                state=_CleanupState.CANCELLATION_REQUESTED)
+            if process is not None:
+                _record_first_cancellation(paths.attempt_directory, paths.journal, paths.receipt)
             _handle_cwl_interrupt(paths, process, interruption)
         raise
     except Exception as exc:
         _handle_cwl_error(paths, process, exc)
         raise
+
+
+def _record_first_cancellation(attempt_directory: Path, journal: dict, receipt: dict) -> None:
+    if journal["cancellation"] is None:
+        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CANCELLATION_REQUESTED,
+                        cancellation={"requestedAt": datetime.now(timezone.utc).isoformat()})
 
 
 def _remove_bounded_output(output_attempt: Path | None, error_target: BaseException) -> None:
@@ -819,7 +874,7 @@ def _prepare_attempt_context(request: _CwlExecutionRequest) -> tuple[Path, dict,
             "updatedAt": datetime.now(timezone.utc).isoformat(),
             "cidfilePrefix": "test-attempt-", "containers": [], "cancellation": None,
         }
-    return attempt_directory, journal, receipt or {}
+    return attempt_directory, journal, {"executionPhase": _ProcessPhase.LAUNCH_INTENT}
 
 
 def _prepare_cwl_paths(request: _CwlExecutionRequest) -> _CwlExecutionPaths:
@@ -860,8 +915,7 @@ def _execute_cwl(request: _CwlExecutionRequest) -> dict:
     stdout_path, stderr_path = paths.stdout_path, paths.stderr_path
     collection_errors = [*cleanup_errors, *receipt["collectionErrors"]]
     if journal.get("cwlProcessGroupUnresolved") is True:
-        journal["state"] = _CleanupState.UNKNOWN
-        _journal_update(attempt_directory, journal, receipt)
+        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.UNKNOWN)
         collection_errors.append("Container cleanup skipped because the CWL process group remains alive")
     else:
         _cleanup_container_journal(attempt_directory, journal, receipt, collection_errors)
@@ -1167,6 +1221,8 @@ def _controller_is_alive(identity: Any) -> bool:
 
 
 def _journal_update(attempt_directory: Path, journal: dict, receipt: dict, **changes) -> None:
+    if "state" in changes:
+        _validate_cleanup_transition(journal.get("state"), changes["state"])
     journal.update(changes)
     journal["updatedAt"] = datetime.now(timezone.utc).isoformat()
     _journal_receipt_reference(attempt_directory, journal, receipt)
@@ -1177,14 +1233,12 @@ def _discover_container_ids(attempt_directory: Path, journal: dict,
     cid_directory = attempt_directory / "engine-cids"
     if cid_directory.is_symlink() or not cid_directory.is_dir():
         errors.append("Container cidfile directory is missing or unsafe")
-        journal["state"] = _CleanupState.CLEANUP_FAILED
-        _journal_update(attempt_directory, journal, receipt)
+        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CLEANUP_FAILED)
         return
     files = sorted(cid_directory.glob(f"{journal['cidfilePrefix']}*.cid"))
     if len(files) > _MAX_ATTEMPT_CONTAINERS:
         errors.append("Container journal exceeds its bounded CID count")
-        journal["state"] = _CleanupState.CLEANUP_FAILED
-        _journal_update(attempt_directory, journal, receipt)
+        _journal_update(attempt_directory, journal, receipt, state=_CleanupState.CLEANUP_FAILED)
         return
     known = {entry.get("id") for entry in journal["containers"] if isinstance(entry, dict)}
     for path in files:
@@ -1209,7 +1263,7 @@ def _discover_container_ids(attempt_directory: Path, journal: dict,
             "cidfile": f"engine-cids/{path.name}",
             "discoveredAt": datetime.now(timezone.utc).isoformat(),
             "inspectState": "unknown",
-            "cleanup": {"status": "pending", "absentAfterCleanup": False},
+            "cleanup": {"status": _ContainerCleanupPhase.PENDING, "absentAfterCleanup": False},
         }
         journal["containers"].append(entry)
         known.add(container_id)
@@ -1255,9 +1309,9 @@ def _container_present(attempt_directory: Path, journal: dict, container_id: str
             raise PackageError("Journaled container image differs from the pinned and receipt-bound worker image")
         return True, fields[1].lower()
     listing = _engine_call(attempt_directory, journal, ["ps", "--all", "--no-trunc", "--format", "{{.ID}}"])
-    if listing.returncode != 0:
-        raise PackageError("Container engine could not prove whether the exact journaled ID remains")
     ids = {line.strip().lower() for line in listing.stdout.splitlines() if line.strip()}
+    if listing.returncode != 0 or any(not _CONTAINER_ID.fullmatch(item) for item in ids):
+        raise PackageError("Container engine could not prove whether the exact journaled ID remains")
     if container_id in ids:
         raise PackageError("Container engine lists the ID but inspect cannot establish its state")
     return False, None
@@ -1275,7 +1329,8 @@ def _cleanup_container_journal(attempt_directory: Path, journal: dict, receipt: 
             present, state = _container_present(attempt_directory, journal, container_id)
             entry["inspectState"] = state or "absent"
             if present and state == "running":
-                cleanup.update(status="stopping", requestedAt=datetime.now(timezone.utc).isoformat())
+                _transition_container_cleanup(cleanup, _ContainerCleanupPhase.STOPPING,
+                                              requestedAt=datetime.now(timezone.utc).isoformat())
                 _journal_update(attempt_directory, journal, receipt)
                 stopped = _engine_call(attempt_directory, journal,
                                        ["stop", "--time", "5", container_id])
@@ -1285,19 +1340,20 @@ def _cleanup_container_journal(attempt_directory: Path, journal: dict, receipt: 
             if present:
                 if state not in {"created", "exited", "stopped"}:
                     raise PackageError(f"Container state {state!r} is busy or unknown; refusing removal")
-                cleanup.update(status="removing", removeRequestedAt=datetime.now(timezone.utc).isoformat())
+                _transition_container_cleanup(cleanup, _ContainerCleanupPhase.REMOVING,
+                                              removeRequestedAt=datetime.now(timezone.utc).isoformat())
                 _journal_update(attempt_directory, journal, receipt)
                 removed = _engine_call(attempt_directory, journal, ["rm", container_id])
                 present, state = _container_present(attempt_directory, journal, container_id)
                 if present:
                     raise PackageError(f"Container removal did not remove exact ID (exit {removed.returncode}, state {state})")
-            cleanup.update(status="absent", absentAfterCleanup=True,
-                           completedAt=datetime.now(timezone.utc).isoformat())
+            _transition_container_cleanup(cleanup, _ContainerCleanupPhase.ABSENT,
+                                          completedAt=datetime.now(timezone.utc).isoformat())
             entry["inspectState"] = "absent"
             _journal_update(attempt_directory, journal, receipt)
         except PackageError as exc:
-            cleanup.update(status="cleanup-failed", error=f"{type(exc).__name__}: {str(exc)[:512]}",
-                           absentAfterCleanup=False)
+            _transition_container_cleanup(cleanup, _ContainerCleanupPhase.FAILED,
+                                          error=f"{type(exc).__name__}: {str(exc)[:512]}")
             errors.append(f"Container cleanup failed for exact ID {container_id}: {exc}")
             _journal_update(attempt_directory, journal, receipt)
     state = _CleanupState.CLEANUP_FAILED if errors else _CleanupState.CLEAN
@@ -1501,9 +1557,9 @@ def _validate_recovery_container(entry: Any, journal: dict) -> None:
             not Path(cidfile).name.startswith(journal["cidfilePrefix"])):
         raise PackageError("Recovery journal contains an unknown, malformed, or cross-attempt container ID")
     cleanup = entry.get("cleanup")
-    if not isinstance(cleanup, dict) or type(cleanup.get("absentAfterCleanup")) is not bool:
+    if not isinstance(cleanup, dict) or cleanup.get("status") not in tuple(_ContainerCleanupPhase):
         raise PackageError("Recovery journal has an invalid container cleanup record")
-    if cleanup["absentAfterCleanup"] != (cleanup.get("status") == "absent"):
+    if cleanup.get("absentAfterCleanup") is not (cleanup["status"] == _ContainerCleanupPhase.ABSENT):
         raise PackageError("Recovery journal has inconsistent container absence evidence")
 
 
@@ -1534,6 +1590,7 @@ def _validate_recovery_engine(receipt: dict, journal: dict) -> None:
 def _validate_recovery_worker(attempt_directory: Path, receipt: dict, journal: dict) -> None:
     """Require the retained plan identity, worker image, and container inventory to match."""
     _validate_recovery_receipt_worker(receipt, journal)
+    _validate_recovery_process_evidence(receipt)
     _validate_recovery_engine(receipt, journal)
     _validate_recovery_age_and_controller(journal)
     _validate_recovery_container_inventory(attempt_directory, journal)
@@ -1583,7 +1640,7 @@ def _recover_retained_attempt(attempt_directory: Path) -> dict:
         errors.append(f"cwltool process recovery remains unresolved: {type(exc).__name__}: {str(exc)[:512]}")
     cid_directory = attempt_directory / "engine-cids"
     cid_files = list(cid_directory.glob(f"{journal['cidfilePrefix']}*.cid"))
-    if errors or (journal.get("launchIntentPersisted") is True and
+    if errors or (_possible_workflow_launch(receipt, journal) and
                   not journal.get("containers") and not cid_files):
         if not errors:
             errors.append("Hard loss after launch intent has no container identity; cleanup remains unknown")
@@ -1592,6 +1649,35 @@ def _recover_retained_attempt(attempt_directory: Path) -> dict:
     else:
         _cleanup_container_journal(attempt_directory, journal, receipt, errors)
     return _record_recovery_result(attempt_directory, receipt, journal, errors)
+
+
+def _validate_recovery_process_evidence(receipt: dict) -> None:
+    phase = receipt.get("executionPhase")
+    if phase is not None and phase not in tuple(_ProcessPhase):
+        raise PackageError("Retained receipt has an unknown process phase")
+    if phase == _ProcessPhase.NOT_STARTED or receipt.get("executionNeverStarted") is True:
+        raise PackageError("Retained preflight no-start receipt conflicts with the journal")
+    expectation = {
+        _ProcessPhase.PREFLIGHT: False,
+        _ProcessPhase.LAUNCH_INTENT: True,
+        _ProcessPhase.RUNNING: True,
+    }
+    if phase in expectation and receipt.get("launchIntentPersisted") is not expectation[phase]:
+        raise PackageError("Retained process phase disagrees with the launch intent flag")
+
+
+def _possible_workflow_launch(receipt: dict, journal: dict) -> bool:
+    # Older receipts omit the launch flags. A running or unsettled journal is
+    # still evidence of a possible launch, even when no container was recorded.
+    return (
+        journal.get("state") in {
+            _CleanupState.RUNNING, _CleanupState.CANCELLATION_REQUESTED,
+            _CleanupState.UNKNOWN, _CleanupState.CLEANUP_FAILED,
+        }
+        or receipt.get("launchIntentPersisted") is True
+        or journal.get("launchIntentPersisted") is True
+        or any(journal.get(key) is not None for key in ("cwlProcessIdentity", "cwlProcessExit", "processStartedAt"))
+    )
 
 
 def _record_recovery_result(attempt_directory: Path, receipt: dict, journal: dict,
@@ -1970,8 +2056,8 @@ def _defer_operator_signals(original: BaseException | None = None):
 
 def _retain_failed_attempt(attempt_directory: Path, temporary: Path, receipt: dict,
                            started: float, exc: BaseException) -> None:
-    receipt.update(status=_AttemptStatus.FAILED, endedAt=datetime.now(timezone.utc).isoformat(),
-                   wallSeconds=time.monotonic() - started)
+    _finish_attempt(receipt, _AttemptStatus.FAILED)
+    receipt.update(endedAt=datetime.now(timezone.utc).isoformat(), wallSeconds=time.monotonic() - started)
     receipt["collectionErrors"] = list(receipt["collectionErrors"]) + [
         f"Attempt failed: {type(exc).__name__}: {str(exc)[:4096]}"
     ]
@@ -2010,15 +2096,14 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
                 state.package, state.expected_sha256, state.closure, state.runner, execution, timing,
             )
             archived_receipt = json_value(augmented[state.receipt_key])
-            state.receipt.update({key: value for key, value in archived_receipt.items()
-                                  if key not in {"containerJournal", "containerCleanup"}})
+            private_fields = {"containerJournal", "status", "endedAt", "wallSeconds"}
+            state.receipt.update({key: value for key, value in archived_receipt.items() if key not in private_fields})
             state.receipt["containerCleanup"] = execution.get(
                 "containerCleanup", {"state": "unknown", "allAbsent": False}
             )
             for label in ("stdout", "stderr"):
                 (state.attempt_directory / f"{label}.log").write_bytes(execution[label])
-            pending = dict(state.receipt, status=_AttemptStatus.STARTED, endedAt=None, wallSeconds=None)
-            _persist_attempt_receipt(state.attempt_directory, pending)
+            _persist_attempt_receipt(state.attempt_directory, state.receipt)
             experiment_id, title = _augment_result_crate(
                 augmented, state.expected_sha256, run_id, attempt_members,
                 state.created, ended, execution,
@@ -2029,6 +2114,8 @@ def _run_retained_attempt(state: _AttemptExecution) -> dict:
                 _retain_failed_attempt(state.attempt_directory, temporary, state.receipt, state.started, exc)
             raise
         with _defer_operator_signals():
+            _finish_attempt(state.receipt, _AttemptStatus(archived_receipt["status"]))
+            state.receipt.update(endedAt=archived_receipt["endedAt"], wallSeconds=archived_receipt["wallSeconds"])
             _persist_attempt_receipt(state.attempt_directory, state.receipt)
         return result
 
@@ -2078,16 +2165,16 @@ def _run_verified_package(package: _VerifiedRunPackage, output: Path, source_dir
     try:
         journal = _new_container_journal(attempt_directory, run_id, runner)
     except (PackageError, OSError, subprocess.SubprocessError) as exc:
-        receipt.update(status=_AttemptStatus.FAILED, endedAt=datetime.now(timezone.utc).isoformat(),
-                       executionPhase=_ProcessPhase.NOT_STARTED, executionNeverStarted=True,
-                       launchIntentPersisted=False,
+        _transition_process(receipt, _ProcessPhase.NOT_STARTED)
+        _finish_attempt(receipt, _AttemptStatus.FAILED)
+        receipt.update(endedAt=datetime.now(timezone.utc).isoformat(),
                        containerCleanup={"state": _CleanupState.NOT_STARTED, "engine": _container_engine(runner),
                                         "containerCount": 0, "absentCount": 0, "allAbsent": False},
                        collectionErrors=[f"Attempt preflight failed before workflow launch: {type(exc).__name__}: {str(exc)[:1024]}"])
         _persist_attempt_receipt(attempt_directory, receipt)
         raise
     journal["launchIntentPersisted"] = True
-    receipt.update(executionPhase=_ProcessPhase.LAUNCH_INTENT, launchIntentPersisted=True)
+    _transition_process(receipt, _ProcessPhase.LAUNCH_INTENT)
     _journal_receipt_reference(attempt_directory, journal, receipt)
     return _run_retained_attempt(_AttemptExecution(
         output=output, source_directory=source_directory, attempt_directory=attempt_directory,
