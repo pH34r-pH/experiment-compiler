@@ -33,6 +33,17 @@ def _add_trajectory_command(commands) -> None:
     add_archive_policy_options(trajectory)
 
 
+def _add_corpus_command(commands) -> None:
+    corpus = commands.add_parser("verify-corpus", help="verify a retained Long-Haul Croissant inventory")
+    corpus.add_argument("package", type=Path)
+    corpus.add_argument("metadata", type=Path, help="retained Croissant JSON-LD bytes")
+    corpus.add_argument("snapshot", type=Path, help="approved local directory of retained corpus files")
+    corpus.add_argument("--expected-sha256", required=True, help="independently reviewed package SHA-256")
+    corpus.add_argument("--expected-metadata-sha256", required=True, help="independently reviewed metadata SHA-256")
+    corpus.add_argument("--max-corpus-bytes", required=True, type=int, help="combined metadata and snapshot read budget")
+    add_archive_policy_options(corpus)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment-compiler")
     parser.add_argument("--version", action="version", version=__version__)
@@ -57,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_archive_policy_options(check)
 
     _add_trajectory_command(commands)
+    _add_corpus_command(commands)
 
     revise = commands.add_parser("revise", help="compile a new plan revision from one verified attempt")
     revise.add_argument("parent_package", type=Path)
@@ -194,6 +206,16 @@ def _verify_trajectory(args: argparse.Namespace) -> dict:
     )
 
 
+def _verify_corpus(args: argparse.Namespace) -> dict:
+    from .corpus import verify_corpus
+
+    return verify_corpus(
+        args.package, args.metadata, args.snapshot, expected_sha256=args.expected_sha256,
+        expected_metadata_sha256=args.expected_metadata_sha256, max_bytes=args.max_corpus_bytes,
+        policy=archive_policy_from_args(args),
+    )
+
+
 _COMMANDS = {
     "describe": _describe,
     "catalog": _catalog,
@@ -203,6 +225,7 @@ _COMMANDS = {
     "inspect-coverage": _inspect_coverage,
     "verify": _verify,
     "verify-trajectory": _verify_trajectory,
+    "verify-corpus": _verify_corpus,
     "project-actions": _project_actions,
 }
 

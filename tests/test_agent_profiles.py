@@ -23,6 +23,7 @@ from experiment_compiler.core import (
     verify_bytes,
     verify_package,
 )
+from experiment_compiler.corpus import CROISSANT_REFERENCE, CROISSANT_SOURCE, verify_corpus
 from experiment_compiler.trajectory import BOUND_QUALIFICATION, TRACE_REFERENCE, TRAJECTORY_SOURCE, verify_trajectory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,7 +141,7 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "Private repository"):
             self.package()
 
-    def test_trajectory_and_corpus_are_exact_unqualified_references_only(self):
+    def test_upstream_pending_trajectory_and_corpus_references_are_inert(self):
         references = [{"kind": kind, "source": SOURCE, "reference": "urn:fixture:" + kind,
             "digest": "sha256:" + "a" * 64, "qualification": "upstream-pending"}
             for kind in ("semantic-trajectory", "governed-corpus")]
@@ -150,6 +151,122 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         references[0]["qualification"] = "training-approved"
         with self.assertRaisesRegex(PackageError, "not qualified"):
             self.package(references=references)
+
+    def corpus_fixture(self):
+        snapshot = self.root / "corpus"
+        snapshot.mkdir()
+        (snapshot / "case.txt").write_bytes(b"public invented corpus")
+        metadata = {
+            "@type": "sc:Dataset", "conformsTo": "http://mlcommons.org/croissant/1.1",
+            "distribution": [{
+                "@id": "files/case.txt", "@type": "cr:FileObject", "name": "case.txt",
+                "encodingFormat": "text/plain", "contentUrl": "https://example.invalid/case.txt",
+                "sha256": sha256((snapshot / "case.txt").read_bytes()),
+            }],
+        }
+        return snapshot, metadata
+
+    def corpus_package(self, snapshot, metadata):
+        raw = canonical(metadata)
+        metadata_path = self.root / "croissant.json"
+        metadata_path.write_bytes(raw)
+        reference = {"kind": "governed-corpus", "source": CROISSANT_SOURCE,
+                     "reference": CROISSANT_REFERENCE, "digest": "sha256:" + sha256(raw),
+                     "qualification": BOUND_QUALIFICATION}
+        report, package = self.package(audience="private-evaluator", references=[reference])
+        self.assertEqual(report["repositoryAgent"]["references"], [reference])
+        self.assertNotIn("trajectoryBinding", report["repositoryAgent"])
+        self.assertEqual(report["repositoryAgent"]["acceptance"], "not-evaluated")
+        return (package, metadata_path, snapshot), {
+            "expected_sha256": report["packageSha256"], "expected_metadata_sha256": sha256(raw),
+            "max_bytes": len(raw) + len(b"public invented corpus"),
+        }, reference
+
+    def test_corpus_cli_and_api_verify_the_pinned_local_snapshot(self):
+        paths, pins, _ = self.corpus_package(*self.corpus_fixture())
+        with offline_operations():
+            receipt = verify_corpus(*paths, **pins)
+        self.assertEqual(receipt, {
+            "schemaVersion": 1, "scope": "corpus-file-integrity-only",
+            "packageSha256": pins["expected_sha256"], "metadataSha256": pins["expected_metadata_sha256"],
+            "croissantSource": CROISSANT_SOURCE, "fileCount": 1,
+            "snapshotSizeBytes": len(b"public invented corpus"),
+            "corpusAdmission": "not-granted", "trainingEligibility": "not-granted",
+        })
+        readback = subprocess.run(
+            [sys.executable, "-m", "experiment_compiler", "verify-corpus", *map(str, paths),
+             "--expected-sha256", pins["expected_sha256"], "--expected-metadata-sha256",
+             pins["expected_metadata_sha256"], "--max-corpus-bytes", str(pins["max_bytes"])],
+            cwd=ROOT, capture_output=True, check=True,
+        )
+        self.assertEqual(json.loads(readback.stdout), receipt)
+
+    def test_corpus_reference_requires_private_scope_reviewed_source_and_unique_digest(self):
+        paths, _, reference = self.corpus_package(*self.corpus_fixture())
+        paths[0].unlink()
+        with self.assertRaisesRegex(PackageError, "private-evaluator"):
+            self.package(references=[reference])
+        with self.assertRaisesRegex(PackageError, "readback identity"):
+            self.package(audience="private-evaluator", references=[dict(reference, source=SOURCE)])
+        with self.assertRaisesRegex(PackageError, "Duplicate bound corpus"):
+            self.package(audience="private-evaluator", references=[reference, reference])
+
+    def test_corpus_readback_checks_pins_and_budget_before_issuing_a_receipt(self):
+        paths, pins, _ = self.corpus_package(*self.corpus_fixture())
+        with self.assertRaisesRegex(PackageError, "[Pp]ackage.*(digest|SHA-256)"):
+            verify_corpus(*paths, **dict(pins, expected_sha256="0" * 64))
+        with self.assertRaisesRegex(PackageError, "lacks the bound Croissant"):
+            verify_corpus(*paths, **dict(pins, expected_metadata_sha256="0" * 64))
+        with self.assertRaisesRegex(PackageError, "read budget"):
+            verify_corpus(*paths, **dict(pins, max_bytes=pins["max_bytes"] - 1))
+        paths[1].write_bytes(paths[1].read_bytes() + b" ")
+        with self.assertRaisesRegex(PackageError, "independently reviewed digest"):
+            verify_corpus(*paths, **dict(pins, max_bytes=pins["max_bytes"] + 1))
+
+    def test_corpus_readback_rejects_missing_extra_and_substituted_files(self):
+        paths, pins, _ = self.corpus_package(*self.corpus_fixture())
+        snapshot = paths[2]
+        extra = snapshot / "unlisted.txt"
+        extra.write_bytes(b"private unlisted data")
+        with self.assertRaisesRegex(PackageError, "exact regular-file inventory"):
+            verify_corpus(*paths, **pins)
+        extra.unlink()
+        path = snapshot / "case.txt"
+        path.unlink()
+        with self.assertRaisesRegex(PackageError, "exact regular-file inventory"):
+            verify_corpus(*paths, **pins)
+        path.write_bytes(b"substituted corpus")
+        with self.assertRaisesRegex(PackageError, "reviewed digest"):
+            verify_corpus(*paths, **pins)
+        path.unlink()
+        path.mkdir()
+        with self.assertRaisesRegex(PackageError, "exact regular-file inventory"):
+            verify_corpus(*paths, **pins)
+
+    def test_corpus_projection_refuses_nonportable_and_case_colliding_files(self):
+        snapshot, metadata = self.corpus_fixture()
+        record = metadata["distribution"][0]
+        metadata["distribution"].append(dict(record, name="Case.txt", **{"@id": "files/Case.txt"}))
+        paths, pins, _ = self.corpus_package(snapshot, metadata)
+        with self.assertRaisesRegex(PackageError, "unique portable"):
+            verify_corpus(*paths, **pins)
+        paths[0].unlink()
+        metadata["distribution"][1].update(name="CON.txt", **{"@id": "files/CON.txt"})
+        paths, pins, _ = self.corpus_package(snapshot, metadata)
+        with self.assertRaisesRegex(PackageError, "unique portable"):
+            verify_corpus(*paths, **pins)
+
+    def test_corpus_readback_rejects_a_link_even_with_matching_bytes(self):
+        paths, pins, _ = self.corpus_package(*self.corpus_fixture())
+        data = paths[2] / "case.txt"
+        moved = self.root / "same-content.txt"
+        data.rename(moved)
+        try:
+            data.symlink_to(moved)
+        except (NotImplementedError, PermissionError):
+            self.skipTest("symbolic links unavailable")
+        with self.assertRaisesRegex(PackageError, "exact regular-file inventory|linked paths"):
+            verify_corpus(*paths, **pins)
 
     def test_bound_trajectory_references_require_private_task_and_pinned_source(self):
         fingerprint = "sha256:" + "a" * 64
