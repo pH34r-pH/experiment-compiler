@@ -10,7 +10,19 @@ The historical `poc-v1` manifest header uses `schemaVersion`, `packageType`, `st
 
 Compilation checks hashes before packaging, preserves raw input bytes, sorts archive paths, emits sorted/indented UTF-8 JSON with a trailing newline, sets every ZIP timestamp to 1980-01-01, uses Unix regular-file mode 0644 and DEFLATE level 9, and omits host paths/times from the package. An existing output is reused only when identical; different output bytes are never silently overwritten. Compression implementations can change output bytes across toolchains, so the POC's historical checksum remains a required gate. The build receipt records Python, zlib and compiler versions separately from the immutable ZIP.
 
-Verification checks the exact member inventory, digests, sizes and JSON syntax. It rejects duplicate keys, duplicate/case-colliding/unsafe paths, symlinks, encrypted ZIPs, special files, and missing/unlisted members. Experiment Compiler imposes no format-level member-count, per-file, or total-byte ceiling: those limits are not part of RO-Crate, CWL, ACM artifact evaluation, or the Compiled Experiment scientific contract. Package verification hashes members incrementally from disk. Repository/venue quotas are enforced only by the publication adapter or destination that actually has them. The verifier never extracts files or runs packaged code. Local source directories must not be concurrently modified by an adversary (this is not an operating-system sandbox).
+Verification checks the exact member inventory, digests, sizes and JSON syntax. It rejects duplicate keys, non-finite decoded numbers, unsafe paths, symlinks, encrypted ZIPs, special files, and missing or unlisted members. Compile and verify both reject embedded Git LFS placeholders. Experiment Compiler imposes no format-level member-count, per-file, or total-byte ceiling: those limits are not part of RO-Crate, CWL, ACM artifact evaluation, or the Compiled Experiment scientific contract. Package verification hashes members incrementally from disk. Repository/venue quotas are enforced only by the publication adapter or destination that actually has them. The verifier never extracts files or runs packaged code. Local source directories must not be concurrently modified by an adversary (this is not an operating-system sandbox).
+
+Source and archive paths use portable relative names. The same inventory check
+runs before lifecycle staging and during ZIP verification. It compares
+canonically equivalent Unicode names without case distinctions and rejects
+collisions between files and directory prefixes. The compiler preserves the
+exact spelling and bytes of each valid member. Compatibility characters, such
+as fullwidth letters, retain distinct names.
+
+The path policy excludes Unicode control and format characters, surrogate code
+points, and line and paragraph separators. Each component also follows
+[Windows device-name rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file),
+including the superscript digits in reserved COM and LPT names.
 
 Verification results and JSON receipts report their strongest check in `verificationBasis`.
 

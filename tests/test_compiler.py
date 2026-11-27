@@ -21,8 +21,9 @@ from unittest.mock import patch
 from offline_fixture_helpers import offline_operations
 
 from experiment_compiler.archive_policy import ArchiveMemberReader, PackageReadPolicy, ResourcePolicyError
+from experiment_compiler.assembly import compile_source_closure
 from experiment_compiler.catalog import describe_catalog, describe_recipe, discover_recipes
-from experiment_compiler.core import (MANIFEST, PackageError, canonical, compile_package,
+from experiment_compiler.core import (MANIFEST, PackageError, _verify_members, canonical, compile_package,
     json_value, load_recipe, manifest_for, safe_path, sha256, unique_paths, verify_bytes, verify_package)
 from experiment_compiler.resources import bytes_to_mib_minimum, seconds_to_cwl_limit
 
@@ -30,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/issue-164"
 SELF_CONTAINED = ROOT / "examples/linear-regression-v1"
 EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
+GIT_LFS_POINTER = b"version https://git-lfs.github.com/spec/v1\noid sha256:" + b"a" * 64 + b"\nsize 4096\n"
 COMPILE_WITH_ENVIRONMENT_PROBE = """
 import json
 import locale
@@ -132,20 +134,31 @@ class CompilerTests(unittest.TestCase):
             verify_bytes(tampered, recipe=recipe)
 
     def test_git_lfs_pointer_is_not_accepted_as_payload_bytes(self):
-        pointer = (b"version https://git-lfs.github.com/spec/v1\n" +
-                   b"oid sha256:" + b"a" * 64 + b"\nsize 4096\n")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             shutil.copytree(SELF_CONTAINED, root / "example")
             recipe = load_recipe(root / "example/experiment.json")
             item = next(item for item in recipe["members"] if item["path"] == "experiment/data.csv")
             data = root / "example" / item["source"]
-            data.write_bytes(pointer)
-            item["sha256"] = sha256(pointer)
-            item["size"] = len(pointer)
+            data.write_bytes(GIT_LFS_POINTER)
+            item["sha256"] = sha256(GIT_LFS_POINTER)
+            item["size"] = len(GIT_LFS_POINTER)
             (root / "example/experiment.json").write_bytes(canonical(recipe))
             with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
                 compile_package(root / "example/experiment.json", root / "pointer.zip")
+
+    def test_member_verification_rejects_a_git_lfs_placeholder(self):
+        digest = sha256(GIT_LFS_POINTER)
+        info = zipfile.ZipInfo("sample.txt")
+        info.file_size = len(GIT_LFS_POINTER)
+        item = {"path": info.filename, "sha256": digest, "size": info.file_size}
+        with patch.object(ArchiveMemberReader, "read", autospec=True) as read:
+            read.return_value = (digest, info.file_size, bytearray(GIT_LFS_POINTER))
+            with zipfile.ZipFile(io.BytesIO(), "w") as archive:
+                reader = ArchiveMemberReader(archive, None)
+                with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
+                    _verify_members(reader, {info.filename: info}, [item], set())
+                read.assert_called_once_with(reader, info, capture=True)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -851,6 +864,51 @@ class CompilerTests(unittest.TestCase):
             with self.subTest(names=names), self.assertRaises(PackageError):
                 unique_paths(names)
 
+    def test_path_policy_checks_unicode_categories_and_windows_device_names(self):
+        for character in ("\x7f", "\u0085", "\u200b", "\u202e", "\u2028", "\u2029", "\ud800"):
+            with self.subTest(character=repr(character)), self.assertRaisesRegex(PackageError, "Unsafe"):
+                safe_path(f"notes/a{character}z.txt")
+        for prefix in ("com", "LPT"):
+            for digit in "¹²³":
+                with self.subTest(prefix=prefix, digit=digit), self.assertRaisesRegex(PackageError, "Nonportable"):
+                    safe_path(f"notes/{prefix}{digit}.txt")
+
+    def test_canonical_case_collisions_include_file_directory_prefixes(self):
+        with self.assertRaisesRegex(PackageError, "canonical equivalents"):
+            unique_paths(["Café.txt", "cafe\u0301.txt"])
+        with self.assertRaisesRegex(PackageError, "File/directory path collision"):
+            unique_paths(["Café", "cafe\u0301/notes.txt"])
+
+    def test_assembly_rejects_ambiguous_paths_before_creating_its_source_tree(self):
+        source = self.root / "retained"
+        self.output.write_bytes(b"keep original")
+        for names, error in (
+            (["Café.txt", "cafe\u0301.txt"], "canonical equivalents"),
+            (["Café", "cafe\u0301/notes.txt"], "File/directory path collision"),
+            (["Experiment.json"], "case-colliding path"),
+            ([MANIFEST.upper()], "case-colliding path"),
+        ):
+            with self.subTest(names=names), self.assertRaisesRegex(PackageError, error):
+                files = dict.fromkeys(names, b"note")
+                compile_source_closure(self.root, self.output, source, files, {}, "candidate.zip")
+        self.assertFalse((self.root / "source").exists())
+        self.assertFalse(source.exists())
+        self.assertEqual(self.output.read_bytes(), b"keep original")
+
+    def test_unicode_member_names_round_trip_byte_for_byte(self):
+        paths = ("notes/Cafe\u0301.txt", "notes/実験.txt", "notes/a.txt", "notes/ａ.txt")
+        recipe = self.recipe()
+        recipe.pop("expectedPackage")
+        for member, path in zip(recipe["members"], paths):
+            member["path"] = path
+        self.save(recipe)
+        raw = self.build()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            self.assertEqual(set(archive.namelist()), {MANIFEST, *(member["path"] for member in recipe["members"])})
+            for member in recipe["members"]:
+                self.assertEqual(archive.read(member["path"]), (self.recipe_path.parent / member["source"]).read_bytes())
+        verify_bytes(raw, recipe=load_recipe(self.recipe_path))
+
     def test_recipe_rejects_unsupported_schema_and_extra_fields(self):
         for key, value in (("profile", "imaginary-v2"), ("buildRecipeVersion", True), ("arbitraryCommand", "run this")):
             recipe = self.recipe()
@@ -861,9 +919,11 @@ class CompilerTests(unittest.TestCase):
             shutil.copyfile(EXAMPLE / "experiment.json", self.recipe_path)
 
     def test_json_duplicate_keys_and_nonfinite_numbers_fail(self):
-        for raw in (b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'bad json'):
+        for raw in (b'{"a":1,"a":2}', b'{"a":{"b":1,"b":2}}', b'{"a":NaN}', b'{"a":Infinity}',
+                    b'{"a":1e999}', b'{"a":-1e999}', b'bad json'):
             with self.subTest(raw=raw), self.assertRaises(PackageError):
                 json_value(raw)
+        self.assertEqual(json_value(b'{"a":[-1.25e2,1e20]}'), {"a": [-125.0, 1e20]})
 
     def test_bad_expected_digest_fails_without_writing(self):
         recipe = self.recipe()

@@ -4,18 +4,19 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .core import _publish_file_once, canonical, compile_package, safe_path, sha256
+from .core import MANIFEST, _publish_file_once, canonical, compile_package, sha256, unique_paths
 
 
 def compile_source_closure(temporary: Path, output: Path, source_directory: Path,
                            files: dict[str, bytes], recipe: dict,
                            package_name: str) -> dict:
     """Compile a source closure and publish it with a new, exclusive package."""
+    unique_paths([MANIFEST, "experiment.json", *files])
     stage = temporary / "source"
     stage.mkdir()
     members = []
     for package_path, data in sorted(files.items()):
-        target = stage.joinpath(*safe_path(package_path).split("/"))
+        target = stage.joinpath(*package_path.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         members.append({

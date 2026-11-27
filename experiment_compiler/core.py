@@ -8,12 +8,14 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import platform
 import re
 import shutil
 import stat
 import tempfile
+import unicodedata
 import zipfile
 import zlib
 from pathlib import Path
@@ -28,6 +30,11 @@ SHA1 = re.compile(r"[0-9a-f]{40}")
 FAMILY_URL_PREFIX = "https://experiments.tyharbin.com/#family-"
 FAMILY_ID = re.compile(re.escape(FAMILY_URL_PREFIX) + r"[a-z0-9]+(?:-[a-z0-9]+)*")
 EPOCH = (1980, 1, 1, 0, 0, 0)
+_LFS_POINTER_MAX_BYTES = 1024
+_UNSAFE_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+_WINDOWS_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
+    prefix + digit for prefix in ("COM", "LPT") for digit in "123456789¹²³"
+}
 
 
 def sha256(data: bytes) -> str:
@@ -51,9 +58,17 @@ def _constant(value: str) -> None:
     raise PackageError(f"Non-finite JSON number: {value}")
 
 
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise PackageError("Non-finite JSON number")
+    return number
+
+
 def json_value(data: bytes | bytearray) -> Any:
     try:
-        return json.loads(data.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_constant)
+        return json.loads(data.decode("utf-8"), object_pairs_hook=_pairs,
+                          parse_constant=_constant, parse_float=_finite_float)
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise PackageError(f"Invalid JSON: {exc}") from exc
 
@@ -87,27 +102,27 @@ def sha256_file(path: Path) -> str:
 
 def safe_path(value: Any) -> str:
     if (not isinstance(value, str) or not value or len(value) > 1024 or
-            any(ord(c) < 32 for c in value) or any(c in value for c in '\\:*?"<>|') or
+            any(unicodedata.category(c) in _UNSAFE_PATH_CATEGORIES for c in value) or
+            any(c in value for c in '\\:*?"<>|') or
             any(p in ("", ".", "..") or p.endswith((".", " ")) for p in value.split("/"))):
         raise PackageError(f"Unsafe or noncanonical relative path: {value!r}")
-    reserved = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{n}" for p in ("COM", "LPT") for n in range(1, 10)}
-    if any(p.split(".")[0].upper() in reserved for p in value.split("/")):
+    if any(p.partition(".")[0].upper() in _WINDOWS_DEVICE_NAMES for p in value.split("/")):
         raise PackageError(f"Nonportable path: {value!r}")
     return value
 
 
 def unique_paths(names: list[str]) -> None:
-    folded: set[str] = set()
+    names_by_key: dict[str, str] = {}
     for name in names:
         safe_path(name)
-        key = name.casefold()
-        if key in folded:
-            raise PackageError(f"Duplicate or case-colliding path: {name}")
-        folded.add(key)
-    for name in folded:
-        parts = name.split("/")
-        if any("/".join(parts[:n]) in folded for n in range(1, len(parts))):
-            raise PackageError(f"File/directory path collision: {name}")
+        key = unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
+        if key in names_by_key:
+            raise PackageError(f"Duplicate or case-colliding path, including canonical equivalents: {name!r}")
+        names_by_key[key] = name
+    for key, name in names_by_key.items():
+        parts = key.split("/")
+        if any("/".join(parts[:n]) in names_by_key for n in range(1, len(parts))):
+            raise PackageError(f"File/directory path collision: {name!r}")
 
 
 def _digest(value: Any) -> bool:
@@ -232,7 +247,7 @@ def _source(root: Path, relative: str) -> Path:
     return path
 
 
-def _is_git_lfs_pointer(data: bytes) -> bool:
+def _is_git_lfs_pointer(data: bytes | bytearray) -> bool:
     """Identify a Git LFS pointer so its small text is never mistaken for payload bytes."""
     if not data.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
         return False
@@ -275,7 +290,7 @@ def _validate_source_member(root: Path, item: dict) -> Path:
         raise PackageError(f"Expected regular file: {source}")
     if size != item["size"] or sha256_file(source) != item["sha256"]:
         raise PackageError(f"Source integrity mismatch: {item['source']}")
-    if size <= 1024 and _is_git_lfs_pointer(bounded_read(source)):
+    if size <= _LFS_POINTER_MAX_BYTES and _is_git_lfs_pointer(bounded_read(source)):
         raise PackageError(f"Git LFS pointer is not the referenced payload: {item['source']}")
     if item["path"].endswith((".json", ".jsonld")):
         if not isinstance(json_value(bounded_read(source)), (dict, list)):
@@ -658,11 +673,14 @@ def _verify_members(reader: ArchiveMemberReader, by_name: dict[str, zipfile.ZipI
         if info.file_size != item["size"]:
             raise PackageError(f"Member size mismatch: {path}")
         json_extension = path.endswith((".json", ".jsonld"))
-        capture = json_extension or path in retained_json
-        digest, _, data = reader.read(info, capture=capture)
+        needs_json = json_extension or path in retained_json
+        check_pointer = info.file_size <= _LFS_POINTER_MAX_BYTES
+        digest, _, data = reader.read(info, capture=needs_json or check_pointer)
         if digest != item["sha256"]:
             raise PackageError(f"Member integrity mismatch: {path}")
-        if capture:
+        if check_pointer and _is_git_lfs_pointer(data):
+            raise PackageError(f"Git LFS pointer is not the referenced payload: {path}")
+        if needs_json:
             document = json_value(data)
             if json_extension and not isinstance(document, (dict, list)):
                 raise PackageError("JSON members must have an object or array root")
