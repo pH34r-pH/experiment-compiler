@@ -16,6 +16,7 @@ from .core import (
     _as_refs,
     _execution_action_nodes,
     _types,
+    _validate_archival_release,
     _validate_related_articles,
     bounded_read,
     compile_package,
@@ -112,6 +113,8 @@ def describe_recipe(recipe_path: Path) -> dict:
     }
     if "isPartOf" in recipe:
         descriptor["isPartOf"] = recipe["isPartOf"]
+    if "archivalRelease" in recipe:
+        descriptor["archivalRelease"] = recipe["archivalRelease"]
     return descriptor
 
 
@@ -190,6 +193,8 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
     }
     if "isPartOf" in recipe:
         descriptor["isPartOf"] = recipe["isPartOf"]
+    if "archivalRelease" in recipe:
+        descriptor["archivalRelease"] = recipe["archivalRelease"]
     identifier = root.get("identifier")
     if isinstance(identifier, str) and identifier.strip():
         descriptor["experimentIdentifier"] = identifier
@@ -288,6 +293,8 @@ def resolve_article_reference(catalog: dict, reference: dict, *, article: dict |
         raise PackageError("Expected experiment identity mismatch")
     backlinks = record.get("backlinks")
     _validate_related_articles(backlinks)
+    if "archivalRelease" in record:
+        _validate_archival_release(record["archivalRelease"])
     if article is not None:
         _validate_related_articles([article])
         if not any(item["url"] == article["url"] and

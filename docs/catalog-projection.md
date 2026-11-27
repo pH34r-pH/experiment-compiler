@@ -56,9 +56,17 @@ list remain valid projections; they cannot claim verified reciprocal linkage.
 
 Adding reviewed recipe publication metadata changes the derived presentation,
 not package member bytes. It must retain the package digest and source identity.
+Optional `archivalRelease` metadata may record an exact immutable release tag in
+`pH34r-pH/compiled-experiments` (`repository`, `releaseTag`, `releaseUrl`, and
+optional `doi` and `zenodoRecordUrl`). Mutable `latest` tags are rejected. This
+citation/archive metadata is not a lifecycle state, scientific acceptance, or
+independent reproduction; its absence remains explicitly `Not archived / no DOI
+declared` and does not affect package validity.
 No family or article relation is inferred from titles, package hashes, article
 slugs, or successful execution. Family membership requires the exact source-owned
-`isPartOf` value described above. The current projection declares no public qualification or publication
+`isPartOf` value described above. The generated index and detail pages expose
+`<link rel="canonical">` and `<link rel="alternate" type="application/json" href="/data/experiments.json">`
+for external article and machine consumers. The current projection declares no public qualification or publication
 verdict. Those fields remain absent/unknown: package availability, `acceptance`,
 completed CreateActions, and CI success do not establish independent reproduction.
 Clients may show the exact inspect detail route, obtain the digest-addressed ZIP,
