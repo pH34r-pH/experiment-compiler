@@ -16,6 +16,22 @@ The publication attestation helper accepts the same flag for native verifier
 failures. Python callers can configure the `experiment_compiler` logger.
 Use the retained receipts for evidence and the CLI's standalone JSON for automation.
 
+## Alpha release provenance
+
+The owner can select `alpha-provenance` in the existing
+[lifecycle workflow](../.github/workflows/lifecycle.yml) on `main`. The signing
+job takes the historical POC ZIP, its checksum, two scoped receipts, and the
+Compiler wheel from the same run and attempt's Python 3.12 build. It checks
+the downloaded archive digest and verifies each GitHub attestation against the
+exact source commit and workflow. The candidate, bundle, and signature
+readback are retained together on success.
+
+The ordinary `pages` operation uses the existing Pages environment. An alpha
+provenance run prepares a new release candidate for owner review. A draft from
+an earlier build retains its own producer identity. Compare its five hashes
+against the signed candidate and use a release target that matches the signed
+source commit. GitHub Release publication still requires the owner decision.
+
 ## Optional selected-attempt coverage record
 
 Finalization can carry a source-authored coverage record alongside the
