@@ -7,7 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import yaml
+import importlib.util
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
+if HAS_YAML:
+    import yaml
 
 from experiment_compiler.actions_projection import project_actions
 from experiment_compiler.core import PackageError, canonical, compile_package
@@ -18,6 +22,7 @@ CAPABILITIES = ("foregroundExclusion", "processTreeCleanup", "resourceEnforcemen
                 "startedTerminalRetention", "lossRecovery")
 
 
+@unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
 class ActionsProjectionTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

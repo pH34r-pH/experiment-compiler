@@ -9,7 +9,11 @@ from pathlib import Path
 
 import test_protocol_coverage
 import test_revision
-import yaml
+import importlib.util
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
+if HAS_YAML:
+    import yaml
 
 from experiment_compiler.core import PackageError, compile_package
 from experiment_compiler.lifecycle_components import component_command
@@ -17,6 +21,8 @@ from experiment_compiler.lifecycle_components import component_command
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipIf(os.name == "nt", "requires POSIX os.execv and runner pipe log capture")
+@unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
 class LifecycleComponentTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

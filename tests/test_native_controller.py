@@ -3,7 +3,11 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
+import importlib.util
 import unittest
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
 from unittest.mock import patch
 
 import test_actions_projection as fixtures
@@ -57,6 +61,8 @@ class FixtureAuthority:
                 "collectionErrors": [], "resourceMeasurements": {"peakProcessMemoryBytes": None, "cpuSeconds": None}}
 
 
+@unittest.skipIf(os.name == "nt", "requires POSIX directory fsync for native receipts")
+@unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
 class NativeControllerTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.ActionsProjectionTests()

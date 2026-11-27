@@ -4,7 +4,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import importlib.util
 import unittest
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
 import uuid
 import zipfile
 from copy import deepcopy
@@ -42,7 +45,7 @@ TRUNCATED_ATTEMPT_LOGS = {"oversized-log", "timeout", "compile", "cancelled"}
 
 class RunnerBoundaryTests(unittest.TestCase):
     def setUp(self):
-        worker = patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation)
+        worker = patch("experiment_compiler.runner_admission.observe_worker", side_effect=synthetic_worker_observation)
         worker.start()
         self.addCleanup(worker.stop)
         self.process_identity_patch = patch(
@@ -55,6 +58,9 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.process_group_patch = patch("experiment_compiler.runner._process_group_exists", return_value=False)
         self.process_group_patch.start()
         self.addCleanup(self.process_group_patch.stop)
+        self.proc_mod_group_patch = patch("experiment_compiler.runner_process._process_group_exists", return_value=False)
+        self.proc_mod_group_patch.start()
+        self.addCleanup(self.proc_mod_group_patch.stop)
         self.engine_journal_patch = patch(
             "experiment_compiler.runner._new_container_journal",
             side_effect=self._fixture_container_journal,
@@ -102,8 +108,8 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value) / "attempt"
             attempt.mkdir(mode=0o700)
-            with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_journal.shutil.which", return_value=sys.executable), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id + "\n")):
                 journal = _new_container_journal(attempt, "0123456789ab", runner)
             self.assertEqual(journal["workerImageRef"], image_ref)
@@ -112,8 +118,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as value:
                 attempt = Path(value) / "attempt"
                 attempt.mkdir(mode=0o700)
-                with patch("experiment_compiler.runner.shutil.which", return_value=sys.executable), \
-                        patch("experiment_compiler.runner._engine_call",
+                with patch("experiment_compiler.runner_journal.shutil.which", return_value=sys.executable), \
+                        patch("experiment_compiler.runner_journal._engine_call",
                               return_value=SimpleNamespace(returncode=0, stdout=invalid)):
                     with self.assertRaisesRegex(PackageError, "Pinned workflow image"):
                         _new_container_journal(attempt, "0123456789ab", runner)
@@ -129,15 +135,15 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as value:
             attempt = Path(value)
             bare_inspect = f"{cid} running {'a' * 64} {image_ref}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_journal._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=bare_inspect)):
                 self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
             tag_elided_inspect = f"{cid} running {'a' * 64} registry.example/tool@sha256:{'d' * 64}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_journal._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=tag_elided_inspect)):
                 self.assertEqual(_container_present(attempt, journal, cid), (True, "running"))
             wrong_inspect = f"{cid} running {'c' * 64} {image_ref}\n"
-            with patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_journal._engine_call",
                        return_value=SimpleNamespace(returncode=0, stdout=wrong_inspect)):
                 with self.assertRaisesRegex(PackageError, "differs from the pinned"):
                     _container_present(attempt, journal, cid)
@@ -149,14 +155,14 @@ class RunnerBoundaryTests(unittest.TestCase):
                        "runner": {"name": "cwltool", "workerImageBase": image_ref},
                        "workerContext": {"reportedImageId": journal["reportedWorkerImageId"]},
                        "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime"}
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_recovery._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_recovery._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
                 _validate_recovery_worker(attempt, receipt, journal)
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._validate_recovery_container_inventory"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_recovery._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_recovery._validate_recovery_container_inventory"), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="c" * 64 + "\n")):
                 with self.assertRaisesRegex(PackageError, "exact retained workflow image ID"):
                     _validate_recovery_worker(attempt, receipt, journal)
@@ -260,9 +266,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                 sha256_bytes((attempt / "container-journal.json").read_bytes()),
             )
 
-            with patch("experiment_compiler.runner._validate_recovery_age_and_controller"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_recovery._validate_recovery_age_and_controller"), \
+                    patch("experiment_compiler.runner_recovery._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="a" * 64 + "\n")):
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -333,9 +339,9 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
                 },
             )
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_recovery._controller_is_alive"), \
+                    patch("experiment_compiler.runner_recovery._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id)):
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -381,13 +387,13 @@ class RunnerBoundaryTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout="")
                 return SimpleNamespace(returncode=0, stdout="")
 
-            with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=current_boot), \
-                    patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._current_cwl_process_fields",
+            with patch("experiment_compiler.runner_process._kernel_boot_uuid", return_value=current_boot), \
+                    patch("experiment_compiler.runner_recovery._controller_is_alive"), \
+                    patch("experiment_compiler.runner_process._current_cwl_process_fields",
                           side_effect=AssertionError("must not inspect a potentially reused PID")), \
-                    patch("experiment_compiler.runner._signal_retained_cwl_group",
+                    patch("experiment_compiler.runner_process._signal_retained_cwl_group",
                           side_effect=AssertionError("must not signal a potentially reused process group")), \
-                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+                    patch("experiment_compiler.runner_journal._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
 
             self.assertEqual(recovered["containerCleanup"]["state"], "clean")
@@ -405,9 +411,9 @@ class RunnerBoundaryTests(unittest.TestCase):
             "processGroupId": 2345, "sessionId": 2345,
         }}
         fields = ["S", "1", "2345", "2345"] + ["0"] * 15 + ["21"]
-        with patch("experiment_compiler.runner._kernel_boot_uuid", return_value=boot_id), \
-                patch("experiment_compiler.runner._current_cwl_process_fields", return_value=fields), \
-                patch("experiment_compiler.runner._signal_retained_cwl_group") as signal_group, \
+        with patch("experiment_compiler.runner_process._kernel_boot_uuid", return_value=boot_id), \
+                patch("experiment_compiler.runner_process._current_cwl_process_fields", return_value=fields), \
+                patch("experiment_compiler.runner_process._signal_retained_cwl_group") as signal_group, \
                 self.assertRaisesRegex(PackageError, "PID has been reused"):
             _reconcile_cwl_process_group(journal)
         signal_group.assert_not_called()
@@ -428,8 +434,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                     "cwl_boot_id": "not-a-uuid", "container_id": "c" * 64,
                 },
             )
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._engine_call",
+            with patch("experiment_compiler.runner_recovery._controller_is_alive"), \
+                    patch("experiment_compiler.runner_journal._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout="sha256:" + "b" * 64)) as engine:
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
@@ -463,8 +469,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             }
             receipt = {}
             states = iter(((True, "running"), (True, "exited"), (False, None)))
-            with patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
-                    patch("experiment_compiler.runner._engine_call", return_value=SimpleNamespace(returncode=0)) as engine:
+            with patch("experiment_compiler.runner_journal._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner_journal._engine_call", return_value=SimpleNamespace(returncode=0)) as engine:
                 errors = []
                 _cleanup_container_journal(attempt, journal, receipt, errors)
             self.assertEqual(errors, [])
@@ -521,10 +527,10 @@ class RunnerBoundaryTests(unittest.TestCase):
                 if arguments[:2] == ["image", "inspect"]:
                     return SimpleNamespace(returncode=0, stdout=image_id)
                 return SimpleNamespace(returncode=0, stdout="")
-            with patch("experiment_compiler.runner._controller_is_alive"), \
-                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
-                    patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
-                    patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
+            with patch("experiment_compiler.runner_recovery._controller_is_alive"), \
+                    patch("experiment_compiler.runner_recovery._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner_journal._container_present", side_effect=lambda *_: next(states)), \
+                    patch("experiment_compiler.runner_journal._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
             self.assertEqual(recovered["status"], "failed")
             self.assertEqual(recovered["containerCleanup"]["state"], "clean")
@@ -545,15 +551,17 @@ class RunnerBoundaryTests(unittest.TestCase):
             size = 64 * MIB
             mountinfo = f"20 1 0:1 / {root} rw,relatime - tmpfs tmpfs rw,size={size}"
             with patch.object(Path, "read_text", return_value=mountinfo), \
-                    patch("experiment_compiler.runner.shutil.disk_usage",
+                    patch("experiment_compiler.runner_admission.shutil.disk_usage",
                           return_value=SimpleNamespace(total=size)):
                 self.assertEqual(_require_bounded_output_tmpfs(root, 64), root.resolve())
             with patch.object(Path, "read_text", return_value=mountinfo.replace("tmpfs tmpfs", "ext4 /dev/fake")), \
-                    patch("experiment_compiler.runner.shutil.disk_usage",
+                    patch("experiment_compiler.runner_admission.shutil.disk_usage",
                           return_value=SimpleNamespace(total=size)), \
                     self.assertRaisesRegex(PackageError, "dedicated tmpfs"):
                 _require_bounded_output_tmpfs(root, 64)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX pipe selector for runner execution")
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_result_package_staging_uses_output_storage_not_bounded_tmpfs(self):
         class CompletedProcess:
             pid = 100
@@ -599,10 +607,10 @@ class RunnerBoundaryTests(unittest.TestCase):
                     }),
                     patch("experiment_compiler.runner.tempfile.tempdir", str(tmpfs)),
                     patch("experiment_compiler.runner._require_bounded_tmpfs"),
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"),
                     patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen),
-                    patch("experiment_compiler.runner.compile_package", side_effect=record_package_path),
+                    patch("experiment_compiler.runner_receipts.compile_package", side_effect=record_package_path),
             ):
                 run_package(plan, output, expected_sha256=built["packageSha256"],
                             allow_workflow_execution=True)
@@ -676,6 +684,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 recipe_path.write_bytes(canonical(recipe))
                 compile_package(recipe_path, directory / "result.zip")
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_nonfinite_resource_limits_are_rejected(self):
         import copy
         import yaml
@@ -710,6 +719,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertEqual(_collect_execution_tree(root, "output", errors, 64), {})
             self.assertTrue(any("declared worker resource budget" in error for error in errors))
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX process groups (os.killpg)")
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
         scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
                      "oversized-output", "aggregate", "oversized-provenance", "missing", "compile",
@@ -718,6 +729,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX process groups (os.killpg)")
     def test_timeout_with_live_orphan_skips_container_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -822,14 +834,14 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "EXPERIMENT_RUNNER_RESOURCE_LIMITS":
                     '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                 "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
-        }), patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
+        }), patch("experiment_compiler.runner_admission.importlib.metadata.version", return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._require_bounded_tmpfs"), \
                 patch("experiment_compiler.runner.LogCapture", capture), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=launch), \
-                patch("experiment_compiler.runner.os.killpg") as kill_group, \
+                patch("experiment_compiler.runner_process.os.killpg") as kill_group, \
                 patch.object(Path, "replace", new=replace_receipt), \
-                patch("experiment_compiler.runner.shutil.copytree", side_effect=copy_source), \
-                patch("experiment_compiler.runner.compile_package", side_effect=PackageError("fixture packaging failure") if scenario == "compile" else compile_package):
+                patch("experiment_compiler.runner_receipts.shutil.copytree", side_effect=copy_source), \
+                patch("experiment_compiler.runner_receipts.compile_package", side_effect=PackageError("fixture packaging failure") if scenario == "compile" else compile_package):
             errors = {"compile": PackageError, "interrupted": KeyboardInterrupt, "cancelled": KeyboardInterrupt, "cancelled-cleanup-timeout": KeyboardInterrupt,
                       "cancelled-cleanup-interrupted": KeyboardInterrupt,
                       "copy": OSError, "existing-output": OSError, "existing-source": OSError,
@@ -922,22 +934,24 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
                 self.assertTrue(published["containerCleanup"]["allAbsent"])
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX process groups (os.killpg)")
     def test_process_cleanup_escalates_and_bounds_each_wait(self):
         from unittest.mock import Mock
         process = Mock(pid=8123)
         process.wait.side_effect = [subprocess.TimeoutExpired("fixture", 5), -9]
-        with patch("experiment_compiler.runner.os.killpg") as kill_group:
+        with patch("experiment_compiler.runner_process.os.killpg") as kill_group:
             errors = _terminate_process_group(process)
         self.assertTrue(any("TimeoutExpired" in error for error in errors))
         self.assertEqual([call.args for call in kill_group.call_args_list], [(8123, 15), (8123, 9)])
         self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 5}, {"timeout": 5}])
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX process groups (os.killpg)")
     def test_process_cleanup_records_signal_errors_without_masking_them(self):
         from unittest.mock import Mock
         process = Mock(pid=8124)
         process.wait.return_value = -9
-        with patch("experiment_compiler.runner.os.killpg", side_effect=OSError("permission denied")), \
-                patch("experiment_compiler.runner._process_group_exists", return_value=False):
+        with patch("experiment_compiler.runner_process.os.killpg", side_effect=OSError("permission denied")), \
+                patch("experiment_compiler.runner_process._process_group_exists", return_value=False):
             errors = _terminate_process_group(process)
         self.assertEqual(len(errors), 2)
         self.assertTrue(all("signal " in error and "OSError" in error for error in errors))
@@ -966,6 +980,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(PackageError, "declared worker resource budget"):
                 _collect_tree(root, {}, 7)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink support")
     def test_collection_rejects_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -980,7 +995,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as other:
             path = Path(temporary)
             root = Path(other)
-            with patch("experiment_compiler.runner.shutil.disk_usage", return_value=type(
+            with patch("experiment_compiler.runner_admission.shutil.disk_usage", return_value=type(
                     "DiskUsage", (), {"total": 32 * 1024 * 1024})()):
                 with self.assertRaisesRegex(PackageError, "outside the declared tmpfs"):
                     _require_bounded_tmpfs(path, root, 64)
@@ -993,7 +1008,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             path.mkdir()
             mountinfo = f"20 1 0:1 / {root} rw,relatime - tmpfs tmpfs rw,size={64 * MIB}"
             with patch.object(Path, "read_text", return_value=mountinfo), \
-                    patch("experiment_compiler.runner.shutil.disk_usage") as usage:
+                    patch("experiment_compiler.runner_admission.shutil.disk_usage") as usage:
                 usage.return_value = SimpleNamespace(total=64 * MIB)
                 _require_bounded_tmpfs(path, root, 64)
                 for total in (63, 512):
@@ -1020,6 +1035,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(PackageError, "execution deferred"):
                 _dependency_closure(payload)
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_worker_refuses_runner_wall_time_above_approved_limit(self):
         source = ROOT / "examples/linear-regression-plan-v1/source"
         payload = {f"experiment/{path.name}": path.read_bytes() for path in source.iterdir() if path.is_file()}
@@ -1053,6 +1069,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         compile_package(recipe_path, package)
         return package, source / "source"
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_file_backed_runner_stages_selected_inputs_and_preserves_other_members(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1080,7 +1097,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                            "EXPERIMENT_RUNNER_TMPFS_ROOT": str(root)}
             output = root / "attempt.zip"
             with patch.dict(os.environ, environment), patch.object(zipfile.ZipFile, "read", checked_read), \
-                    patch("experiment_compiler.runner.importlib.metadata.version", return_value="3.2.20260720092025"), \
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version", return_value="3.2.20260720092025"), \
                     patch("experiment_compiler.runner._execute_cwl", side_effect=execute):
                 result = run_package(package, output, expected_sha256=package_digest, allow_workflow_execution=True,
                                      policy=PackageReadPolicy(max_total_bytes=6 * MIB))
@@ -1109,6 +1126,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 with _open_run_package(altered, root / "second.zip", sha256_file(altered), None):
                     self.fail("A changed unrelated member was admitted")
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_cwl_resource_ranges_require_supported_explicit_finite_values(self):
         import yaml
 
@@ -1135,6 +1153,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(location=location), self.assertRaisesRegex(PackageError, "unsupported CWL|CWL hints"):
                 _admit_workflow(workflow, limits, image)
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_workflow_admission_allows_literal_arguments_and_rejects_other_expressions(self):
         import yaml
 
@@ -1148,6 +1167,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             _admit_workflow(workflow, limits,
                             "python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3")
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_cwl_document_references_are_rejected_before_subprocess_launch(self):
         reference_documents = (
             """cwlVersion: v1.2
@@ -1202,7 +1222,7 @@ class: CommandLineTool
                             '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                         "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                         "TMPDIR": str(directory),
-                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                }), patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
                         patch("experiment_compiler.runner.subprocess.Popen") as popen:
                     with self.assertRaisesRegex(PackageError, "execution deferred:"):
@@ -1211,6 +1231,7 @@ class: CommandLineTool
                                     allow_workflow_execution=True)
                     popen.assert_not_called()
 
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_job_order_references_and_overrides_are_rejected_before_subprocess_launch(self):
         base_job = (ROOT / "examples/linear-regression-plan-v1/source/job.yml").read_text()
         job_documents = (
@@ -1246,7 +1267,7 @@ class: CommandLineTool
                             '{"cores":1,"ramMiB":64,"tmpdirMiB":64,"outdirMiB":64,"wallSeconds":120}',
                         "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                         "TMPDIR": str(directory),
-                }), patch("experiment_compiler.runner.importlib.metadata.version",
+                }), patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
                         patch("experiment_compiler.runner.subprocess.Popen") as popen:
                     with self.assertRaisesRegex(PackageError, "execution deferred:"):
@@ -1271,6 +1292,8 @@ class: CommandLineTool
         self.assertNotIn("--preserve-entire-environment", command)
         self.assertFalse(any(arg.startswith("--preserve-environment") for arg in command))
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX pipe selector for runner execution")
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_podman_mode_selects_podman_in_the_pinned_cwltool_runner(self):
         class CompletedProcess:
             pid = 102
@@ -1331,7 +1354,7 @@ class: CommandLineTool
                     "DOCKER_HOST": "tcp://private/host",
                     "PODMAN_CONNECTIONS_CONF": "/private/host-connections",
             }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                           return_value="3.2.20260720092025"), \
                     patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
                 outcome = run_package(plan, result, expected_sha256=built["packageSha256"],
@@ -1364,6 +1387,7 @@ class: CommandLineTool
                 self.assertEqual(client_environment["PATH"], "/usr/bin:/bin")
                 self.assertEqual(client_environment["TMPDIR"], temporary)
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink support")
     def test_execution_collection_rejection_is_recorded_without_admitting_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1383,6 +1407,8 @@ class: CommandLineTool
         private_snapshot = result.with_name(result.stem + ".attempt") / reference["storePath"]
         self.assertEqual(sha256_bytes(private_snapshot.read_bytes()), reference["sha256"])
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX pipe selector for runner execution")
+    @unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
             pid = 101
@@ -1421,7 +1447,7 @@ class: CommandLineTool
                     "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                     "TMPDIR": str(directory),
             }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                    patch("experiment_compiler.runner.importlib.metadata.version",
+                    patch("experiment_compiler.runner_admission.importlib.metadata.version",
                       return_value="3.2.20260720092025"), \
                     patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
                 run_result = run_package(plan, result, expected_sha256=original_sha,

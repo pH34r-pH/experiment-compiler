@@ -2,7 +2,10 @@
 import copy
 import json
 import tempfile
+import importlib.util
 import unittest
+
+HAS_JSONSCHEMA = importlib.util.find_spec("jsonschema") is not None
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +25,7 @@ from experiment_compiler.core import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(HAS_JSONSCHEMA, "requires optional 'repository' extra (jsonschema)")
 class RepositoryAgentProfileTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

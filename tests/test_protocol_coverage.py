@@ -1,11 +1,15 @@
 """The optional first coverage slice binds source declarations to actual bytes."""
 import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import importlib.util
 import unittest
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,6 +25,8 @@ import test_revision
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipIf(os.name == "nt", "requires POSIX pipe selector for runner execution fixtures")
+@unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
 class ProtocolCoverageTests(unittest.TestCase):
     def amendment_fixture(self, directory):
         attempt, attempt_id, coverage, _ = self.campaign_fixture(directory)

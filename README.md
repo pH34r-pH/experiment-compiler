@@ -13,7 +13,7 @@ It does **not** define the science, fill in a missing method, infer a conclusion
 
 ## Quick start
 
-Python 3.11+ is sufficient for the core compiler/verifier.
+Python 3.11+ (standard library only) is sufficient for the core compiler, verifier, and core test suite:
 
 ```sh
 python -m experiment_compiler compile examples/linear-regression-v1/experiment.json
@@ -24,6 +24,15 @@ python -m experiment_compiler verify \
 
 python -m unittest discover -s tests -v
 ```
+
+To run the full test suite including CWL runner admission (`PyYAML`) and repository-agent evidence schemas (`jsonschema`), install the optional extras on Linux/POSIX:
+
+```sh
+python -m pip install -e '.[runner,repository]'
+python -m unittest discover -s tests -v
+```
+
+Without those extras installed, tests that require `runner` or `repository` dependencies are skipped rather than erroring; on Windows, POSIX-only process-group, directory-`fsync`, and symlink tests are likewise skipped.
 
 The self-contained linear-regression fixture embeds the implementation, tests, synthetic data, environment/configuration, protocol, acceptance criteria, reference result, resource evidence, Croissant metadata, and RO-Crate / Process Run Crate provenance.
 

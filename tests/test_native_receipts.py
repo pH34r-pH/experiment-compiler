@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from experiment_compiler.native_receipts import (
 )
 
 
+@unittest.skipIf(os.name == "nt", "requires POSIX directory fsync and symlinks")
 class NativeReceiptTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

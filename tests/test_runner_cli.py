@@ -41,7 +41,7 @@ CONTROLLER = textwrap.dedent("""\
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
     from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
-    from experiment_compiler import runner, runner_cli
+    from experiment_compiler import runner, runner_admission, runner_cli, runner_process
     directory = Path(sys.argv[1])
     worker = sys.argv[2]
     killpg = os.killpg
@@ -60,11 +60,11 @@ CONTROLLER = textwrap.dedent("""\
         return [sys.executable, "-u", "-c", worker, str(directory)]
     with synthetic_controller_environment(directory), \\
             patch.object(runner, "_require_bounded_tmpfs"), \\
-            patch.object(runner, "_runner_config", side_effect=configure), \\
+            patch.object(runner_admission, "_runner_config", side_effect=configure), \\
             patch.object(runner, "_new_container_journal", side_effect=prepare_container_journal), \\
             patch.object(runner, "LogCapture", partial(runner.LogCapture, stream_limit=31)), \\
             patch.object(runner, "_run_command", side_effect=native_command), \\
-            patch.object(runner.os, "killpg", side_effect=record_signal):
+            patch.object(runner_process.os, "killpg", side_effect=record_signal):
         raise SystemExit(runner_cli.main(json.loads(sys.argv[3])))
     """)
 RETENTION_CONTROLLER = textwrap.dedent("""\
@@ -73,7 +73,7 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
     from unittest.mock import patch
     sys.path.insert(0, str(Path.cwd() / "tests"))
     from runner_fixture_helpers import prepare_container_journal, synthetic_controller_environment
-    from experiment_compiler import runner, runner_cli
+    from experiment_compiler import runner, runner_admission, runner_cli, runner_process
     directory = Path(sys.argv[1])
     mode = sys.argv[2]
     replace = Path.replace
@@ -225,7 +225,7 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
                             signal.raise_signal(signal.SIGINT)
                     if phase == "replay":
                         original_install(signal.SIGTERM, replay)
-                    with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+                    with patch("experiment_compiler.runner_process.signal.signal", side_effect=install):
                         with _defer_operator_signals():
                             if phase != "install":
                                 signal.raise_signal(signal.SIGTERM)
@@ -242,7 +242,7 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
                 if number == signal.SIGTERM and restored is handler:
                     signal.raise_signal(signal.SIGTERM)
                 return result
-            with patch("experiment_compiler.runner.signal.signal", side_effect=install):
+            with patch("experiment_compiler.runner_process.signal.signal", side_effect=install):
                 with _defer_operator_signals():
                     pass
 
@@ -259,16 +259,16 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
         def enter():
             with _defer_operator_signals():
                 entered.append(True)
-        with patch("experiment_compiler.runner.signal.signal") as install:
+        with patch("experiment_compiler.runner_process.signal.signal") as install:
             thread = threading.Thread(target=enter)
             thread.start()
             thread.join(timeout=5)
             self.assertFalse(thread.is_alive())
-            with patch("experiment_compiler.runner.signal.getsignal", return_value=signal.SIG_DFL), \
-                    patch("experiment_compiler.runner.signal.pthread_sigmask") as mask:
+            with patch("experiment_compiler.runner_process.signal.getsignal", return_value=signal.SIG_DFL), \
+                    patch("experiment_compiler.runner_process.signal.pthread_sigmask") as mask:
                 enter()
                 mask.assert_not_called()
-            with patch("experiment_compiler.runner.hasattr", return_value=False):
+            with patch("experiment_compiler.runner_process.hasattr", return_value=False):
                 enter()
             install.assert_not_called()
         self.assertEqual(entered, [True, True, True])

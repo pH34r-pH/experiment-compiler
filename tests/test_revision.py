@@ -4,7 +4,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import importlib.util
 import unittest
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -19,6 +22,8 @@ from runner_fixture_helpers import prepare_container_journal, synthetic_worker_o
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipIf(os.name == "nt", "requires POSIX pipe selector for runner execution fixtures")
+@unittest.skipUnless(HAS_YAML, "requires optional 'runner' extra (PyYAML)")
 class RevisionTests(unittest.TestCase):
     @staticmethod
     def _fixture_container_journal(attempt_directory, attempt_id, runner):
@@ -55,8 +60,8 @@ class RevisionTests(unittest.TestCase):
                 "EXPERIMENT_RUNNER_TMPFS_ROOT": str(directory),
                 "TMPDIR": str(directory),
         }), patch("experiment_compiler.runner._require_bounded_tmpfs"), \
-                patch("experiment_compiler.runner.observe_worker", side_effect=synthetic_worker_observation), \
-                patch("experiment_compiler.runner.importlib.metadata.version",
+                patch("experiment_compiler.runner_admission.observe_worker", side_effect=synthetic_worker_observation), \
+                patch("experiment_compiler.runner_admission.importlib.metadata.version",
                       return_value="3.2.20260720092025"), \
                 patch("experiment_compiler.runner._new_container_journal",
                       side_effect=self._fixture_container_journal), \
@@ -64,6 +69,7 @@ class RevisionTests(unittest.TestCase):
                     "pid": 101, "bootId": "fixture", "processStartTicks": "1",
                     "processGroupId": 101, "sessionId": 101,
                 }), patch("experiment_compiler.runner._process_group_exists", return_value=False), \
+                patch("experiment_compiler.runner_process._process_group_exists", return_value=False), \
                 patch("experiment_compiler.runner.subprocess.Popen", side_effect=fake_popen):
             run_package(plan, attempt, expected_sha256=built["packageSha256"],
                         allow_workflow_execution=True)

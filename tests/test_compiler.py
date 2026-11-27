@@ -366,7 +366,7 @@ class CompilerTests(unittest.TestCase):
                     "## Preregistered endpoints\nMeasure held-out error per selected sample.\n\n"
                     "## Frozen comparison denominator\nUse the declared reference sample set; missing evidence is inconclusive.\n")
         member = next(item for item in recipe["members"] if item["path"] == "experiment/protocol.md")
-        (recipe_path.parent / member["source"]).write_text(protocol)
+        (recipe_path.parent / member["source"]).write_bytes(protocol.encode())
         member.update(sha256=sha256(protocol.encode()), size=len(protocol.encode()))
         recipe_path.write_bytes(canonical(recipe))
         record = describe_recipe(recipe_path)
@@ -689,6 +689,7 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             self.build()
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink support")
     def test_source_symlink_fails(self):
         path = self.recipe_path.parent / "inputs/VALIDATION.md"
         target = self.root / "outside"
@@ -697,6 +698,7 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaises(PackageError):
             self.build()
 
+    @unittest.skipIf(os.name == "nt", "requires POSIX symlink support")
     def test_source_parent_symlink_fails(self):
         path = self.recipe_path.parent / "inputs"
         target = self.root / "outside-directory"
