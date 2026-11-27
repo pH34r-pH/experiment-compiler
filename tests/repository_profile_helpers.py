@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from experiment_compiler.agent_profiles import projection_fingerprint
@@ -57,3 +58,36 @@ def composed_records(packet):
         "partition_references": []}
     return {"repository-task": task, "repository-context": context, "repository-evaluator-public": public,
             "repository-evaluator-sealed": sealed, "repository-evidence": packet}
+
+
+def retained_trajectory(task, terminal, *, repository_id=None, candidate=None):
+    """Produce canonical synthetic evidence using the actual pinned upstream models."""
+    from long_haul.work.harness import (
+        HarnessAttempt, HarnessCleanup, HarnessState, SemanticActionEventV1, semantic_trace_bytes,
+    )
+    from long_haul.work.repository_models import RepositoryWorkExtensionV1
+
+    extension = RepositoryWorkExtensionV1.model_validate(task)
+    assert extension.fingerprint == projection_fingerprint(task)
+    attempt = HarnessAttempt(
+        attempt_id="attempt", contract_id="contract", mission_id="mission", session_id="session",
+        crew_id="crew", repository_id=repository_id or extension.source.repository_id,
+        contract_digest=reference("contract")["digest"], repository_extension_digest=extension.fingerprint,
+        context_manifest=extension.context_manifest, harness={
+            "harness_id": "fixture", "package_name": "fixture", "package_version": "1", "protocol": "fixture-v1",
+            "source": reference("source"), "artifact": reference("artifact"), "configuration": reference("configuration"),
+        },
+    )
+    events = () if terminal == "provider_failure" else (SemanticActionEventV1(
+        attempt_id=attempt.attempt_id, session_id=attempt.session_id, contract_id=attempt.contract_id,
+        native_id_mode="none", sequence=1, wire_sequence=1, phase="lifecycle", tool="unknown", action="unknown",
+        timestamp=datetime(2026, 11, 27, tzinfo=timezone.utc), outcome="unknown", progress="no_progress",
+        arguments={"argument_fingerprint": "hmac-sha256:" + "0" * 64}, summary="settled",
+        consequence="unknown", policy_receipt=reference("policy"), normalization=reference("normalization"),
+        harness_digest=attempt.harness.fingerprint,
+    ),)
+    state = HarnessState(attempt)
+    state.settle(terminal)
+    cleanup = HarnessCleanup(attempt_id=attempt.attempt_id, session_id=attempt.session_id, boundary="fixture",
+                             process_tree_stopped=True, evidence=reference("cleanup"))
+    return state.finish(events, cleanup, candidate), semantic_trace_bytes(events)

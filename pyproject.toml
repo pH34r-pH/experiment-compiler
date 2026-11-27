@@ -21,6 +21,10 @@ classifiers = [
 [project.optional-dependencies]
 runner = ["PyYAML==6.0.2"]
 repository = ["jsonschema==4.25.1"]
+trajectory = [
+  "jsonschema==4.25.1",
+  "long-haul @ git+https://github.com/pH34r-pH/long-haul@64c81d31fc8193cd2ff9e96a8df1751f86f8a21c",
+]
 mutation = [
   "irradiate==0.4.3",
   "jsonschema>=4.25,<5",
