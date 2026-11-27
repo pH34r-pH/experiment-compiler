@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import warnings
 import zipfile
@@ -29,6 +30,39 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/issue-164"
 SELF_CONTAINED = ROOT / "examples/linear-regression-v1"
 EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
+COMPILE_WITH_ENVIRONMENT_PROBE = """
+import json
+import locale
+import os
+import sys
+import time
+
+try:
+    active_locale = locale.setlocale(locale.LC_ALL, os.environ["LC_ALL"])
+except locale.Error:
+    raise SystemExit(77)
+
+timezone_offset = None
+if hasattr(time, "tzset"):
+    time.tzset()
+    timezone_offset = time.timezone
+
+creation_mask = None
+if os.name == "posix":
+    creation_mask = os.umask(0)
+    os.umask(creation_mask)
+
+print(json.dumps({
+    "locale": active_locale,
+    "timezone_offset": timezone_offset,
+    "hash_probe": hash("compiler-environment-probe"),
+    "umask": creation_mask,
+}), file=sys.stderr, flush=True)
+
+from experiment_compiler.__main__ import main
+
+raise SystemExit(main(["compile", *sys.argv[1:]]))
+"""
 
 
 class CompilerTests(unittest.TestCase):
@@ -156,6 +190,92 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(raw, second.read_bytes())
         # Same output is idempotent rather than an overwrite/error.
         compile_package(self.recipe_path, self.output)
+
+    def compile_in_environment(self, recipe, label, *, overrides=None, mask=0o022):
+        output = self.root / f"{label}.zip"
+        environment = {
+            **os.environ,
+            "LC_ALL": "C",
+            "TZ": "UTC0",
+            "PYTHONHASHSEED": "7",
+            "PYTHONPATH": str(ROOT),
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONCOERCECLOCALE": "0",
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
+            **(overrides or {}),
+        }
+        posix_options = {"umask": mask} if os.name == "posix" else {}
+        result = subprocess.run(
+            [sys.executable, "-c", COMPILE_WITH_ENVIRONMENT_PROBE, str(recipe), "--output", str(output)],
+            cwd=self.root, env=environment, capture_output=True, encoding="utf-8", timeout=30, **posix_options,
+        )
+        if result.returncode == 77 and overrides and "LC_ALL" in overrides:
+            return None
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        return output.read_bytes(), json.loads(result.stderr)
+
+    def test_lifecycle_package_bytes_are_stable_across_hash_seeds_and_source_paths(self):
+        recipe, _, _ = self.lifecycle_fixture()
+        baseline, observed = self.compile_in_environment(recipe, "baseline")
+        archive, varied = self.compile_in_environment(recipe, "seed", overrides={"PYTHONHASHSEED": "89"})
+        self.assertNotEqual(varied["hash_probe"], observed["hash_probe"])
+        self.assertEqual(archive, baseline)
+        relocated = self.root / "relocated source"
+        shutil.copytree(recipe.parent, relocated)
+        archive, _ = self.compile_in_environment(relocated / recipe.name, "relocated")
+        self.assertEqual(archive, baseline)
+
+    def test_lifecycle_package_bytes_are_stable_across_source_mtimes(self):
+        recipe, _, _ = self.lifecycle_fixture()
+        member = recipe.parent / "experiment/README.md"
+        baseline, _ = self.compile_in_environment(recipe, "baseline")
+        original_mtime = member.stat().st_mtime_ns
+        os.utime(member, (946684800, 946684800))
+        self.assertNotEqual(member.stat().st_mtime_ns, original_mtime)
+        archive, _ = self.compile_in_environment(recipe, "mtime")
+        self.assertEqual(archive, baseline)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX source modes and child umask require a POSIX host")
+    def test_lifecycle_package_bytes_are_stable_across_source_modes_and_umasks(self):
+        recipe, _, _ = self.lifecycle_fixture()
+        baseline, observed = self.compile_in_environment(recipe, "baseline")
+        with self.subTest(setting="child umask"):
+            archive, varied = self.compile_in_environment(recipe, "umask", mask=0o077)
+            self.assertEqual(observed["umask"], 0o022)
+            self.assertEqual(varied["umask"], 0o077)
+            self.assertEqual(archive, baseline)
+        with self.subTest(setting="readable source mode"):
+            member = recipe.parent / "experiment/README.md"
+            original_mode = stat.S_IMODE(member.stat().st_mode)
+            wanted_mode = 0o600 if original_mode != 0o600 else 0o644
+            member.chmod(wanted_mode)
+            if stat.S_IMODE(member.stat().st_mode) != wanted_mode:
+                self.skipTest("temporary filesystem does not retain POSIX file modes")
+            archive, _ = self.compile_in_environment(recipe, "mode")
+            self.assertEqual(archive, baseline)
+
+    @unittest.skipUnless(hasattr(time, "tzset"), "host Python cannot apply a child TZ override")
+    def test_lifecycle_package_bytes_are_stable_across_timezones(self):
+        recipe, _, _ = self.lifecycle_fixture()
+        baseline, observed = self.compile_in_environment(recipe, "baseline")
+        archive, varied = self.compile_in_environment(recipe, "timezone", overrides={"TZ": "EST5"})
+        self.assertEqual(observed["timezone_offset"], 0)
+        self.assertEqual(varied["timezone_offset"], 5 * 60 * 60)
+        self.assertEqual(archive, baseline)
+
+    def test_lifecycle_package_bytes_are_stable_across_available_locales(self):
+        recipe, _, _ = self.lifecycle_fixture()
+        baseline, observed = self.compile_in_environment(recipe, "baseline")
+        for index, locale_name in enumerate(("C.UTF-8", "C.utf8", "en_US.UTF-8", ".UTF-8")):
+            result = self.compile_in_environment(recipe, f"locale-{index}", overrides={"LC_ALL": locale_name})
+            if result is None:
+                continue
+            archive, varied = result
+            if varied["locale"] != observed["locale"]:
+                self.assertEqual(archive, baseline)
+                return
+        self.skipTest("no alternate locale from the test candidates is available")
 
     def test_compile_and_both_verifiers_are_offline_for_all_profiles(self):
         lifecycle_recipe, _, _ = self.lifecycle_fixture()
