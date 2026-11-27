@@ -26,6 +26,7 @@ class CleanRebuildTests(unittest.TestCase):
         self.digest = compile_package(ROOT / "examples/issue-164/experiment.json", self.package)["packageSha256"]
         self.commit = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
 
+    @unittest.skipUnless(os.name == "posix", "exact-source reconstruction uses the POSIX system Git path")
     def test_exact_committed_source_rebuilds_without_package_execution(self):
         report = clean_rebuild(ROOT, self.commit, "examples/issue-164/experiment.json", self.package, self.digest)
         self.assertEqual(report["builderSourceCommit"], self.commit)
@@ -35,12 +36,14 @@ class CleanRebuildTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "differs"):
             clean_rebuild(ROOT, self.commit, "examples/linear-regression-v1/experiment.json", self.package, self.digest)
 
+    @unittest.skipUnless(os.name == "posix", "exact-source reconstruction uses the POSIX system Git path")
     def test_wrong_source_or_candidate_identity_fails_before_promotion(self):
         tree = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD^{tree}"], text=True).strip()
         for commit, digest in (("main", self.digest), (self.commit, "0" * 64), (tree, self.digest)):
             with self.assertRaises(PackageError):
                 clean_rebuild(ROOT, commit, "examples/issue-164/experiment.json", self.package, digest)
 
+    @unittest.skipUnless(os.name == "posix", "exact-source reconstruction uses the POSIX system Git path")
     def test_path_git_shim_and_caller_git_config_cannot_replace_the_source_archive(self):
         git = shutil.which("git", path=os.defpath)
         repository = self.root / "source-clone"
@@ -62,6 +65,7 @@ class CleanRebuildTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(receipt["packageSha256"], self.digest)
 
+    @unittest.skipUnless(os.name == "posix", "exact-source reconstruction uses the POSIX system Git path")
     def test_missing_and_export_ignored_compiler_cannot_fall_back_to_installed_code(self):
         git = shutil.which("git", path=os.defpath)
         for mode in ("missing", "export-ignore"):

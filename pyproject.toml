@@ -7,7 +7,7 @@ name = "experiment-compiler"
 version = "0.1.0a1"
 description = "Offline deterministic packaging for standards-based Compiled Experiments"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Tyler J.H.G."}]

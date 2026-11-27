@@ -313,7 +313,7 @@ class SiteProjectionTest(unittest.TestCase):
             resolve_article_reference(missing, fixture["compiled_experiment"])
 
     def test_compiler_style_uses_the_2071_blue_glass_contract_and_controls(self):
-        css = (ROOT / "site/assets/site.css").read_text()
+        css = (ROOT / "site/assets/site.css").read_text(encoding="utf-8")
         for token in ("--bg: #f4f9fd", "--ink: #071724", "--muted: #425768",
                       "--line: #9bb2c3", "--accent: #006fc7", "--bg: #00070d",
                       "--accent: #29a7ff", "--glass-border:", "--gradient-y:"):
@@ -330,19 +330,20 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn(".details pre { min-width: 0; max-width: 100%;", css)
         self.assertIn(".detail-page summary, .details summary { min-height: 48px;", css)
 
-        runtime = (ROOT / "site/assets/instrument.js").read_text()
+        runtime = (ROOT / "site/assets/instrument.js").read_text(encoding="utf-8")
         self.assertIn('localStorage.getItem("experiment-theme")', runtime)
         self.assertIn('target.origin !== location.origin', runtime)
         self.assertIn("Cross-origin pages cannot share", runtime)
 
-        catalog_runtime = (ROOT / "site/assets/site.js").read_text()
+        catalog_runtime = (ROOT / "site/assets/site.js").read_text(encoding="utf-8")
         self.assertIn('querySelectorAll("tbody.catalog-group")', catalog_runtime)
         self.assertIn('dataset.search.includes(query)', catalog_runtime)
         self.assertIn('aria-sort', catalog_runtime)
         self.assertIn('within each family', catalog_runtime)
         self.assertIn("GENERATED_CATALOG", (ROOT / "site/index.html").read_text())
-        self.assertIn("caption", (ROOT / "scripts/build_pages_site.py").read_text())
-        self.assertIn("scope=\"rowgroup\"", (ROOT / "scripts/build_pages_site.py").read_text())
+        builder = (ROOT / "scripts/build_pages_site.py").read_text(encoding="utf-8")
+        self.assertIn("caption", builder)
+        self.assertIn("scope=\"rowgroup\"", builder)
         self.assertIn("--parallax-y", css)
         self.assertIn(".catalog-table", css)
         self.assertIn(".table-scroll", css)

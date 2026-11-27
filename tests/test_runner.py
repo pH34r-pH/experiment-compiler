@@ -30,6 +30,7 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
 from experiment_compiler.runner_logs import LogCapture
+from fixture_requirements import REQUIRES_RUNNER
 from runner_fixture_helpers import prepare_container_journal, prepare_recovery_attempt, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -554,6 +555,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                     self.assertRaisesRegex(PackageError, "dedicated tmpfs"):
                 _require_bounded_output_tmpfs(root, 64)
 
+    @REQUIRES_RUNNER
     def test_result_package_staging_uses_output_storage_not_bounded_tmpfs(self):
         class CompletedProcess:
             pid = 100
@@ -676,6 +678,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 recipe_path.write_bytes(canonical(recipe))
                 compile_package(recipe_path, directory / "result.zip")
 
+    @REQUIRES_RUNNER
     def test_nonfinite_resource_limits_are_rejected(self):
         import copy
         import yaml
@@ -710,6 +713,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             self.assertEqual(_collect_execution_tree(root, "output", errors, 64), {})
             self.assertTrue(any("declared worker resource budget" in error for error in errors))
 
+    @REQUIRES_RUNNER
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_attempt_receipts_survive_execution_and_packaging_failures(self):
         scenarios = ("success", "nonzero", "timeout", "oversized-log", "symlink",
                      "oversized-output", "aggregate", "oversized-provenance", "missing", "compile",
@@ -718,6 +723,8 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 self._check_attempt_scenario(scenario, Path(temporary))
 
+    @REQUIRES_RUNNER
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_timeout_with_live_orphan_skips_container_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -922,6 +929,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 self.assertEqual(published["containerJournal"]["sha256"], receipt["containerJournal"]["sha256"])
                 self.assertTrue(published["containerCleanup"]["allAbsent"])
 
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_process_cleanup_escalates_and_bounds_each_wait(self):
         from unittest.mock import Mock
         process = Mock(pid=8123)
@@ -932,6 +940,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.assertEqual([call.args for call in kill_group.call_args_list], [(8123, 15), (8123, 9)])
         self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 5}, {"timeout": 5}])
 
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_process_cleanup_records_signal_errors_without_masking_them(self):
         from unittest.mock import Mock
         process = Mock(pid=8124)
@@ -966,6 +975,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(PackageError, "declared worker resource budget"):
                 _collect_tree(root, {}, 7)
 
+    @unittest.skipIf(os.name == "nt", "symlink fixture requires POSIX link privileges")
     def test_collection_rejects_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1020,6 +1030,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(PackageError, "execution deferred"):
                 _dependency_closure(payload)
 
+    @REQUIRES_RUNNER
     def test_worker_refuses_runner_wall_time_above_approved_limit(self):
         source = ROOT / "examples/linear-regression-plan-v1/source"
         payload = {f"experiment/{path.name}": path.read_bytes() for path in source.iterdir() if path.is_file()}
@@ -1053,6 +1064,7 @@ class RunnerBoundaryTests(unittest.TestCase):
         compile_package(recipe_path, package)
         return package, source / "source"
 
+    @REQUIRES_RUNNER
     def test_file_backed_runner_stages_selected_inputs_and_preserves_other_members(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1109,6 +1121,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 with _open_run_package(altered, root / "second.zip", sha256_file(altered), None):
                     self.fail("A changed unrelated member was admitted")
 
+    @REQUIRES_RUNNER
     def test_cwl_resource_ranges_require_supported_explicit_finite_values(self):
         import yaml
 
@@ -1135,6 +1148,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             with self.subTest(location=location), self.assertRaisesRegex(PackageError, "unsupported CWL|CWL hints"):
                 _admit_workflow(workflow, limits, image)
 
+    @REQUIRES_RUNNER
     def test_workflow_admission_allows_literal_arguments_and_rejects_other_expressions(self):
         import yaml
 
@@ -1148,6 +1162,7 @@ class RunnerBoundaryTests(unittest.TestCase):
             _admit_workflow(workflow, limits,
                             "python:3.13.13-slim@sha256:7ba5f5888fbe0014ab9edb2278922995c2201fc3752c46b0be24763eb46fa9f3")
 
+    @REQUIRES_RUNNER
     def test_cwl_document_references_are_rejected_before_subprocess_launch(self):
         reference_documents = (
             """cwlVersion: v1.2
@@ -1211,6 +1226,7 @@ class: CommandLineTool
                                     allow_workflow_execution=True)
                     popen.assert_not_called()
 
+    @REQUIRES_RUNNER
     def test_job_order_references_and_overrides_are_rejected_before_subprocess_launch(self):
         base_job = (ROOT / "examples/linear-regression-plan-v1/source/job.yml").read_text()
         job_documents = (
@@ -1271,6 +1287,8 @@ class: CommandLineTool
         self.assertNotIn("--preserve-entire-environment", command)
         self.assertFalse(any(arg.startswith("--preserve-environment") for arg in command))
 
+    @REQUIRES_RUNNER
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_podman_mode_selects_podman_in_the_pinned_cwltool_runner(self):
         class CompletedProcess:
             pid = 102
@@ -1364,6 +1382,7 @@ class: CommandLineTool
                 self.assertEqual(client_environment["PATH"], "/usr/bin:/bin")
                 self.assertEqual(client_environment["TMPDIR"], temporary)
 
+    @unittest.skipIf(os.name == "nt", "symlink fixture requires POSIX link privileges")
     def test_execution_collection_rejection_is_recorded_without_admitting_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1383,6 +1402,8 @@ class: CommandLineTool
         private_snapshot = result.with_name(result.stem + ".attempt") / reference["storePath"]
         self.assertEqual(sha256_bytes(private_snapshot.read_bytes()), reference["sha256"])
 
+    @REQUIRES_RUNNER
+    @unittest.skipUnless(os.name == "posix", "runner process-group execution and cleanup require POSIX")
     def test_successful_attempt_creates_a_distinct_immutable_result_package(self):
         class CompletedProcess:
             pid = 101

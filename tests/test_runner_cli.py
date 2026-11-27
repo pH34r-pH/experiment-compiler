@@ -17,6 +17,8 @@ from experiment_compiler.core import PackageError, compile_package
 from experiment_compiler.runner import _defer_operator_signals
 from experiment_compiler.runner_cli import _operator_cancellation, main
 
+from fixture_requirements import REQUIRES_RUNNER
+
 ROOT = Path(__file__).resolve().parents[1]
 ARGS = ["run", "plan.zip", "--output", "result.zip", "--expected-sha256", "0" * 64,
         "--allow-workflow-execution"]
@@ -275,6 +277,7 @@ class ReceiptSignalDeferralTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "posix", "runner process-group cancellation requires POSIX")
+@REQUIRES_RUNNER
 class NativeRunnerCancellationTests(unittest.TestCase):
     def test_native_attempt_retains_sigterm_and_mixed_signal_cancellation(self):
         for first, repeats in ((signal.SIGTERM, ()),

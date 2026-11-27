@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import yaml
+from fixture_requirements import REQUIRES_RUNNER
 
 from experiment_compiler.actions_projection import project_actions
 from experiment_compiler.core import PackageError, canonical, compile_package
@@ -18,8 +18,11 @@ CAPABILITIES = ("foregroundExclusion", "processTreeCleanup", "resourceEnforcemen
                 "startedTerminalRetention", "lossRecovery")
 
 
+@REQUIRES_RUNNER
 class ActionsProjectionTests(unittest.TestCase):
     def setUp(self):
+        import yaml
+
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -120,6 +123,8 @@ class ActionsProjectionTests(unittest.TestCase):
         closure_path.write_text(json.dumps(closure))
         self.workflow["inputs"]["model"] = {"type": "File"}
         job_path = self.source / "source/job.yml"
+        import yaml
+
         job = yaml.safe_load(job_path.read_text())
         job["model"] = {"class": "File", "path": "models/fixture.gguf"}
         job_path.write_text(json.dumps(job))

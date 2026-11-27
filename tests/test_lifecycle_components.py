@@ -9,7 +9,7 @@ from pathlib import Path
 
 import test_protocol_coverage
 import test_revision
-import yaml
+from fixture_requirements import REQUIRES_RUNNER
 
 from experiment_compiler.core import PackageError, compile_package
 from experiment_compiler.lifecycle_components import component_command
@@ -24,6 +24,8 @@ class LifecycleComponentTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
 
     def run_component(self, stage, parameters, *, check=True, cwd=None):
+        if os.name != "posix":
+            self.skipTest("GitHub lifecycle command handoff uses POSIX exec")
         return subprocess.run([sys.executable, str(ROOT / "scripts/lifecycle_component.py"), stage],
             env={**os.environ, "COMPONENT_PARAMETERS": json.dumps(parameters)},
             capture_output=True, check=check, timeout=30, cwd=cwd)
@@ -77,7 +79,10 @@ class LifecycleComponentTests(unittest.TestCase):
         self.assertEqual(result["parentPackageSha256"], parameters["expected-sha256"])
         self.assertTrue(attempt.is_file())
 
+    @REQUIRES_RUNNER
     def test_composite_inputs_are_environment_data_and_publication_gate_is_unchanged(self):
+        import yaml
+
         for stage in ("compile", "verify", "execute", "finalize", "publication"):
             action = yaml.safe_load((ROOT / ".github/actions" / stage / "action.yml").read_text())
             step = action["runs"]["steps"][0]
