@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Protected lifecycle operation
+        type: choice
+        default: pages
+        options: [pages, alpha-provenance]
 
 permissions:
   contents: read
@@ -16,6 +22,7 @@ concurrency:
 jobs:
   runner-smoke:
     name: Run the reviewed lifecycle fixture in a bounded worker
+    if: inputs.operation != 'alpha-provenance'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -139,10 +146,20 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 7
-
-
+      - name: Check alpha assets for signing
+        if: inputs.operation == 'alpha-provenance' && matrix.python == '3.12'
+        run: python scripts/stage_alpha_release_assets.py --input dist --output "$RUNNER_TEMP/alpha-assets"
+      - name: Retain exact alpha inputs for the signing job
+        if: inputs.operation == 'alpha-provenance' && matrix.python == '3.12'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: alpha-release-inputs-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/alpha-assets/
+          if-no-files-found: error
+          retention-days: 7
 
   mutation-pilot:
+    if: inputs.operation != 'alpha-provenance'
     name: Mutation pilot with standard report
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -193,6 +210,7 @@ jobs:
           retention-days: 7
 
   standards-validation:
+    if: inputs.operation != 'alpha-provenance'
     name: Validate Croissant and RO-Crate metadata
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -223,6 +241,7 @@ jobs:
 
 
   site-preview:
+    if: inputs.operation != 'alpha-provenance'
     name: Build derived public site
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -257,7 +276,7 @@ jobs:
   pages:
     name: Deploy GitHub Pages
     needs: [build, standards-validation, site-preview]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'pages'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -304,3 +323,61 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+  alpha-provenance:
+    name: Sign and verify alpha release candidates
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.operation == 'alpha-provenance' &&
+      github.repository == 'pH34r-pH/experiment-compiler' && github.ref == 'refs/heads/main' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: alpha-release-inputs-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/alpha-inputs
+          digest-mismatch: error
+      - name: Verify only the reviewed release asset set
+        run: python scripts/stage_alpha_release_assets.py --input "$RUNNER_TEMP/alpha-inputs" --output "$RUNNER_TEMP/alpha-release/assets"
+      - name: Attest same-run alpha build subjects
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/alpha-release/assets/*
+      - name: Verify every signature against the exact producer
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/alpha-release"
+          mkdir "$root/verification"
+          for asset in "$root"/assets/*; do
+            gh attestation verify "$asset" --bundle "$BUNDLE_PATH" --repo "$GITHUB_REPOSITORY" \
+              --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/lifecycle.yml" \
+              --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --hostname github.com \
+              --predicate-type https://slsa.dev/provenance/v1 --format json \
+              > "$root/verification/$(basename "$asset").json"
+          done
+          cp -- "$BUNDLE_PATH" "$root/verification/attestation.jsonl"
+          (cd "$root/assets" && sha256sum -- *) > "$root/asset-sha256.txt"
+      - name: Retain verified alpha candidate and signatures
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: verified-alpha-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/alpha-release/
+          if-no-files-found: error
+          retention-days: 7

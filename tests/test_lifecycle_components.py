@@ -91,9 +91,35 @@ class LifecycleComponentTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / ".github/workflows/lifecycle.yml").read_text())
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         pages = workflow["jobs"]["pages"]
-        self.assertEqual(pages["if"], "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'")
+        self.assertEqual(pages["if"], "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' "
+                         "&& inputs.operation == 'pages'")
         self.assertEqual(pages["environment"]["name"], "github-pages")
         self.assertEqual(pages["permissions"]["attestations"], "write")
+
+    @REQUIRES_RUNNER
+    def test_alpha_signing_uses_only_an_owner_dispatch_and_a_same_attempt_build(self):
+        import yaml
+
+        workflow = yaml.load((ROOT / ".github/workflows/lifecycle.yml").read_text(), Loader=yaml.BaseLoader)
+        operation = workflow["on"]["workflow_dispatch"]["inputs"]["operation"]
+        self.assertEqual(operation["default"], "pages")
+        self.assertEqual(operation["options"], ["pages", "alpha-provenance"])
+        build = workflow["jobs"]["build"]
+        self.assertNotIn("permissions", build)
+        signing = workflow["jobs"]["alpha-provenance"]
+        for guard in ("github.event_name == 'workflow_dispatch'", "inputs.operation == 'alpha-provenance'",
+                      "github.repository == 'pH34r-pH/experiment-compiler'", "github.ref == 'refs/heads/main'",
+                      "github.actor == github.repository_owner", "github.triggering_actor == github.repository_owner"):
+            self.assertIn(guard, signing["if"])
+        self.assertEqual(signing["needs"], "build")
+        self.assertEqual(signing["permissions"], {"contents": "read", "id-token": "write", "attestations": "write"})
+        producer = next(step for step in build["steps"] if step.get("name") == "Retain exact alpha inputs for the signing job")
+        reader = next(step for step in signing["steps"] if step.get("uses", "").startswith("actions/download-artifact@"))
+        self.assertEqual(reader["with"]["name"], "alpha-release-inputs-${{ github.sha }}-${{ github.run_attempt }}")
+        self.assertEqual(reader["with"]["name"], producer["with"]["name"])
+        self.assertEqual(reader["with"]["digest-mismatch"], "error")
+        self.assertEqual(set(reader["with"]), {"name", "path", "digest-mismatch"})
+        self.assertEqual(producer["if"], "inputs.operation == 'alpha-provenance' && matrix.python == '3.12'")
 
     def test_finalization_component_retains_amended_coverage(self):
         from experiment_compiler.core import sha256_file
