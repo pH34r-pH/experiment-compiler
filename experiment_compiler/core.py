@@ -31,6 +31,12 @@ FAMILY_URL_PREFIX = "https://experiments.tyharbin.com/#family-"
 FAMILY_ID = re.compile(re.escape(FAMILY_URL_PREFIX) + r"[a-z0-9]+(?:-[a-z0-9]+)*")
 EPOCH = (1980, 1, 1, 0, 0, 0)
 _LFS_POINTER_MAX_BYTES = 1024
+_LFS_VERSION_LINES = {
+    b"version https://git-lfs.github.com/spec/v1",
+    b"version https://hawser.github.com/spec/v1",
+    b"version http://git-media.io/v/2",
+}
+_LFS_EXTENSION_LINE = re.compile(rb"ext-[0-9]-[A-Za-z0-9_][A-Za-z0-9_.-]* sha256:[0-9a-f]{64}")
 _UNSAFE_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 _WINDOWS_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
     prefix + digit for prefix in ("COM", "LPT") for digit in "123456789¹²³"
@@ -249,12 +255,13 @@ def _source(root: Path, relative: str) -> Path:
 
 def _is_git_lfs_pointer(data: bytes | bytearray) -> bool:
     """Identify a Git LFS pointer so its small text is never mistaken for payload bytes."""
-    if not data.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
-        return False
     lines = data.splitlines()
-    return (len(lines) == 3 and lines[1].startswith(b"oid sha256:") and
-            len(lines[1]) == len(b"oid sha256:") + 64 and
-            lines[2].startswith(b"size ") and lines[2][5:].isdigit())
+    if len(lines) < 3 or bytes(lines[0]) not in _LFS_VERSION_LINES:
+        return False
+    oid, size = lines[-2:]
+    return (oid.startswith(b"oid sha256:") and len(oid) == len(b"oid sha256:") + 64 and
+            size.startswith(b"size ") and size[5:].isdigit() and
+            all(_LFS_EXTENSION_LINE.fullmatch(line) for line in lines[1:-2]))
 
 
 def write_once(path: Path, data: bytes) -> None:

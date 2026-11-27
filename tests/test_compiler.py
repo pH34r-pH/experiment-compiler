@@ -32,6 +32,15 @@ EXAMPLE = ROOT / "examples/issue-164"
 SELF_CONTAINED = ROOT / "examples/linear-regression-v1"
 EXPECTED = "45ab246ccfd4ca636e1ad50e8edf068125a111b46b6bcb2b86ac1d811f523341"
 GIT_LFS_POINTER = b"version https://git-lfs.github.com/spec/v1\noid sha256:" + b"a" * 64 + b"\nsize 4096\n"
+SYNTHETIC_MANIFEST = {
+    "schemaVersion": 1,
+    "packageType": "compiled-experiment",
+    "profile": "compiled-experiment-v1",
+    "status": "reproducible",
+    "source": {"repository": "synthetic-package-fixture", "commit": "1" * 40},
+    "standards": {},
+    "evidence": {},
+}
 COMPILE_WITH_ENVIRONMENT_PROBE = """
 import json
 import locale
@@ -65,6 +74,35 @@ from experiment_compiler.__main__ import main
 
 raise SystemExit(main(["compile", *sys.argv[1:]]))
 """
+
+
+def _fixture_inventory(members: list[tuple[str, bytes]]) -> list[dict]:
+    return [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+            for name, data in members]
+
+
+def _fixture_recipe(name: str, data: bytes) -> str:
+    row, = _fixture_inventory([(name, data)])
+    return json.dumps({
+        "buildRecipeVersion": 1, "id": "fixture", "title": "Synthetic fixture",
+        "profile": "compiled-experiment-v1", "manifest": SYNTHETIC_MANIFEST,
+        "members": [{**row, "source": name}],
+    })
+
+
+def _fixture_archive(members: list[tuple[str, bytes]], manifest: bytes | None = None) -> bytes:
+    """Serialize a test archive directly, independently of the Compiler."""
+    if manifest is None:
+        manifest = json.dumps({**SYNTHETIC_MANIFEST, "members": _fixture_inventory(members)}).encode()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(MANIFEST, manifest)
+        for name, data in members:
+            info = zipfile.ZipInfo(name)
+            # Preserve the declared name even when ZipInfo translates Windows separators.
+            info.filename = name
+            archive.writestr(info, data)
+    return buffer.getvalue()
 
 
 class CompilerTests(unittest.TestCase):
@@ -159,6 +197,34 @@ class CompilerTests(unittest.TestCase):
                 with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
                     _verify_members(reader, {info.filename: info}, [item], set())
                 read.assert_called_once_with(reader, info, capture=True)
+
+    def test_both_entrypoints_require_lfs_payloads(self):
+        notes = b"sample notes\n"
+        payload = self.root / "notes.txt"
+        recipe_path = self.root / "fixture.json"
+        archive_path = self.root / "independent.zip"
+        pointers = (
+            GIT_LFS_POINTER,
+            GIT_LFS_POINTER.replace(b"git-lfs.github.com", b"hawser.github.com").replace(b"\n", b"\r\n"),
+            GIT_LFS_POINTER.replace(b"https://git-lfs.github.com/spec/v1", b"http://git-media.io/v/2"),
+            GIT_LFS_POINTER.replace(b"\noid ", b"\next-0-fixture sha256:" + b"b" * 64 + b"\noid "),
+        )
+        for data in (notes, *pointers):
+            with self.subTest(pointer=data != notes), offline_operations():
+                archive_path.write_bytes(_fixture_archive([("notes.txt", data)]))
+                payload.write_bytes(data)
+                recipe_path.write_text(_fixture_recipe("notes.txt", data), encoding="utf-8")
+                output = self.root / ("positive.zip" if data == notes else "missing-payload.zip")
+                if data == notes:
+                    self.assertEqual(verify_package(archive_path)["status"], "integrity-verified")
+                    compile_package(recipe_path, output)
+                    self.assertEqual(verify_package(output)["status"], "integrity-verified")
+                else:
+                    with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
+                        verify_package(archive_path)
+                    with self.assertRaisesRegex(PackageError, "Git LFS pointer is not the referenced payload"):
+                        compile_package(recipe_path, output)
+                    self.assertFalse(output.exists())
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -879,6 +945,19 @@ class CompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "File/directory path collision"):
             unique_paths(["Café", "cafe\u0301/notes.txt"])
 
+    def test_verifier_checks_names_from_an_independently_written_archive(self):
+        for names, error in (
+            (["Notes.txt", "notes.txt"], "case-colliding path"),
+            (["Café.txt", "Cafe\u0301.txt"], "canonical equivalents"),
+            (["Café", "Cafe\u0301/notes.txt"], "File/directory path collision"),
+            (["notes\\sample.txt"], "Unsafe or noncanonical relative path"),
+            (["notes/sam\tple.txt"], "Unsafe or noncanonical relative path"),
+        ):
+            with self.subTest(names=names):
+                members = [(name, b"synthetic text") for name in names]
+                with self.assertRaisesRegex(PackageError, error):
+                    verify_bytes(_fixture_archive(members))
+
     def test_assembly_rejects_ambiguous_paths_before_creating_its_source_tree(self):
         source = self.root / "retained"
         self.output.write_bytes(b"keep original")
@@ -924,6 +1003,71 @@ class CompilerTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(PackageError):
                 json_value(raw)
         self.assertEqual(json_value(b'{"a":[-1.25e2,1e20]}'), {"a": [-125.0, 1e20]})
+
+    def test_embedded_json_has_the_same_validation_in_compile_and_verify(self):
+        payload = self.root / "notes.json"
+        recipe_path = self.root / "fixture.json"
+        for data, error in (
+            (b'{"items":[1,2,]}', "Invalid JSON"),
+            (b'{"note":{"text":"first","text":"second"}}', "Duplicate JSON key"),
+            (b'{"count":1e999}', "Non-finite JSON number"),
+            (b'"notes"', "JSON members must have an object or array root"),
+        ):
+            with self.subTest(data=data), offline_operations():
+                with self.assertRaisesRegex(PackageError, error):
+                    verify_bytes(_fixture_archive([("notes.json", data)]))
+                payload.write_bytes(data)
+                recipe_path.write_text(_fixture_recipe("notes.json", data), encoding="utf-8")
+                with self.assertRaisesRegex(PackageError, error):
+                    compile_package(recipe_path, self.output)
+                self.assertFalse(self.output.exists())
+
+    def test_verifier_distinguishes_integer_types_size_and_hash_checks(self):
+        members = [("notes.txt", b"synthetic text")]
+        row, = _fixture_inventory(members)
+        for table, error in (
+            (["notes.txt"], "Malformed manifest member"),
+            ([{**row, "size": True}], "Malformed manifest member"),
+            ([{**row, "size": row["size"] + 1}], "Member size mismatch"),
+            ([{**row, "sha256": "0" * 64}], "Member integrity mismatch"),
+        ):
+            with self.subTest(error=error):
+                manifest = json.dumps({**SYNTHETIC_MANIFEST, "members": table}).encode()
+                with self.assertRaisesRegex(PackageError, error):
+                    verify_bytes(_fixture_archive(members, manifest))
+        with self.assertRaisesRegex(PackageError, "Missing manifest member inventory"):
+            verify_bytes(_fixture_archive(members, b"[]"))
+
+    def test_cli_refusals_leave_outputs_receipts_and_other_files_unchanged(self):
+        keep = b"existing bytes"
+        output_dir = self.root / "outputs"
+        output_dir.mkdir()
+        target = output_dir / "retained.zip"
+        target.write_bytes(keep)
+        receipt = output_dir / "retained.json"
+        receipt.write_bytes(keep)
+        outside = self.root / "unrelated.txt"
+        outside.write_bytes(b"unrelated file")
+        invalid = self.root / "placeholder.zip"
+        invalid.write_bytes(_fixture_archive([("notes.txt", GIT_LFS_POINTER)]))
+        recipe = self.recipe()
+        recipe["members"][0]["size"] = True
+        self.save(recipe)
+        for command, error in (
+            (["compile", str(self.recipe_path), "--output", str(target)], "Recipe member must pin"),
+            (["verify", str(invalid)], "Git LFS pointer is not the referenced payload"),
+        ):
+            with self.subTest(command=command[0]):
+                args = [sys.executable, "-m", "experiment_compiler", *command, "--receipt", str(receipt)]
+                result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(error, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(set(output_dir.iterdir()), {target, receipt})
+        self.assertEqual(target.read_bytes(), keep)
+        self.assertEqual(receipt.read_bytes(), keep)
+        self.assertEqual(outside.read_bytes(), b"unrelated file")
 
     def test_bad_expected_digest_fails_without_writing(self):
         recipe = self.recipe()

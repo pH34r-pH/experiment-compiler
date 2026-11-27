@@ -12,6 +12,9 @@ Compilation checks hashes before packaging, preserves raw input bytes, sorts arc
 
 Verification checks the exact member inventory, digests, sizes and JSON syntax. It rejects duplicate keys, non-finite decoded numbers, unsafe paths, symlinks, encrypted ZIPs, special files, and missing or unlisted members. Compile and verify both reject embedded Git LFS placeholders. Experiment Compiler imposes no format-level member-count, per-file, or total-byte ceiling: those limits are not part of RO-Crate, CWL, ACM artifact evaluation, or the Compiled Experiment scientific contract. Package verification hashes members incrementally from disk. Repository/venue quotas are enforced only by the publication adapter or destination that actually has them. The verifier never extracts files or runs packaged code. Local source directories must not be concurrently modified by an adversary (this is not an operating-system sandbox).
 
+The small [Git LFS pointer format](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md#the-pointer)
+check includes recognized legacy version headers and extension records.
+
 Source and archive paths use portable relative names. The same inventory check
 runs before lifecycle staging and during ZIP verification. It compares
 canonically equivalent Unicode names without case distinctions and rejects
