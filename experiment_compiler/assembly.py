@@ -4,13 +4,13 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .core import PackageError, canonical, compile_package, safe_path, sha256, write_once
+from .core import _publish_file_once, canonical, compile_package, safe_path, sha256
 
 
 def compile_source_closure(temporary: Path, output: Path, source_directory: Path,
                            files: dict[str, bytes], recipe: dict,
                            package_name: str) -> dict:
-    """Compile files plus a source-owned recipe, then expose both atomically."""
+    """Compile a source closure and publish it with a new, exclusive package."""
     stage = temporary / "source"
     stage.mkdir()
     members = []
@@ -41,13 +41,11 @@ def compile_source_closure(temporary: Path, output: Path, source_directory: Path
     }
     recipe_path.write_bytes(canonical(compiled_recipe))
 
-    shutil.copytree(stage, source_directory)
+    source_directory.mkdir(parents=True)
     try:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with temporary_package.open("rb") as source, output.open("xb") as destination:
-            shutil.copyfileobj(source, destination, length=1024 * 1024)
-    except (OSError, PackageError):
-        output.unlink(missing_ok=True)
+        shutil.copytree(stage, source_directory, dirs_exist_ok=True)
+        _publish_file_once(temporary_package, output, reuse_identical=False)
+    except BaseException:
         shutil.rmtree(source_directory, ignore_errors=True)
         raise
     return result

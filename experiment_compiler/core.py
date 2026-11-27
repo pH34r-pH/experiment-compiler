@@ -334,11 +334,11 @@ def _files_equal(left: Path, right: Path) -> bool:
                 return True
 
 
-def _publish_file_once(source: Path, output: Path) -> None:
+def _publish_file_once(source: Path, output: Path, *, reuse_identical: bool = True) -> None:
     """Publish a completed package without overwriting different existing bytes."""
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() or output.is_symlink():
-        if output.is_file() and not output.is_symlink() and _files_equal(source, output):
+        if reuse_identical and output.is_file() and not output.is_symlink() and _files_equal(source, output):
             return
         raise PackageError(f"Output already exists with different bytes: {output}")
     created = False
@@ -670,20 +670,22 @@ def _verify_members(reader: ArchiveMemberReader, by_name: dict[str, zipfile.ZipI
     return documents
 
 
-def _check_package_pins(package_sha256: str, package_size: int,
-                        expected_sha256: str | None, recipe: dict | None) -> bool:
+def _verification_basis(package_sha256: str, package_size: int,
+                        expected_sha256: str | None, recipe: dict | None) -> str:
     if expected_sha256 is not None and (not _digest(expected_sha256) or package_sha256 != expected_sha256):
         raise PackageError("Package SHA-256 mismatch")
     expected = recipe.get("expectedPackage") if recipe else None
     if expected and (package_sha256, package_size) != (expected["sha256"], expected["size"]):
         raise PackageError("Package differs from recipe compatibility target")
-    return bool(expected or expected_sha256)
+    if expected or expected_sha256:
+        return "complete-package-sha256"
+    return "reviewed-recipe" if recipe else "internal-consistency"
 
 
 def _verify_archive(archive: zipfile.ZipFile, *, package_sha256: str, package_size: int,
                     expected_sha256: str | None = None, recipe: dict | None = None,
                     policy: PackageReadPolicy | None = None) -> dict:
-    matched_package = _check_package_pins(package_sha256, package_size, expected_sha256, recipe)
+    basis = _verification_basis(package_sha256, package_size, expected_sha256, recipe)
     reader = ArchiveMemberReader(archive, policy)
     infos = archive.infolist()
     _validate_zip_inventory(infos)
@@ -721,7 +723,9 @@ def _verify_archive(archive: zipfile.ZipFile, *, package_sha256: str, package_si
         "memberCount": len(infos),
         "manifestSha256": manifest_digest,
         "source": manifest["source"],
-        "matchedExpectedPackage": matched_package,
+        "verificationBasis": basis,
+        "matchedReviewedRecipe": bool(recipe),
+        "matchedExpectedPackage": basis == "complete-package-sha256",
         **({"lifecycle": lifecycle_projection} if lifecycle_projection is not None else {}),
         **({"repositoryAgent": agent_projection} if agent_projection is not None else {}),
     }

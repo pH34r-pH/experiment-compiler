@@ -12,7 +12,15 @@ Compilation checks hashes before packaging, preserves raw input bytes, sorts arc
 
 Verification checks the exact member inventory, digests, sizes and JSON syntax. It rejects duplicate keys, duplicate/case-colliding/unsafe paths, symlinks, encrypted ZIPs, special files, and missing/unlisted members. Experiment Compiler imposes no format-level member-count, per-file, or total-byte ceiling: those limits are not part of RO-Crate, CWL, ACM artifact evaluation, or the Compiled Experiment scientific contract. Package verification hashes members incrementally from disk. Repository/venue quotas are enforced only by the publication adapter or destination that actually has them. The verifier never extracts files or runs packaged code. Local source directories must not be concurrently modified by an adversary (this is not an operating-system sandbox).
 
-`verify --recipe ...` also compares the manifest with the reviewed recipe. `verify --expected-sha256 ...` checks an external complete-package checksum. Without either external pin, success means self-consistency only: an attacker could change both content and its hashes. Hashes do not establish authorship or scientific validity. Receipts always state `scope: package-integrity-only` and `scientificReproduction: not-run`.
+Verification results and JSON receipts report their strongest check in `verificationBasis`.
+
+| Basis | Evidence checked |
+| --- | --- |
+| `internal-consistency` | ZIP members match the inventory and hashes declared inside the ZIP. |
+| `reviewed-recipe` | The manifest and member inventory also match the supplied `--recipe`. |
+| `complete-package-sha256` | The entire ZIP matches `--expected-sha256` or the recipe's `expectedPackage` hash. A recipe pin also checks the ZIP size. |
+
+`matchedReviewedRecipe` and `matchedExpectedPackage` show which checks ran when both references are supplied. A recipe without `expectedPackage` can establish the manifest and member identities while allowing different ZIP encodings. Each receipt retains `scope: package-integrity-only` and `scientificReproduction: not-run`. Authorship, execution authorization, scientific acceptance, and publication each require their own evidence.
 
 Operators can pass `--max-member-bytes`, `--max-total-bytes`, `--max-members`,
 and `--max-compression-ratio` to `experiment-compiler verify` or
