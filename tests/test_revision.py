@@ -14,6 +14,7 @@ from experiment_compiler.catalog import describe_catalog
 from experiment_compiler.finalization import finalize_package
 from experiment_compiler.revision import _read_parent_attempt, revise_package
 from experiment_compiler.runner import run_package
+from fixture_requirements import HAS_RUNNER
 from runner_fixture_helpers import prepare_container_journal, synthetic_worker_observation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,8 @@ class RevisionTests(unittest.TestCase):
 
     def _attempt(self, directory: Path, recipe_path: Path | None = None,
                  fixture_result: str = '{"fixture":"result"}\n') -> tuple[Path, str, bytes, str]:
+        if not HAS_RUNNER or os.name != "posix":
+            self.skipTest("attempt fixture requires the runner extra and POSIX process control")
         plan = directory / "plan.zip"
         built = compile_package(recipe_path or ROOT / "examples/linear-regression-plan-v1/experiment.json", plan)
         plan_bytes = plan.read_bytes()

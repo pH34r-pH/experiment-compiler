@@ -166,9 +166,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="run existing compile and verify commands using a temporary package")
     args = parser.parse_args(argv)
     recipe_path = args.recipe.resolve()
+    supported_python = sys.version_info >= (3, 11, 4)
     report: dict = {
         "status": "blocked",
-        "environment": {"python": sys.version.split()[0], "supportedPython": sys.version_info >= (3, 11),
+        "environment": {"python": sys.version.split()[0], "supportedPython": supported_python,
                         "compilerDistribution": None},
         "findings": [],
         "compilerCheck": {"status": "not_run", "reason": "pass --compiler-check to build and verify in a temporary directory"},
@@ -177,8 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         report["environment"]["compilerDistribution"] = importlib.metadata.version("experiment-compiler")
     except importlib.metadata.PackageNotFoundError:
         report["environment"]["compilerDistribution"] = "source checkout or module-only installation"
-    if sys.version_info < (3, 11):
-        report["findings"].append({"severity": "error", "message": "Python 3.11 or newer is required."})
+    if not supported_python:
+        report["findings"].append({"severity": "error", "message": "Python 3.11.4 or newer is required."})
     if load_recipe is None:
         report["findings"].append({"severity": "error", "message": f"Experiment Compiler is unavailable: {IMPORT_ERROR}"})
     else:

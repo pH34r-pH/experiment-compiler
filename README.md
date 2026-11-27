@@ -13,7 +13,9 @@ It does **not** define the science, fill in a missing method, infer a conclusion
 
 ## Quick start
 
-Python 3.11+ is sufficient for the core compiler/verifier.
+Use Python 3.11.4 or later. Clean source reconstruction uses the standard library's
+filtered tar extraction, introduced in 3.11.4. Use a maintained patch release for normal work.
+The core compiler and verifier use only the standard library.
 
 ```sh
 python -m experiment_compiler compile examples/linear-regression-v1/experiment.json
@@ -21,9 +23,20 @@ python -m experiment_compiler compile examples/linear-regression-v1/experiment.j
 python -m experiment_compiler verify \
   dist/stdlib-linear-regression-v1-compiled-experiment.zip \
   --recipe examples/linear-regression-v1/experiment.json
+```
 
+From a Git checkout, run `python -m unittest discover -s tests -v` to test the
+core. Tests for optional dependencies and unavailable platform capabilities report skips.
+To run the full suite used in lifecycle CI, use Linux and install the test prerequisites
+in a virtual environment.
+
+```sh
+python -m pip install '.[runner,trajectory]'
 python -m unittest discover -s tests -v
 ```
+
+The `runner` extra provides PyYAML. The `trajectory` extra provides the pinned
+Long-Haul verifier and includes the JSON Schema dependency used by repository profiles.
 
 The self-contained linear-regression fixture embeds the implementation, tests, synthetic data, environment/configuration, protocol, acceptance criteria, reference result, resource evidence, Croissant metadata, and RO-Crate / Process Run Crate provenance.
 

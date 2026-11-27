@@ -3,10 +3,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import unittest
 from unittest.mock import patch
 
 import test_actions_projection as fixtures
+from fixture_requirements import REQUIRES_RUNNER
 from experiment_compiler.core import PackageError
 from experiment_compiler.native_controller import run_native_controller
 
@@ -57,6 +59,7 @@ class FixtureAuthority:
                 "collectionErrors": [], "resourceMeasurements": {"peakProcessMemoryBytes": None, "cpuSeconds": None}}
 
 
+@REQUIRES_RUNNER
 class NativeControllerTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.ActionsProjectionTests()
@@ -76,6 +79,7 @@ class NativeControllerTests(unittest.TestCase):
                                                 "runtimeSha256": "c" * 64, "attemptId": "d" * 12,
                                                 "controller": self.controller}, authority=self.authority)
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_admit_retain_started_execute_retain_terminal_release_order(self):
         with patch("subprocess.Popen", side_effect=AssertionError("no process")), \
                 patch("socket.socket", side_effect=AssertionError("no network")):
@@ -89,6 +93,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertEqual(started["sourceRepository"], "pH34r-pH/experiment-compiler")
         self.assertIn("not established", result["packageOutcome"])
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_attempt_directory_reuse_cannot_execute_twice(self):
         self.run_fixture()
         with self.assertRaises(FileExistsError):
@@ -96,6 +101,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertEqual(self.authority.events.count("execute"), 1)
         self.assertEqual(len(self.authority.retained), 2)
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_request_bytes_survive_replacement_of_original_files(self):
         def replace_sources(request):
             (self.fixture.root / "plan.zip").write_bytes(b"replaced package")
@@ -143,6 +149,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertNotIn("execute", self.authority.events)
 
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_started_retention_ack_is_required_before_execution(self):
         self.authority.bad_ack = True
         with self.assertRaises(PackageError):
@@ -151,6 +158,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertFalse((self.attempt / "terminal-receipt.json").exists())
         self.assertNotIn("execute", self.authority.events)
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_worker_loss_preserves_started_without_fabricated_terminal(self):
         self.authority.failure = "execute"
         with self.assertRaises(OSError):
@@ -159,6 +167,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertFalse((self.attempt / "terminal-receipt.json").exists())
         self.assertEqual(self.authority.events[-1], "release")
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_malformed_observation_preserves_started(self):
         self.authority.outcome = "unknown"
         with self.assertRaises(PackageError):
@@ -166,6 +175,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertFalse((self.attempt / "terminal-receipt.json").exists())
         self.assertEqual(len(self.authority.retained), 1)
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_terminal_transport_loss_preserves_observed_terminal(self):
         self.authority.failure = "retain-succeeded"
         with self.assertRaises(OSError):
@@ -173,6 +183,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertEqual(json.loads((self.attempt / "terminal-receipt.json").read_bytes())["status"], "succeeded")
         self.assertEqual(len(self.authority.retained), 1)
 
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
     def test_failure_timeout_and_cancel_remain_distinct(self):
         for status in ("failed", "timed-out", "cancelled"):
             self.authority.outcome = status

@@ -4,7 +4,7 @@ Use the packaged skills to prepare a research package with a local coding agent 
 
 ## A first clean install and compile
 
-Python 3.11 or newer is required. The compiler core has no runtime dependencies; package installation uses the project's Python build backend, which standard `pip` may need to fetch on a new machine.
+Python 3.11.4 or newer is required for filtered tar extraction during clean source reconstruction. Use a maintained patch release. The compiler core uses the standard library. Package installation uses the project's Python build backend, which `pip` may fetch on a new machine.
 
 ```sh
 git clone https://github.com/pH34r-pH/experiment-compiler.git

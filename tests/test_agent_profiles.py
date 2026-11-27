@@ -33,6 +33,7 @@ def trajectory_reference(fingerprint, digest):
             "qualification": BOUND_QUALIFICATION}
 
 
+@unittest.skipUnless(importlib.util.find_spec("jsonschema"), "install the repository extra for profile tests")
 class RepositoryAgentProfileTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
