@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--site", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--verbose", action="store_true", help="report bounded verification diagnostics on stderr")
     args = parser.parse_args()
     repository = os.environ["GITHUB_REPOSITORY"]
     for _, package, digest in publication_candidates(args.site):
@@ -31,8 +32,17 @@ def main():
         parameters = {"package": str(package), "expected-sha256": digest, "repository": repository,
             "source-commit": args.source_commit, "signer-workflow": repository + "/.github/workflows/lifecycle.yml",
             "output": str(args.output / (digest + ".attestation.json"))}
-        subprocess.run([sys.executable, str(ROOT / "scripts/lifecycle_component.py"), "publication"],
-                       env={**os.environ, "COMPONENT_PARAMETERS": json.dumps(parameters)}, check=True)
+        command = [sys.executable, str(ROOT / "scripts/lifecycle_component.py"), "publication"]
+        if args.verbose:
+            command.append("--verbose")
+        try:
+            subprocess.run(command,
+                           env={**os.environ, "COMPONENT_PARAMETERS": json.dumps(parameters)}, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            if not args.verbose:
+                raise
+            print("Publication attestation command failed.", file=sys.stderr)
+            return 1
     return 0
 
 

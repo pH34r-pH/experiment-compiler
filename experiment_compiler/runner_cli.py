@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .archive_policy_cli import add_archive_policy_options, archive_policy_from_args
 from .core import PackageError, canonical
+from .diagnostics import cli_diagnostics
 from .runner import recover_attempt, run_package
 
 
@@ -65,9 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     recover = commands.add_parser("recover", help="reconcile retained container evidence after an interrupted attempt")
     recover.add_argument("attempt_directory", type=Path,
                          help="existing .attempt directory; recovery never re-executes the workflow")
+    for command in (run, recover):
+        command.add_argument("--verbose", action="store_true", help="report bounded failure diagnostics on stderr")
     args = parser.parse_args(argv)
     try:
-        with _operator_cancellation():
+        with cli_diagnostics(args.verbose), _operator_cancellation():
             if args.command == "recover":
                 result = recover_attempt(args.attempt_directory)
             else:
@@ -79,10 +82,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.get("containerCleanup", {}).get("state") in {"clean", "not-started"} else 2
         return 0 if result["executionStatus"] == "succeeded" else 2
     except KeyboardInterrupt as exc:
-        print(f"experiment-runner: {exc or 'Operator cancellation requested'}", file=sys.stderr)
+        message = "Operator cancellation requested" if args.verbose else exc or "Operator cancellation requested"
+        print(f"experiment-runner: {message}", file=sys.stderr)
         return 128 + getattr(exc, "signal_number", signal.SIGINT)
     except (PackageError, OSError) as exc:
-        print(f"experiment-runner: {exc}", file=sys.stderr)
+        message = "Command failed. Inspect retained attempt evidence when available." if args.verbose else exc
+        print(f"experiment-runner: {message}", file=sys.stderr)
         return 1
 
 

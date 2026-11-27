@@ -124,11 +124,21 @@ class CleanRebuildTests(unittest.TestCase):
             self.assertNotIn("GH_DEBUG", actual)
             self.assertNotEqual(actual["HOME"], str(poisoned))
             self.assertEqual(list(Path(actual["GH_CONFIG_DIR"]).iterdir()), [])
-            raise subprocess.CalledProcessError(1, command)
+            raise subprocess.CalledProcessError(1, command, stderr=b"fixture-job-token /private/verifier")
 
         with patch.dict(os.environ, environment), patch("experiment_compiler.attestation.GH_EXECUTABLE", verifier), \
                 patch("experiment_compiler.attestation.subprocess.run", side_effect=reject), \
-                self.assertRaises(PackageError):
+                self.assertRaises(PackageError) as wrapped, self.assertLogs(
+                    "experiment_compiler.attestation", level="WARNING"
+                ) as diagnostics:
             verify_attestation(self.package, self.digest, repository="pH34r-pH/experiment-compiler",
                 source_commit=self.commit, signer_workflow="pH34r-pH/experiment-compiler/.github/workflows/lifecycle.yml",
                 output=self.root / "rejected.json")
+        self.assertIsInstance(wrapped.exception.__cause__, subprocess.CalledProcessError)
+        self.assertEqual(len(diagnostics.output), 1)
+        rendered = diagnostics.output[0]
+        self.assertIn("phase=native-verifier attempt_id=unavailable package_sha256=" + self.digest, rendered)
+        self.assertIn("exception=CalledProcessError", rendered)
+        self.assertNotIn("fixture-job-token", rendered)
+        self.assertNotIn("/private/verifier", rendered)
+        self.assertNotIn(str(self.package), rendered)

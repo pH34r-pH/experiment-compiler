@@ -1,6 +1,7 @@
 """Use the maintained GitHub CLI for signature verification; no local crypto engine."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -15,6 +16,9 @@ from .core import (
     verify_package,
     write_once,
 )
+from .diagnostics import report_failure
+
+_LOGGER = logging.getLogger(__name__)
 
 GH_EXECUTABLE = Path("/usr/bin/gh")  # Ubuntu publication worker tool, never caller-controlled PATH.
 
@@ -61,6 +65,7 @@ def verify_attestation(package, expected_sha256, *, repository, source_commit, s
         if not isinstance(verified, list) or not verified:
             raise PackageError("GitHub CLI returned no verified attestations")
     except (OSError, subprocess.SubprocessError, PackageError) as exc:
+        report_failure(_LOGGER, "attestation", "native-verifier", digest=expected_sha256, error=exc)
         _failure_receipt(output, expected_sha256, source_commit, "native-verification-failed")
         raise PackageError("Signed provenance verification failed; no publication is authorized") from exc
     if sha256_file(Path(package)) != expected_sha256:

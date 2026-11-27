@@ -1,4 +1,5 @@
 """Native controller cancellation fixtures execute no packaged CWL or containers."""
+import io
 import json
 import os
 import signal
@@ -10,10 +11,11 @@ import threading
 import time
 import unittest
 import zipfile
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from experiment_compiler.core import PackageError, compile_package
+from experiment_compiler.core import PackageError, canonical, compile_package
 from experiment_compiler.runner import _defer_operator_signals
 from experiment_compiler.runner_cli import _operator_cancellation, main
 
@@ -114,6 +116,36 @@ RETENTION_CONTROLLER = textwrap.dedent("""\
 
 
 class RunnerSignalContextTests(unittest.TestCase):
+    def test_verbose_runner_rejection_is_safe_and_carries_available_identity(self):
+        stderr = io.StringIO()
+        stdout = io.StringIO()
+        with (tempfile.TemporaryDirectory() as temporary, redirect_stderr(stderr), redirect_stdout(stdout),
+              patch("experiment_compiler.runner._open_run_package",
+                    side_effect=OSError("fixture-secret at /private/fixture-plan")) as opened):
+            output = Path(temporary) / "result.zip"
+            args = ["run", "plan.zip", "--output", str(output), "--expected-sha256", "0" * 64,
+                    "--allow-workflow-execution", "--verbose"]
+            self.assertEqual(main(args), 1)
+            opened.assert_called_once()
+        rendered = stderr.getvalue()
+        self.assertIn("phase=admission attempt_id=unavailable", rendered)
+        self.assertIn("package_sha256=" + "0" * 64, rendered)
+        self.assertIn("exception=OSError", rendered)
+        self.assertNotIn("fixture-secret", rendered)
+        self.assertNotIn("/private/fixture-plan", rendered)
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_verbose_success_keeps_stdout_as_standalone_json(self):
+        stderr = io.StringIO()
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw)
+        receipt = {"executionStatus": "succeeded", "id": "fixture"}
+        with (redirect_stderr(stderr), redirect_stdout(stdout),
+              patch("experiment_compiler.runner_cli.run_package", return_value=receipt)):
+            self.assertEqual(main([*ARGS, "--verbose"]), 0)
+        self.assertEqual(raw.getvalue(), canonical(receipt))
+        self.assertEqual(stderr.getvalue(), "")
+
     def test_context_keeps_first_signal_and_restores_custom_handlers(self):
         originals = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
         def custom(number, frame):

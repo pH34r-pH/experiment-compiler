@@ -7,6 +7,15 @@ rule, checks, and interpretation. A completed execution can produce a failed
 scientific check. Missing reference bytes or mismatched samples/units can leave a
 source-authored comparison inconclusive even when the package verifies.
 
+## Controller diagnostics
+
+Pass `--verbose` to `experiment-runner run` or `experiment-runner recover` for
+failure diagnostics on stderr. Each record includes the operation, phase,
+available attempt ID and package digest, and the exception class if available.
+The publication attestation helper accepts the same flag for native verifier
+failures. Python callers can configure the `experiment_compiler` logger.
+Use the retained receipts for evidence and the CLI's standalone JSON for automation.
+
 ## Optional selected-attempt coverage record
 
 Finalization can carry a source-authored coverage record alongside the
