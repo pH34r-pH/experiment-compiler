@@ -25,7 +25,8 @@ from experiment_compiler.runner import (_CwlCommandRequest, _CwlExecutionRequest
                                         _admit_container_requirement, _persist_attempt_receipt,
                                         _dependency_closure, _worker_admission,
                                         _materialize, _open_run_package,
-                                        _write_container_journal, _journal_receipt_reference,
+                                        _write_container_journal, _journal_receipt_reference, _retain_journal_snapshot,
+                                        _container_cleanup_summary,
                                         _augment_result_crate,
                                         recover_attempt, run_package)
 from experiment_compiler.runner import sha256_bytes
@@ -39,6 +40,18 @@ WORKER_OUTPUT_BUDGET = 64 * MIB
 ATTEMPT_DIAGNOSTIC = b"bounded diagnostic"
 ATTEMPT_LOG_OVERFLOW = b" extra diagnostic"
 TRUNCATED_ATTEMPT_LOGS = {"oversized-log", "timeout", "compile", "cancelled"}
+RECOVERY_IDENTITY = {
+    "attempt_id": "0123456789ab",
+    "image_ref": "registry.example/tool@sha256:" + "d" * 64,
+    "image_id": "sha256:" + "a" * 64,
+    "reported_image_id": "sha256:" + "e" * 64,
+    "controller": {"pid": -1, "bootId": None, "processStartTicks": None},
+}
+
+
+def _retained_files(attempt: Path) -> dict[str, str]:
+    return {path.relative_to(attempt).as_posix(): sha256_file(path)
+            for path in attempt.rglob("*") if path.is_file()}
 
 
 class RunnerBoundaryTests(unittest.TestCase):
@@ -339,8 +352,149 @@ class RunnerBoundaryTests(unittest.TestCase):
                     patch("experiment_compiler.runner._engine_call",
                           return_value=SimpleNamespace(returncode=0, stdout=image_id)):
                 recovered = recover_attempt(attempt)
+                retained = _retained_files(attempt)
+                repeated = recover_attempt(attempt)
             self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
             self.assertFalse(recovered["containerCleanup"]["allAbsent"])
+            self.assertEqual(recovered["status"], "failed")
+            self.assertEqual(repeated, recovered)
+            self.assertEqual(_retained_files(attempt), retained)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_validates_current_evidence_before_settling_a_pending_update(self):
+        cases = (
+            ("worker", {"reportedWorkerImageId": "different-worker"}, "plan and worker identity"),
+            ("expired", {"createdAt": "2000-01-01T00:00:00+00:00"}, "journal is stale"),
+            ("missing-marker", {}, "no matching durable update marker"),
+            ("permissive-marker", {}, "transaction marker.*mode 0600"),
+            ("permissive-journal", {}, "Recovery journal.*mode 0600"),
+        )
+        with tempfile.TemporaryDirectory() as value:
+            for mode, changes, expected in cases:
+                with self.subTest(mode=mode):
+                    attempt = Path(value) / mode
+                    journal = prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+                    receipt = json_value((attempt / "runner-receipt.json").read_bytes())
+                    journal.update(changes, state="unknown")
+                    with patch("experiment_compiler.runner._persist_attempt_receipt",
+                               side_effect=OSError("fixture receipt interruption")):
+                        with self.assertRaisesRegex(OSError, "fixture receipt interruption"):
+                            _journal_receipt_reference(attempt, journal, receipt)
+                    marker = attempt / "container-journal.pending"
+                    if mode == "missing-marker":
+                        marker.unlink()
+                    elif mode == "permissive-marker":
+                        marker.chmod(0o644)
+                    elif mode == "permissive-journal":
+                        (attempt / "container-journal.json").chmod(0o644)
+                    retained = _retained_files(attempt)
+                    with patch("experiment_compiler.runner._engine_call") as engine:
+                        with self.assertRaisesRegex(PackageError, expected):
+                            recover_attempt(attempt)
+                    engine.assert_not_called()
+                    self.assertEqual(_retained_files(attempt), retained)
+                    self.assertFalse((attempt / "container-journal-history").exists())
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_before_and_after_journal_publication(self):
+        replace = Path.replace
+        with tempfile.TemporaryDirectory() as value:
+            for publication_completed in (False, True):
+                with self.subTest(publication_completed=publication_completed):
+                    attempt = Path(value) / str(publication_completed)
+                    journal = prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+                    receipt_path = attempt / "runner-receipt.json"
+                    receipt = json_value(receipt_path.read_bytes())
+                    receipt_bytes = receipt_path.read_bytes()
+                    journal["cancellation"] = {"requestedAt": journal["createdAt"]}
+
+                    def stop_during_replace(source, target):
+                        if target.name == "container-journal.json":
+                            if publication_completed:
+                                replace(source, target)
+                            raise OSError("fixture journal publication interruption")
+                        return replace(source, target)
+
+                    with patch.object(Path, "replace", new=stop_during_replace):
+                        with self.assertRaisesRegex(OSError, "fixture journal publication interruption"):
+                            _journal_receipt_reference(attempt, journal, receipt)
+                    self.assertEqual(receipt_path.read_bytes(), receipt_bytes)
+                    with patch("experiment_compiler.runner._controller_is_alive"), \
+                            patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                            patch("experiment_compiler.runner._engine_call",
+                                  return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])):
+                        recovered = recover_attempt(attempt)
+                    retained = json_value((attempt / "container-journal.json").read_bytes())
+                    self.assertEqual(retained["cancellation"], journal["cancellation"] if publication_completed else None)
+                    self.assertEqual(recovered["status"], "failed")
+                    self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+                    self.assertFalse((attempt / "container-journal.pending").exists())
+
+    @unittest.skipUnless(os.name == "posix", "private journal snapshots are POSIX worker contracts")
+    def test_snapshot_failure_does_not_leave_a_partial_immutable_snapshot(self):
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+            digest = sha256_file(attempt / "container-journal.json")
+            with patch("experiment_compiler.runner.os.fsync", side_effect=OSError("fixture snapshot interruption")):
+                with self.assertRaisesRegex(OSError, "fixture snapshot interruption"):
+                    _retain_journal_snapshot(attempt, digest)
+            self.assertEqual(list((attempt / "container-journal-history").iterdir()), [])
+            snapshot = attempt / _retain_journal_snapshot(attempt, digest)
+            self.assertEqual(sha256_file(snapshot), digest)
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(attempt / _retain_journal_snapshot(attempt, digest), snapshot)
+
+    @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
+    def test_recovery_of_timed_out_attempt_preserves_outcome(self):
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+            receipt = json_value((attempt / "runner-receipt.json").read_bytes())
+            receipt.update(status="timed-out", endedAt="2026-01-01T00:00:00+00:00", exitCode=124, timedOut=True)
+            _persist_attempt_receipt(attempt, receipt)
+            with patch("experiment_compiler.runner._controller_is_alive"), \
+                    patch("experiment_compiler.runner._reconcile_cwl_process_group"), \
+                    patch("experiment_compiler.runner._engine_call",
+                          return_value=SimpleNamespace(returncode=0, stdout=RECOVERY_IDENTITY["image_id"])):
+                recovered = recover_attempt(attempt)
+            for key in ("status", "endedAt", "timedOut", "exitCode"):
+                self.assertEqual(recovered[key], receipt[key])
+            self.assertEqual(recovered["containerCleanup"]["state"], "unknown")
+
+    @unittest.skipUnless(os.name == "posix", "attempt recovery is a POSIX worker contract")
+    def test_recovery_refuses_a_second_writer_for_the_same_attempt(self):
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as value:
+            attempt = Path(value) / "attempt"
+            prepare_recovery_attempt(attempt, RECOVERY_IDENTITY)
+            before = _retained_files(attempt)
+            descriptor = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch("experiment_compiler.runner._engine_call") as engine:
+                    with self.assertRaisesRegex(PackageError, "Another recovery is active"):
+                        recover_attempt(attempt)
+                engine.assert_not_called()
+                self.assertEqual(_retained_files(attempt), before)
+            finally:
+                os.close(descriptor)
+
+    def test_public_cleanup_summary_only_exposes_state_and_aggregate_counts(self):
+        journal = {
+            "engine": "podman", "state": "clean", "controller": {"pid": 23015},
+            "enginePath": "/private/worker/bin/podman",
+            "containers": [{"id": "c" * 64, "cidfile": "engine-cids/retained.cid",
+                            "cleanup": {"absentAfterCleanup": True, "diagnostic": "private stderr"}}],
+        }
+        self.assertEqual(_container_cleanup_summary(journal), {
+            "engine": "podman", "state": "clean", "containerCount": 1, "absentCount": 1, "allAbsent": True,
+        })
+        journal.update(engine="/private/worker/bin/podman", state="private engine diagnostic")
+        self.assertEqual(_container_cleanup_summary(journal), {
+            "engine": None, "state": "unknown", "containerCount": 1, "absentCount": 1, "allAbsent": False,
+        })
 
     @unittest.skipUnless(os.name == "posix", "attempt ownership and recovery are POSIX worker contracts")
     def test_recovery_after_kernel_reboot_never_signals_reused_pid_and_cleans_exact_cid(self):
@@ -502,7 +656,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "cidfilePrefix": f"{attempt_id}-", "containers": [], "cancellation": None,
             }
             journal_bytes = canonical(journal)
-            (attempt / "container-journal.json").write_bytes(journal_bytes)
+            _write_container_journal(attempt, journal)
             receipt = {
                 "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
                 "planPackageSha256": "f" * 64,
@@ -517,6 +671,7 @@ class RunnerBoundaryTests(unittest.TestCase):
                 "schema": "cwltool-container-journal-transaction/v1", "attemptId": attempt_id,
                 "fromSha256": "0" * 64, "toSha256": sha256_bytes(journal_bytes),
             }))
+            (attempt / "container-journal.pending").chmod(0o600)
             states = iter(((True, "exited"), (False, None)))
             def engine_call(_attempt, _journal, arguments):
                 if arguments[:2] == ["image", "inspect"]:
@@ -527,11 +682,18 @@ class RunnerBoundaryTests(unittest.TestCase):
                     patch("experiment_compiler.runner._container_present", side_effect=lambda *_: next(states)), \
                     patch("experiment_compiler.runner._engine_call", side_effect=engine_call) as engine:
                 recovered = recover_attempt(attempt)
+                retained = _retained_files(attempt)
+                repeated = recover_attempt(attempt)
             self.assertEqual(recovered["status"], "failed")
             self.assertEqual(recovered["containerCleanup"]["state"], "clean")
             self.assertEqual(recovered["containerCleanup"]["containerCount"], 1)
             self.assertTrue(recovered["containerCleanup"]["allAbsent"])
-            self.assertEqual(engine.call_args_list[-1].args[2], ["rm", container_id])
+            self.assertEqual([call.args[2] for call in engine.call_args_list if call.args[2][0] == "rm"],
+                             [["rm", container_id]])
+            self.assertEqual(repeated, recovered)
+            self.assertEqual(_retained_files(attempt), retained)
+            self.assertEqual(sha256_file(attempt / "container-journal-history" /
+                                         f"{sha256_bytes(journal_bytes)}.json"), sha256_bytes(journal_bytes))
             latest_journal = json.loads((attempt / "container-journal.json").read_text())
             self.assertTrue(latest_journal["containers"][0]["cleanup"]["absentAfterCleanup"])
             latest_receipt = json.loads((attempt / "runner-receipt.json").read_text())
@@ -846,6 +1008,8 @@ class RunnerBoundaryTests(unittest.TestCase):
                     run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
             else:
                 run_package(plan, output, expected_sha256=built["packageSha256"], allow_workflow_execution=True)
+            if scenario in {"compile", "terminal-persist"}:
+                self._assert_retained_attempt_refuses_rerun(plan, output, built["packageSha256"])
         if scenario in {"timeout", "timeout-orphan"} or scenario.startswith("cancelled"):
             self.assertEqual([call.args for call in kill_group.call_args_list], [(98765, 15), (98765, 9)])
         receipt = json.loads((directory / "result.attempt/runner-receipt.json").read_text())
@@ -853,6 +1017,14 @@ class RunnerBoundaryTests(unittest.TestCase):
         self.assertTrue(receipt["attemptId"])
         self.assertTrue(all(not path.exists() for path in scratch))
         self._check_attempt_outcome(scenario, directory, receipt, terminal_failure)
+
+    def _assert_retained_attempt_refuses_rerun(self, plan, output, digest):
+        retained = _retained_files(output.parent)
+        with patch("experiment_compiler.runner.subprocess.Popen") as launch:
+            with self.assertRaisesRegex(PackageError, "attempts are never overwritten"):
+                run_package(plan, output, expected_sha256=digest, allow_workflow_execution=True)
+        launch.assert_not_called()
+        self.assertEqual(_retained_files(output.parent), retained)
 
     def _check_attempt_outcome(self, scenario, directory, receipt, terminal_failure):
         statuses = {"terminal-persist": "started",
@@ -1471,7 +1643,9 @@ class: CommandLineTool
             self.assertEqual(receipt["workflowRunCrateFiles"], ["workflow-run.json"])
             self._assert_private_container_reference(receipt, result)
             self.assertTrue(receipt["containerCleanup"]["allAbsent"])
-            self.assertNotIn("containerIds", receipt["containerCleanup"])
+            self.assertEqual(set(receipt["containerCleanup"]), {
+                "engine", "state", "containerCount", "absentCount", "allAbsent",
+            })
             self.assertFalse(any(name.endswith("/container-journal.json") for name in names))
             self.assertTrue(any(node.get("@type") == "CreateAction" for node in crate["@graph"]))
 

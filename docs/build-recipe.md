@@ -89,6 +89,14 @@ records bytes observed, bytes retained, the applicable limit, and whether each
 pipe reached EOF. If final draining ends before EOF, observed counts are lower
 bounds. These are worker log limits.
 
+Use `experiment-runner recover <output-stem>.attempt` to reconcile retained
+container evidence after a controller interruption. The runner validates the
+private receipt, journal, pending transaction and worker identity before
+settling a pending update. Recovery retains the original journal snapshot
+and records cleanup separately from the attempt outcome. An unresolved
+launch keeps cleanup unknown. Failed and timed-out outcomes stay visible,
+and repeating recovery with the same evidence preserves the settled receipt.
+
 ### Revising a plan after an attempt
 
 The `experiment-compiler revise` command creates a new prospective plan from a source-authored recipe and one explicitly selected attempt package:

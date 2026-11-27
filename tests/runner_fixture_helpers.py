@@ -5,8 +5,7 @@ from contextlib import contextmanager
 from fractions import Fraction
 from unittest.mock import patch
 
-from experiment_compiler.core import canonical
-from experiment_compiler.runner import _persist_attempt_receipt, sha256_bytes
+from experiment_compiler.runner import _persist_attempt_receipt, _write_container_journal
 from experiment_compiler.worker_limits import ObservedWorker
 
 
@@ -74,8 +73,7 @@ def prepare_recovery_attempt(attempt_directory, identity):
             "pid": 2345, "bootId": cwl_boot_id, "processStartTicks": "20",
             "processGroupId": 2345, "sessionId": 2345,
         }
-    journal_bytes = canonical(journal)
-    (attempt_directory / "container-journal.json").write_bytes(journal_bytes)
+    journal_digest = _write_container_journal(attempt_directory, journal)
     receipt = {
         "schemaVersion": 1, "attemptId": attempt_id, "status": "started",
         "planPackageSha256": "f" * 64,
@@ -83,7 +81,7 @@ def prepare_recovery_attempt(attempt_directory, identity):
                    "workerImageBase": image_ref},
         "executionMode": "cwltool orchestrator on worker; CWL CommandLineTool uses Podman runtime",
         "workerContext": {"reportedImageId": reported_image_id}, "collectionErrors": [],
-        "containerJournal": {"path": "container-journal.json", "sha256": sha256_bytes(journal_bytes)},
+        "containerJournal": {"path": "container-journal.json", "sha256": journal_digest},
     }
     _persist_attempt_receipt(attempt_directory, receipt)
     return journal
