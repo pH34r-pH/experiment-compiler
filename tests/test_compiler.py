@@ -1052,6 +1052,20 @@ class CompilerTests(unittest.TestCase):
                     self.assertEqual(refusal.exception.budget, budget)
                     self.assertEqual(refusal.exception.member, info.filename)
 
+    def test_archive_policy_hashes_complete_members_with_optional_capture(self):
+        payload = b"a" * (1024 * 1024) + b"last bytes"
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w") as archive:
+            archive.writestr("payload.txt", payload)
+        with zipfile.ZipFile(archive_bytes) as archive:
+            info = archive.getinfo("payload.txt")
+            digest = hashlib.sha256(payload).hexdigest()
+            for capture, expected in ((False, b""), (True, payload)):
+                with self.subTest(capture=capture):
+                    reader = ArchiveMemberReader(archive, PackageReadPolicy(max_total_bytes=len(payload)))
+                    self.assertEqual(reader.read(info, capture=capture), (digest, len(payload), expected))
+                    self.assertEqual(reader.total_bytes, len(payload))
+
     def test_verifier_opens_lifecycle_and_generic_json_members_once(self):
         recipe = ROOT / "examples/linear-regression-plan-v1/experiment.json"
         compile_package(recipe, self.output)

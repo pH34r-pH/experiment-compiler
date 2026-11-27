@@ -13,7 +13,7 @@ class WorkerLimitTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         directory = Path(temporary.name).resolve()
-        self.root = directory / "cgroup"
+        self.root = directory / "cgroup fixture"
         self.parent = self.root / "system.slice"
         self.unit = "experiment-compiler-worker-fixture.service"
         self.leaf = self.parent / self.unit
@@ -42,9 +42,22 @@ class WorkerLimitTests(unittest.TestCase):
         self.write_limits(self.parent, "50000 100000", str(256 * 1024 * 1024), "64")
         worker, evidence = self.observe(self.approval)
         self.assertEqual((worker.cpu, worker.memory_bytes, worker.tasks), (Fraction(1, 2), 256 * 1024 * 1024, 64))
-        self.assertEqual(evidence["reportedOuterLimits"]["tasks"], 128)
-        self.assertEqual(evidence["observedOuterLimits"]["tasks"], 64)
-        self.assertEqual(evidence["outerImage"]["status"], "unavailable")
+        self.assertEqual(evidence, {
+            "profile": WORKER_PROFILE,
+            "reportedOuterLimits": {
+                "cpuQuotaMicros": 100000,
+                "cpuPeriodMicros": 100000,
+                "memoryBytes": 512 * 1024 * 1024,
+                "tasks": 128,
+            },
+            "observedOuterLimits": {
+                "cpuCores": {"numerator": 1, "denominator": 2},
+                "memoryBytes": 256 * 1024 * 1024,
+                "tasks": 64,
+            },
+            "observationSource": "linux-cgroup-v2-current-process-and-visible-ancestors",
+            "outerImage": {"status": "unavailable", "reason": "host-systemd-service"},
+        })
         worker.check_workload(0.5, 256)
         for cores, memory in ((0.75, 256), (0.5, 256.125)):
             with self.subTest(cores=cores, memory=memory), self.assertRaisesRegex(WorkerAdmissionError, "workload exceeds"):

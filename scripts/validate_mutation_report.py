@@ -17,10 +17,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("report", type=Path)
     parser.add_argument("--require-mutants", action="store_true")
+    parser.add_argument("--require-file", action="append", default=[], metavar="REPO_PATH",
+                        help="require a tested mutant for this exact repository-relative path (repeatable)")
     args = parser.parse_args()
 
-    schema = json.loads(SCHEMA.read_text())
-    report = json.loads(args.report.read_text())
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    report = json.loads(args.report.read_text(encoding="utf-8"))
 
     Draft7Validator.check_schema(schema)
     Draft7Validator(schema).validate(report)
@@ -34,6 +36,17 @@ def main() -> int:
     if args.require_mutants and total == 0:
         raise SystemExit("mutation report is schema-valid but contains no mutants")
 
+    required_counts = {
+        filename: sum(
+            mutant["status"] in {"Killed", "Survived"}
+            for mutant in report["files"].get(filename, {}).get("mutants", [])
+        )
+        for filename in args.require_file
+    }
+    for filename, count in required_counts.items():
+        if count == 0:
+            raise SystemExit(f"mutation report contains no tested mutants for {filename}")
+
     print(
         json.dumps(
             {
@@ -41,6 +54,7 @@ def main() -> int:
                 "framework": report.get("framework", {}).get("name"),
                 "mutants": total,
                 "statuses": dict(sorted(statuses.items())),
+                **({"requiredFileTestedMutants": required_counts} if required_counts else {}),
             },
             sort_keys=True,
         )
