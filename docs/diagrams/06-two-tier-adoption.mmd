@@ -1,0 +1,23 @@
+flowchart LR
+  subgraph DSL["Source Lab (Tier 1 · Fast Exploration)"]
+    EXP["Local CPU / GPU run<br/>metrics.json · run_manifest.json<br/>RO-Crate 1.1"]
+    FRZ["freeze<br/>clean Git + digest checks<br/>explicit date & license"]
+    EXP --> FRZ
+  end
+
+  subgraph EC["Experiment Compiler v0.1.0a1 (Tier 2 · Immutable Packaging)"]
+    RCP["experiment.json<br/>compiled-experiment-lifecycle-v1"]
+    CMP["compile + verify<br/>deterministic ZIP · SHA-256"]
+    RUN["Optional bounded runner<br/>CWL / native profile"]
+    FIN["finalize<br/>protocol coverage + interpretation"]
+    RCP --> CMP --> RUN --> FIN
+  end
+
+  subgraph PUB["Public Reproduction & Archival Surfaces"]
+    SITE["experiments.tyharbin.com<br/>live static catalog"]
+    ARC["compiled-experiments<br/>exact-byte release → Zenodo DOI"]
+    FIN --> SITE
+    FIN --> ARC
+  end
+
+  FRZ --> RCP

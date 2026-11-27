@@ -1,8 +1,15 @@
 # Experiment Compiler architecture
 
-> Status: current project architecture and north-star boundaries, 2026-09-29.
+> Status: current project architecture, design philosophy, and roadmap as of 2026-11-27 (`v0.1.0a1` published).
 
-Experiment Compiler turns reviewed research inputs into immutable, inspectable experiment artifacts. The diagrams on this page make the project's boundaries explicit: what the compiler owns, what the runner owns, how immutable lifecycle artifacts relate, which public standards carry semantics, and how the public reproduction surface connects back to explanatory research articles.
+Experiment Compiler turns reviewed research inputs into immutable, inspectable experiment artifacts. The diagrams on this page make the project's boundaries explicit: what the compiler owns, what the runner owns, how immutable lifecycle artifacts relate, which public standards carry semantics, how fast lab exploration hands off into immutable packaging, and how the public reproduction surface connects back to explanatory research articles.
+
+## Design philosophy and overarching goals
+
+1. **Zero-dependency portable core:** Compile and verify require only the Python standard library (`>=3.11.4`), keeping verification offline, deterministic, and easy to audit years after publication.
+2. **Standards over bespoke schemas:** Package structure, execution provenance, workflows, and dataset descriptions reuse **RO-Crate 1.3**, **Process Run Crate 0.6**, **Schema.org**, **PROV-O**, **CWL 1.2**, and **MLCommons Croissant** instead of introducing a private registry or custom ontology.
+3. **Strict separation of claims:** Byte integrity (`compile`/`verify`), bounded execution (`run`), source-authored interpretation (`finalize`), and public promotion are distinct immutable steps. None silently implies scientific truth or independent reproduction.
+4. **Tier 2 publication layer for fast science:** Research workspaces iterate freely at local speed (`Tier 1`) and invoke Experiment Compiler (`Tier 2`) when freezing a study for durable verification, catalog presentation, or archival release.
 
 The diagrams are maintained as Mermaid source under [`docs/diagrams/`](diagrams/).
 
@@ -276,6 +283,47 @@ flowchart LR
 ```
 
 Source: [`05-public-surface.mmd`](diagrams/05-public-surface.mmd)
+
+## 6. Two-Tier lab adoption and current roadmap
+
+Research labs do not need to run every exploratory iteration through CWL or release packaging. Labs iterate locally in Tier 1 and hand off selected clean-checkout runs into Experiment Compiler (`v0.1.0a1`) for Tier 2 deterministic packaging and verification.
+
+```mermaid
+flowchart LR
+  subgraph DSL["Source Lab (Tier 1 · Fast Exploration)"]
+    EXP["Local CPU / GPU run<br/>metrics.json · run_manifest.json<br/>RO-Crate 1.1"]
+    FRZ["freeze<br/>clean Git + digest checks<br/>explicit date & license"]
+    EXP --> FRZ
+  end
+
+  subgraph EC["Experiment Compiler v0.1.0a1 (Tier 2 · Immutable Packaging)"]
+    RCP["experiment.json<br/>compiled-experiment-lifecycle-v1"]
+    CMP["compile + verify<br/>deterministic ZIP · SHA-256"]
+    RUN["Optional bounded runner<br/>CWL / native profile"]
+    FIN["finalize<br/>protocol coverage + interpretation"]
+    RCP --> CMP --> RUN --> FIN
+  end
+
+  subgraph PUB["Public Reproduction & Archival Surfaces"]
+    SITE["experiments.tyharbin.com<br/>live static catalog"]
+    ARC["compiled-experiments<br/>exact-byte release → Zenodo DOI"]
+    FIN --> SITE
+    FIN --> ARC
+  end
+
+  FRZ --> RCP
+```
+
+Source: [`06-two-tier-adoption.mmd`](diagrams/06-two-tier-adoption.mmd)
+
+### Current state and planned milestones
+
+| Capability | Current State (2026-11-27) | Planned Next Steps |
+| --- | --- | --- |
+| **Core compiler & verifier** | Released in attested [`v0.1.0a1`](https://github.com/pH34r-pH/experiment-compiler/releases/tag/v0.1.0a1) (`#5` closed); deterministic ZIP bytes verified across Python 3.11–3.14; archive/recipe conformance hardened (`#195`, `#196`, `#201`). | Keep the stdlib core minimal and byte-stable across releases. |
+| **CWL runner & recovery** | Modularized into `runner_admission`, `runner_process`, and `runner_receipts` (`#194`) with recovery transition validation (`#185`, `#186`). | Execute prepared small CPU Podman fixture once Fleet runner boundary is qualified (`#87`) and complete native Fleet Actions projection (`#119`). |
+| **Protocol coverage & finalization** | Generic v1/v2/v3 protocol obligations, campaign attempt census, and amendment history landed (`#154`, `#176`, `#177`). | Attach study-owned campaign fixtures under `#152` and consumer profiles (`#127`, `#128`). |
+| **Lab adoption & public surface** | End-to-end Tier 1 → Tier 2 freeze handoff verified with `domain-scaling-lab` (`#890`). | Complete source-owned pipeline adoption (`#4`) and align `experiments.tyharbin.com` reproduction UX with Portfolio (`#99`, `#101`, `#103`). |
 
 ## Design invariants
 
