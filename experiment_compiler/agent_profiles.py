@@ -114,22 +114,26 @@ def agent_record_paths(manifest, member_names):
     return paths
 
 
+def _validate_reference(reference):
+    fields = {"kind", "source", "reference", "digest", "qualification"}
+    if (not isinstance(reference, dict) or set(reference) != fields
+            or reference["kind"] not in ("semantic-trajectory", "governed-corpus")
+            or not isinstance(reference["source"], dict)
+            or set(reference["source"]) != {"repository", "commit"}
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", str(reference["source"]["repository"]))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(reference["source"]["commit"]))
+            or not re.fullmatch(r"(urn|artifact|git):[A-Za-z0-9._:/+@-]+", str(reference["reference"]))
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(reference["digest"]))):
+        raise PackageError("Trajectory/corpus references require exact upstream identity; payloads are not qualified")
+
+
 def _references(references, audience):
     from .corpus import is_bound_corpus
     from .trajectory import BOUND_QUALIFICATION, is_bound_trajectory
 
     corpus_digests = set()
     for reference in references:
-        fields = {"kind", "source", "reference", "digest", "qualification"}
-        if (not isinstance(reference, dict) or set(reference) != fields
-                or reference["kind"] not in ("semantic-trajectory", "governed-corpus")
-                or not isinstance(reference["source"], dict)
-                or set(reference["source"]) != {"repository", "commit"}
-                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", str(reference["source"]["repository"]))
-                or not re.fullmatch(r"[0-9a-f]{40}", str(reference["source"]["commit"]))
-                or not re.fullmatch(r"(urn|artifact|git):[A-Za-z0-9._:/+@-]+", str(reference["reference"]))
-                or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(reference["digest"]))):
-            raise PackageError("Trajectory/corpus references require exact upstream identity; payloads are not qualified")
+        _validate_reference(reference)
         if reference["qualification"] == "upstream-pending":
             continue
         corpus = is_bound_corpus(reference)

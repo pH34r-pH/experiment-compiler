@@ -28,6 +28,18 @@ def is_bound_corpus(reference: dict) -> bool:
     )
 
 
+def _file_identity(file: object) -> tuple[str, str]:
+    fields = {"@id", "@type", "name", "contentUrl", "encodingFormat", "sha256"}
+    if not isinstance(file, dict) or file.keys() != fields:
+        raise PackageError("Expected direct Croissant FileObject records")
+    name, digest = file["name"], file["sha256"]
+    if (not isinstance(name, str) or not FILE_NAME.fullmatch(name)
+            or not isinstance(digest, str) or not SHA256.fullmatch(digest)
+            or file["@id"] != "files/" + name or file["@type"] != "cr:FileObject"):
+        raise PackageError("Croissant file identity or digest is invalid")
+    return name, digest
+
+
 def _inventory(raw: bytes) -> dict[str, str]:
     try:
         value = json_value(raw)
@@ -39,17 +51,7 @@ def _inventory(raw: bytes) -> dict[str, str]:
     files = value.get("distribution")
     if not isinstance(files, list) or not files:
         raise PackageError("Croissant metadata lacks a file inventory")
-    pairs = []
-    fields = {"@id", "@type", "name", "contentUrl", "encodingFormat", "sha256"}
-    for file in files:
-        if not isinstance(file, dict) or file.keys() != fields:
-            raise PackageError("Expected direct Croissant FileObject records")
-        name, digest = file["name"], file["sha256"]
-        if (not isinstance(name, str) or not FILE_NAME.fullmatch(name)
-                or not isinstance(digest, str) or not SHA256.fullmatch(digest)
-                or file["@id"] != "files/" + name or file["@type"] != "cr:FileObject"):
-            raise PackageError("Croissant file identity or digest is invalid")
-        pairs.append((name, digest))
+    pairs = [_file_identity(file) for file in files]
     try:
         unique_paths([name for name, _ in pairs])
     except PackageError as exc:
