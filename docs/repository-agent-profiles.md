@@ -47,7 +47,7 @@ The command checks the verifier's installed source identity, verifies the canoni
 Use the existing `governed-corpus` reference in a `private-evaluator` package.
 Set `qualification` to `readback-required` and `reference` to
 `artifact:croissant-1.1`. The `source` identifies
-`pH34r-pH/long-haul@71f75bca00aacebf75c73155e3fca1d007ffd501`.
+`pH34r-pH/long-haul@94aa97d78fca4896eb4556a96e2dde89f6eb1d86`.
 Set `digest` to `sha256:` followed by the SHA-256 of the exact Croissant
 metadata bytes from the reviewed producer. The reviewed package retains
 only the reference. Keep the metadata and files in approved private storage.

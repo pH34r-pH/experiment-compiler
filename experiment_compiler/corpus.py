@@ -13,7 +13,7 @@ from .core import SHA256, PackageError, bounded_read, json_value, sha256, unique
 
 CROISSANT_SOURCE = {
     "repository": "pH34r-pH/long-haul",
-    "commit": "71f75bca00aacebf75c73155e3fca1d007ffd501",
+    "commit": "94aa97d78fca4896eb4556a96e2dde89f6eb1d86",
 }
 CROISSANT_REFERENCE = "artifact:croissant-1.1"
 CROISSANT_VERSION = "http://mlcommons.org/croissant/1.1"
