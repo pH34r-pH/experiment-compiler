@@ -443,8 +443,6 @@ def _lifecycle_root(nodes: dict[str, dict]) -> dict:
         raise PackageError("Lifecycle crate requires an RO-Crate metadata descriptor about the root Dataset")
     if not any(ref.get("@id") == "https://w3id.org/ro/crate/1.3" for ref in _as_refs(descriptor.get("conformsTo"))):
         raise PackageError("Lifecycle metadata descriptor must declare RO-Crate 1.3")
-    if not any(ref.get("@id") == "https://w3id.org/ro/crate/1.3" for ref in _as_refs(root.get("conformsTo"))):
-        raise PackageError("Lifecycle root Dataset must declare RO-Crate 1.3")
     return root
 
 
