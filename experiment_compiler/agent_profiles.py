@@ -114,12 +114,13 @@ def agent_record_paths(manifest, member_names):
     return paths
 
 
-def _references(references):
+def _references(references, audience):
+    from .trajectory import BOUND_QUALIFICATION, is_bound_trajectory
+
     for reference in references:
         fields = {"kind", "source", "reference", "digest", "qualification"}
         if (not isinstance(reference, dict) or set(reference) != fields
                 or reference["kind"] not in ("semantic-trajectory", "governed-corpus")
-                or reference["qualification"] != "upstream-pending"
                 or not isinstance(reference["source"], dict)
                 or set(reference["source"]) != {"repository", "commit"}
                 or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", str(reference["source"]["repository"]))
@@ -127,6 +128,29 @@ def _references(references):
                 or not re.fullmatch(r"(urn|artifact|git):[A-Za-z0-9._:/+@-]+", str(reference["reference"]))
                 or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(reference["digest"]))):
             raise PackageError("Trajectory/corpus references require exact upstream identity; payloads are not qualified")
+        if reference["qualification"] == "upstream-pending":
+            continue
+        if reference["qualification"] != BOUND_QUALIFICATION or not is_bound_trajectory(reference):
+            raise PackageError("Trajectory/corpus reference lacks a supported readback identity; payloads are not qualified")
+        if audience != "private-evaluator":
+            raise PackageError("Bound trajectory references require the private-evaluator audience")
+
+
+def _trajectory_binding(documents, references):
+    from .trajectory import BOUND_QUALIFICATION
+
+    if not any(reference["qualification"] == BOUND_QUALIFICATION for reference in references):
+        return {}
+    task = documents.get("repository-task")
+    if task is None:
+        raise PackageError("Bound trajectory references require a repository-task record")
+    candidate = documents.get("repository-candidate") or documents.get("repository-evidence", {}).get("candidate")
+    return {"trajectoryBinding": {
+        "repositoryId": task["source"]["repository_id"],
+        "taskFingerprint": projection_fingerprint(task),
+        "contextManifest": task["context_manifest"],
+        "candidateFingerprint": projection_fingerprint(candidate) if candidate is not None else None,
+    }}
 
 
 def validate_agent_profiles(manifest, parsed_members):
@@ -140,11 +164,12 @@ def validate_agent_profiles(manifest, parsed_members):
         if projection_fingerprint(document) != record["fingerprint"]:
             raise PackageError("Repository record fingerprint mismatch")
         documents[record["kind"]] = document
-    _references(declaration["references"])
+    _references(declaration["references"], declaration["audience"])
     from .agent_disclosure import validate_bindings, validate_disclosure
     validate_bindings(documents)
     validate_disclosure(documents, declaration["audience"])
     return {"schemaVersion": 1, "source": SOURCE, "audience": declaration["audience"],
             "records": declaration["records"], "references": declaration["references"],
             "scope": "schema-identity-and-disclosure-only", "acceptance": "not-evaluated",
-            "trainingEligibility": "not-granted"}
+            "trainingEligibility": "not-granted",
+            **_trajectory_binding(documents, declaration["references"])}

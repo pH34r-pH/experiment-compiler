@@ -1,13 +1,16 @@
 """Repository profile admission preserves identity without granting acceptance."""
 import copy
+import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from repository_profile_helpers import composed_records
+from repository_profile_helpers import composed_records, retained_trajectory
 
 from experiment_compiler.agent_profiles import SOURCE, projection_fingerprint
 from experiment_compiler.archive_policy import PackageReadPolicy, ResourcePolicyError
@@ -18,8 +21,16 @@ from experiment_compiler.core import (
     sha256,
     verify_package,
 )
+from experiment_compiler.trajectory import BOUND_QUALIFICATION, TRACE_REFERENCE, TRAJECTORY_SOURCE, verify_trajectory
 
 ROOT = Path(__file__).resolve().parents[1]
+HAS_TRAJECTORY_EXTRA = importlib.util.find_spec("long_haul") is not None
+
+
+def trajectory_reference(fingerprint, digest):
+    return {"kind": "semantic-trajectory", "source": TRAJECTORY_SOURCE,
+            "reference": f"{TRACE_REFERENCE}/{fingerprint}", "digest": digest,
+            "qualification": BOUND_QUALIFICATION}
 
 
 class RepositoryAgentProfileTests(unittest.TestCase):
@@ -135,6 +146,111 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         references[0]["qualification"] = "training-approved"
         with self.assertRaisesRegex(PackageError, "not qualified"):
             self.package(references=references)
+
+    def test_bound_trajectory_references_require_private_task_and_pinned_source(self):
+        fingerprint = "sha256:" + "a" * 64
+        bound = trajectory_reference(fingerprint, fingerprint)
+        with self.assertRaisesRegex(PackageError, "private-evaluator"):
+            self.package(references=[bound])
+        with self.assertRaisesRegex(PackageError, "repository-task"):
+            self.package(audience="private-evaluator", references=[bound])
+        task = composed_records(self.packet)["repository-task"]
+        with self.assertRaisesRegex(PackageError, "readback identity"):
+            self.package({"repository-task": task}, audience="private-evaluator",
+                         references=[dict(bound, source=SOURCE)])
+
+    def trajectory_package(self, terminal="settled", *, repository_id=None, candidate_record=None,
+                           result_candidate=None, reference_digest=None):
+        task = composed_records(self.packet)["repository-task"]
+        result, trace = retained_trajectory(task, terminal, repository_id=repository_id, candidate=result_candidate)
+        result_path, trace_path = self.root / "result.json", self.root / "trace.jsonl"
+        result_path.write_bytes(result.model_dump_json().encode())
+        trace_path.write_bytes(trace)
+        documents = {"repository-task": task}
+        if candidate_record:
+            documents["repository-candidate"] = candidate_record
+        report, archive = self.package(documents, audience="private-evaluator",
+                                       references=[trajectory_reference(result.fingerprint, reference_digest or result.trace.digest)])
+        self.assertEqual(report["repositoryAgent"]["scope"], "schema-identity-and-disclosure-only")
+        return (archive, result_path, trace_path), {
+            "expected_sha256": report["packageSha256"], "expected_result_fingerprint": result.fingerprint,
+            "max_bytes": len(result_path.read_bytes()) + len(trace),
+        }
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_verified_trajectory_reports_exact_attempt_without_running_package(self):
+        with patch("subprocess.Popen", side_effect=AssertionError("no process")), \
+                patch("socket.socket", side_effect=AssertionError("no network")):
+            paths, pins = self.trajectory_package()
+            receipt = verify_trajectory(*paths, **pins)
+        self.assertEqual(receipt["eventCount"], 1)
+        self.assertEqual(receipt["terminal"], "settled")
+        self.assertEqual(receipt["acceptance"], "not_evaluated")
+        self.assertEqual(receipt["trainingEligibility"], "not-granted")
+        self.assertEqual(receipt["resultFingerprint"], pins["expected_result_fingerprint"])
+        self.assertEqual(receipt["traceDigest"], "sha256:" + sha256(paths[2].read_bytes()))
+        self.assertEqual(receipt["packageSha256"], pins["expected_sha256"])
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_trajectory_command_retains_a_zero_event_provider_failure(self):
+        paths, pins = self.trajectory_package("provider_failure")
+        command = [sys.executable, "-m", "experiment_compiler", "verify-trajectory", *(str(path) for path in paths),
+                   "--expected-sha256", pins["expected_sha256"], "--expected-result-fingerprint",
+                   pins["expected_result_fingerprint"], "--max-trajectory-bytes", str(pins["max_bytes"])]
+        completed = subprocess.run(command, cwd=ROOT, check=True, capture_output=True)
+        receipt = json.loads(completed.stdout)
+        self.assertEqual(receipt["terminal"], "provider_failure")
+        self.assertEqual(receipt["eventCount"], 0)
+        self.assertEqual(receipt["candidateDisposition"], "none")
+        self.assertEqual(receipt["verifierSource"], TRAJECTORY_SOURCE)
+        with self.assertRaisesRegex(PackageError, "one bound reference"):
+            verify_trajectory(*paths, **dict(pins, expected_result_fingerprint="sha256:" + "0" * 64))
+        task = composed_records(self.packet)["repository-task"]
+        alternate, trace = retained_trajectory(task, "provider_failure", repository_id="other-repository")
+        self.assertEqual(trace, paths[2].read_bytes())
+        paths[1].write_bytes(alternate.model_dump_json().encode())
+        with self.assertRaisesRegex(PackageError, "verifier rejected"):
+            verify_trajectory(*paths, **dict(pins, max_bytes=paths[1].stat().st_size))
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_trajectory_readback_rejects_changed_bytes_and_independent_pin_mismatches(self):
+        paths, pins = self.trajectory_package()
+        with self.assertRaisesRegex(PackageError, "Package SHA-256 mismatch"):
+            verify_trajectory(*paths, **dict(pins, expected_sha256="0" * 64))
+        with self.assertRaisesRegex(PackageError, "resource budget"):
+            verify_trajectory(*paths, **dict(pins, max_bytes=pins["max_bytes"] - 1))
+        trace = paths[2].read_bytes()
+        self.assertIn(b'"sequence":1', trace)
+        paths[2].write_bytes(trace.replace(b'"sequence":1', b'"sequence":2'))
+        with self.assertRaisesRegex(PackageError, "verifier rejected"):
+            verify_trajectory(*paths, **pins)
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_valid_trajectory_cannot_attach_to_different_repository_task(self):
+        paths, pins = self.trajectory_package(repository_id="different-repository")
+        with self.assertRaisesRegex(PackageError, "different repository task"):
+            verify_trajectory(*paths, **pins)
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_verified_result_must_agree_with_package_trace_digest(self):
+        paths, pins = self.trajectory_package(reference_digest="sha256:" + "a" * 64)
+        with self.assertRaisesRegex(PackageError, "package trace digest"):
+            verify_trajectory(*paths, **pins)
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_bound_candidate_matches_canonical_harness_candidate_identity(self):
+        from long_haul.work.repository_models import DigestReference
+
+        candidate = self.packet["candidate"]
+        digest = projection_fingerprint(candidate)
+        result_candidate = DigestReference(reference="artifact:frozen-worker-candidate", digest=digest)
+        paths, pins = self.trajectory_package(candidate_record=candidate, result_candidate=result_candidate)
+        self.assertEqual(verify_trajectory(*paths, **pins)["candidateDisposition"], "frozen")
+        paths[0].unlink()
+        different = result_candidate.model_copy(update={"digest": "sha256:" + "0" * 64})
+        paths, pins = self.trajectory_package(candidate_record=candidate, result_candidate=different)
+        with self.assertRaisesRegex(PackageError, "different frozen candidate"):
+            verify_trajectory(*paths, **pins)
 
     def test_invalid_trace_fingerprint_and_changed_schema_source_rejected(self):
         self.packet["checks"][0]["stdout_digest"] = "private output disguised as a digest"

@@ -9,7 +9,7 @@ The existing manifest's `evidence.repositoryAgent` field declares:
 - `schemaVersion: 1` and the exact Long-Haul `source` repository/commit;
 - `audience`: `worker`, `private-evaluator`, or `public-evidence`;
 - `records`: unique `kind`, package `path`, and compact-JSON `fingerprint` entries;
-- `references`: exact upstream semantic-trajectory or governed-corpus references whose `qualification` is `upstream-pending`.
+- `references`: exact upstream semantic-trajectory or governed-corpus references. Existing inert references use `upstream-pending`. A private package can declare a bound trajectory with `readback-required`.
 
 Record kinds are `repository-task`, `repository-context`, `repository-candidate`, `repository-evaluator-public`, `repository-evaluator-sealed`, and `repository-evidence`. These compose existing Compiled Experiment envelopes; they do not create another scheduler, task authority, corpus store, or scientific acceptance service. No packaged record is executed while compiling or verifying.
 
@@ -25,7 +25,22 @@ Worker/public packages fail closed on sealed evaluator references, sealed requir
 
 The `private-evaluator` audience can retain full evaluator profiles and unsuccessful, invalid, timed-out, or interrupted observations. The publication verifier rejects that audience. A worker task without sealed evaluation may carry the ordinary public subset; this does not certify a private-check workflow. Caller authentication, reviewed source admission, resource rights, and publication authority remain separate upstream gates.
 
-Trajectory/corpus references retain exact source and content identities but do not validate raw trajectories, establish corpus rights, or grant training eligibility. Those require the qualified upstream #244/#248 contracts and later profile pin upgrades. Package verification reports `acceptance: not-evaluated` and `trainingEligibility: not-granted`.
+Package verification reports `acceptance: not-evaluated` and `trainingEligibility: not-granted`. Governed corpus readback and rights depend on Long-Haul #248.
+
+## Semantic trajectory readback
+
+A `private-evaluator` package with a typed `repository-task` record can add a `semantic-trajectory` reference. Set `qualification` to `readback-required`, `source` to repository `pH34r-pH/long-haul` at `64c81d31fc8193cd2ff9e96a8df1751f86f8a21c`, and `reference` to `artifact:semantic-trace-v1/<result-fingerprint>`. The result fingerprint includes its `sha256:` prefix. Set the reference's `digest` to the exact trace digest from the canonical `HarnessResult`. The result fingerprint distinguishes attempts that have the same empty trace. The package keeps the typed task and reference. The authorized evidence store keeps the original result JSON and JSONL bytes. [Long-Haul trace verifier](https://github.com/pH34r-pH/long-haul/pull/310)
+
+Prepare the verifier in a trusted environment with `python -m pip install '.[trajectory]'`. Keep the package SHA-256 and result fingerprint from independent review. Supply those pins and a caller-owned combined byte budget to read back the evidence offline.
+
+```sh
+experiment-compiler verify-trajectory package.zip result.json semantic-trace.jsonl \
+  --expected-sha256 "$REVIEWED_PACKAGE_SHA256" \
+  --expected-result-fingerprint "$RETAINED_RESULT_FINGERPRINT" \
+  --max-trajectory-bytes "$READ_BUDGET_BYTES"
+```
+
+The command checks the verifier's installed source identity, verifies the canonical result and trace through Long-Haul, then binds the attempt to the package's exact repository task and context. When the package retains a frozen candidate, the result must identify that candidate. The receipt preserves the terminal outcome, event count, candidate disposition, and acceptance state. The existing resource admission, private evaluator disclosure, publication, and corpus-use gates still apply. [Installed source metadata](https://packaging.python.org/en/latest/specifications/direct-url/)
 
 ## Reusable lifecycle components
 

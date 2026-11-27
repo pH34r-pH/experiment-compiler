@@ -22,6 +22,17 @@ from .coverage import inspect_coverage
 from .revision import revise_package
 
 
+def _add_trajectory_command(commands) -> None:
+    trajectory = commands.add_parser("verify-trajectory", help="read back retained Long-Haul trajectory evidence")
+    trajectory.add_argument("package", type=Path)
+    trajectory.add_argument("result", type=Path, help="retained canonical Long-Haul HarnessResult JSON")
+    trajectory.add_argument("trace", type=Path, help="retained canonical Long-Haul semantic trace JSONL")
+    trajectory.add_argument("--expected-sha256", required=True, help="independently retained package SHA-256")
+    trajectory.add_argument("--expected-result-fingerprint", required=True, help="independently retained result fingerprint")
+    trajectory.add_argument("--max-trajectory-bytes", required=True, type=int, help="combined result and trace read budget")
+    add_archive_policy_options(trajectory)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment-compiler")
     parser.add_argument("--version", action="version", version=__version__)
@@ -44,6 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
     check.add_argument("--recipe", type=Path)
     check.add_argument("--expected-sha256")
     add_archive_policy_options(check)
+
+    _add_trajectory_command(commands)
 
     revise = commands.add_parser("revise", help="compile a new plan revision from one verified attempt")
     revise.add_argument("parent_package", type=Path)
@@ -171,6 +184,16 @@ def _project_actions(args: argparse.Namespace) -> dict:
     return result
 
 
+def _verify_trajectory(args: argparse.Namespace) -> dict:
+    from .trajectory import verify_trajectory
+
+    return verify_trajectory(
+        args.package, args.result, args.trace, expected_sha256=args.expected_sha256,
+        expected_result_fingerprint=args.expected_result_fingerprint,
+        max_bytes=args.max_trajectory_bytes, policy=archive_policy_from_args(args),
+    )
+
+
 _COMMANDS = {
     "describe": _describe,
     "catalog": _catalog,
@@ -179,6 +202,7 @@ _COMMANDS = {
     "finalize": _finalize,
     "inspect-coverage": _inspect_coverage,
     "verify": _verify,
+    "verify-trajectory": _verify_trajectory,
     "project-actions": _project_actions,
 }
 
