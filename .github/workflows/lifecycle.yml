@@ -170,6 +170,8 @@ jobs:
       - name: Mutate verifier resource policy and worker admission
         timeout-minutes: 4
         run: |
+          # Irradiate 0.4.3 can reuse coverage collected for different paths.
+          mv .irradiate "$RUNNER_TEMP/irradiate-resource-cache"
           irradiate run experiment_compiler/archive_policy.py experiment_compiler/worker_limits.py \
             --report json --output "$RUNNER_TEMP/irradiate-admission-report.json" \
             --verify-survivors --workers 2 \
@@ -180,6 +182,7 @@ jobs:
             --require-file experiment_compiler/archive_policy.py \
             --require-file experiment_compiler/worker_limits.py
       - name: Retain standard mutation report
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: experiment-compiler-mutation-report-${{ github.sha }}

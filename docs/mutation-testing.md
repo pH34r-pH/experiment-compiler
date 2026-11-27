@@ -42,7 +42,9 @@ python scripts/validate_mutation_report.py irradiate-report.json --require-mutan
 
 The lifecycle mutation job also targets the verifier's archive read policy and
 the runner's worker-limit admission. It uses the existing archive tests and
-synthetic cgroup observations without launching a workload.
+synthetic cgroup observations without launching a workload. Run the next pass
+from a fresh checkout, or move aside the `.irradiate` cache first. Irradiate
+0.4.3 can reuse coverage collected for another path.
 
 ```sh
 irradiate run experiment_compiler/archive_policy.py experiment_compiler/worker_limits.py \
@@ -55,9 +57,10 @@ python scripts/validate_mutation_report.py irradiate-admission-report.json \
 ```
 
 The two reports retain the resource-conversion baseline and show the observed
-results by source file. The extra pass has a four-minute step timeout in the
-existing ten-minute job. Run Irradiate on Linux, where its worker process uses
-Unix sockets.
+results by source file. The admission report must include a killed or surviving
+mutant for each target. The extra pass has a four-minute step timeout in the
+existing ten-minute job. Run Irradiate on Linux, where its worker process uses Unix
+sockets.
 
 No mutation-score threshold is enforced during the pilot. Surviving mutants are evidence to review,
 not a requirement to manufacture tests until the score reaches 100%.
