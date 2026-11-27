@@ -115,8 +115,10 @@ def agent_record_paths(manifest, member_names):
 
 
 def _references(references, audience):
+    from .corpus import is_bound_corpus
     from .trajectory import BOUND_QUALIFICATION, is_bound_trajectory
 
+    corpus_digests = set()
     for reference in references:
         fields = {"kind", "source", "reference", "digest", "qualification"}
         if (not isinstance(reference, dict) or set(reference) != fields
@@ -130,16 +132,22 @@ def _references(references, audience):
             raise PackageError("Trajectory/corpus references require exact upstream identity; payloads are not qualified")
         if reference["qualification"] == "upstream-pending":
             continue
-        if reference["qualification"] != BOUND_QUALIFICATION or not is_bound_trajectory(reference):
+        corpus = is_bound_corpus(reference)
+        if reference["qualification"] != BOUND_QUALIFICATION or not (corpus or is_bound_trajectory(reference)):
             raise PackageError("Trajectory/corpus reference lacks a supported readback identity; payloads are not qualified")
         if audience != "private-evaluator":
-            raise PackageError("Bound trajectory references require the private-evaluator audience")
+            raise PackageError("Bound evidence references require the private-evaluator audience")
+        if corpus:
+            if reference["digest"] in corpus_digests:
+                raise PackageError("Duplicate bound corpus reference")
+            corpus_digests.add(reference["digest"])
 
 
 def _trajectory_binding(documents, references):
-    from .trajectory import BOUND_QUALIFICATION
+    from .trajectory import BOUND_QUALIFICATION, is_bound_trajectory
 
-    if not any(reference["qualification"] == BOUND_QUALIFICATION for reference in references):
+    if not any(reference["qualification"] == BOUND_QUALIFICATION and is_bound_trajectory(reference)
+               for reference in references):
         return {}
     task = documents.get("repository-task")
     if task is None:

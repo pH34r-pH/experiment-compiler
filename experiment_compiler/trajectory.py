@@ -64,6 +64,7 @@ def _bound_reference(report: dict, expected: str) -> dict:
     matches = [
         item for item in agent["references"]
         if item["qualification"] == BOUND_QUALIFICATION
+        and is_bound_trajectory(item)
         and item["reference"] == TRACE_REFERENCE + "/" + expected
     ]
     if len(matches) != 1:

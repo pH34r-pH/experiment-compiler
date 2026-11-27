@@ -9,7 +9,7 @@ The existing manifest's `evidence.repositoryAgent` field declares:
 - `schemaVersion: 1` and the exact Long-Haul `source` repository/commit;
 - `audience`: `worker`, `private-evaluator`, or `public-evidence`;
 - `records`: unique `kind`, package `path`, and compact-JSON `fingerprint` entries;
-- `references`: exact upstream semantic-trajectory or governed-corpus references. Existing inert references use `upstream-pending`. A private package can declare a bound trajectory with `readback-required`.
+- `references`: exact upstream semantic-trajectory or governed-corpus references. Existing inert references use `upstream-pending`. A private package can declare a bound trajectory or corpus inventory with `readback-required`.
 
 Record kinds are `repository-task`, `repository-context`, `repository-candidate`, `repository-evaluator-public`, `repository-evaluator-sealed`, and `repository-evidence`. These compose existing Compiled Experiment envelopes; they do not create another scheduler, task authority, corpus store, or scientific acceptance service. No packaged record is executed while compiling or verifying.
 
@@ -41,6 +41,39 @@ experiment-compiler verify-trajectory package.zip result.json semantic-trace.jso
 ```
 
 The command checks the verifier's installed source identity, verifies the canonical result and trace through Long-Haul, then binds the attempt to the package's exact repository task and context. When the package retains a frozen candidate, the result must identify that candidate. The receipt preserves the terminal outcome, event count, candidate disposition, and acceptance state. The existing resource admission, private evaluator disclosure, publication, and corpus-use gates still apply. [Installed source metadata](https://packaging.python.org/en/latest/specifications/direct-url/)
+
+## Corpus file readback
+
+Use the existing `governed-corpus` reference in a `private-evaluator` package.
+Set `qualification` to `readback-required` and `reference` to
+`artifact:croissant-1.1`. The `source` identifies
+`pH34r-pH/long-haul@71f75bca00aacebf75c73155e3fca1d007ffd501`.
+Set `digest` to `sha256:` followed by the SHA-256 of the exact Croissant
+metadata bytes from the reviewed producer. The reviewed package retains
+only the reference. Keep the metadata and files in approved private storage.
+[Long-Haul exporter review](https://github.com/pH34r-pH/long-haul/pull/321)
+
+Review the exact package and metadata digests independently. Use an
+authorized operator with a current file-read decision for the snapshot.
+Provide a local directory containing exactly the inventoried regular files
+at their `FileObject.name` values. Keep the directory stable through readback.
+
+```sh
+experiment-compiler verify-corpus package.zip croissant.json snapshot \
+  --expected-sha256 "$REVIEWED_PACKAGE_SHA256" \
+  --expected-metadata-sha256 "$REVIEWED_METADATA_SHA256" \
+  --max-corpus-bytes "$READ_BUDGET_BYTES"
+```
+
+The command checks the two pins, the package's reference, the complete
+direct FileObject inventory, and each file's SHA-256. It counts the metadata
+and streamed files against the caller's read budget. Croissant URLs remain
+descriptive, and the command reads only the specified local inputs. The
+receipt retains aggregate counts and digests. Record current use rights,
+frozen partitions, contamination checks, and evaluator evidence through
+the existing Long-Haul corpus admission. This receipt sets
+`corpusAdmission` and `trainingEligibility` to `not-granted`.
+[Croissant 1.1 FileObjects](https://docs.mlcommons.org/croissant/docs/croissant-spec-1.1.html#fileobject) · [Long-Haul corpus qualification](https://github.com/pH34r-pH/long-haul/issues/246)
 
 ## Reusable lifecycle components
 
