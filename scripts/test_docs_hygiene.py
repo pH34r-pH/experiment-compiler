@@ -26,6 +26,15 @@ class DocumentationHygieneTests(unittest.TestCase):
             root = Path(directory)
             self.assertTrue(check_paths(root, ["examples/study/evidence/cache/result.json"]))
 
+    def test_feature_records_under_build_are_allowed_but_build_output_is_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for record in ("plan.md", "tests.md", "tasks.md"):
+                self.assertEqual([], check_paths(root, [f"build/archive-read-policy/{record}"]))
+            for rejected in ("build/lib/experiment_compiler/core.py", "build/archive-read-policy/notes.md",
+                             "build/archive-read-policy/cache/plan.md", "build/plan.md", "build/Bad_Name/plan.md"):
+                self.assertTrue(check_paths(root, [rejected]), rejected)
+
     def test_issue_number_only_living_name_is_rejected_and_architecture_is_allowed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

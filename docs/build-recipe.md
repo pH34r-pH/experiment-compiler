@@ -46,7 +46,7 @@ declared ZIP sizes before opening members and counts expanded bytes during reads
 Library callers can pass `policy=PackageReadPolicy(...)` to `verify_package`,
 `verify_bytes`, or `run_package`. `PackageReadPolicy` and `ResourcePolicyError`
 are available from `experiment_compiler.archive_policy`. Unset budgets impose
-no additional limit. A `ResourcePolicyError` reports a local refusal, so the
+no additional limit. A `ResourcePolicyError` reports a local refusal and the observed value that exceeded the limit, so the
 caller can retry under an appropriate policy. See [Security](../SECURITY.md)
 for process resource limits and JSON memory considerations.
 

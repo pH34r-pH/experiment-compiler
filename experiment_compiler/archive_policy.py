@@ -13,12 +13,14 @@ class PackageError(ValueError):
 class ResourcePolicyError(PackageError):
     """A caller's operational budget refused the archive."""
 
-    def __init__(self, budget: str, limit: int, *, member: str | None = None) -> None:
+    def __init__(self, budget: str, limit: int, *, member: str | None = None, observed: int | None = None) -> None:
         self.budget = budget
         self.limit = limit
         self.member = member
+        self.observed = observed
         target = f" for member {member!r}" if member is not None else ""
-        super().__init__(f"Local resource policy refused package{target}: {budget} exceeds {limit}")
+        value = f" (observed {observed})" if observed is not None else ""
+        super().__init__(f"Local resource policy refused package{target}: {budget} exceeds {limit}{value}")
 
 
 @dataclass(frozen=True)
@@ -48,12 +50,13 @@ class PackageReadPolicy:
         self._check("max_total_bytes", total_bytes, info.filename)
         ratio = self.max_compression_ratio
         if ratio is not None and member_bytes > info.compress_size * ratio:
-            raise ResourcePolicyError("max_compression_ratio", ratio, member=info.filename)
+            observed = -(-member_bytes // info.compress_size) if info.compress_size else member_bytes
+            raise ResourcePolicyError("max_compression_ratio", ratio, member=info.filename, observed=observed)
 
     def _check(self, budget: str, value: int, member: str | None = None) -> None:
         limit = getattr(self, budget)
         if limit is not None and value > limit:
-            raise ResourcePolicyError(budget, limit, member=member)
+            raise ResourcePolicyError(budget, limit, member=member, observed=value)
 
 
 class ArchiveMemberReader:

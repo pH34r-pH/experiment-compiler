@@ -44,6 +44,10 @@ verified lifecycle plan
 
 `__main__.py` is the CLI dispatcher. `core.py` owns recipe, package, and lifecycle integrity; `assembly.py` owns source-closure packaging; `runner.py` is the explicit execution boundary; `revision.py` and `finalization.py` create new immutable lifecycle identities; `catalog.py` derives display records. The full trust-boundary model is in [`docs/architecture.md`](docs/architecture.md) and the package contract is in [`docs/build-recipe.md`](docs/build-recipe.md).
 
+## Specified Development specification
+
+The archive read policy is onboarded under the [Specified Development](https://github.com/pH34r-pH/specified-development) paradigm. Its living, present-tense specification is [`spec/features/archive-read-policy/index.md`](spec/features/archive-read-policy/index.md); its plan, public interface and independent test contract are under `build/archive-read-policy/`, and the executable cases are `tests/test_spec_archive_read_policy.py`. Change that behavior spec-first: edit the specification in present tense as if the change were done, then the plan and test contract, then the code. Expected results never come from the implementation's output. Every other part of the repository is explicitly unspecified until it is onboarded, and `docs/` remains descriptive guidance. `onboarding.json` records the onboarding, and lifecycle CI checks the layout and the record.
+
 ## Agent-first onboarding
 
 The onboarding, doctor, and repair skills live under [`.agents/skills/`](.agents/skills/). Keep those files and their bundled template/scripts as the canonical mode definitions. The [agent onboarding guide](docs/agent-onboarding.md) records client-specific installation/discovery paths and scientific/evidence boundaries. Skills guide work; they do not grant permission to execute an experiment, install dependencies, spend money, publish, or change access.
