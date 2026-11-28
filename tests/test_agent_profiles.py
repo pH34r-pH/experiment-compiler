@@ -322,6 +322,12 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         with patch(__name__ + ".retained_trajectory", side_effect=produce):
             paths, pins = self.trajectory_package()
         trace = paths[2].read_bytes()
+        events = [json.loads(line) for line in trace.splitlines()]
+        self.assertEqual(
+            [(event["sequence"], event["phase"], event["action"], event["outcome"]) for event in events],
+            [(1, "start", "read", "unknown"), (2, "end", "read", "success"),
+             (3, "lifecycle", "recovery", "unknown")],
+        )
         self.assertNotIn(b"SYNTHETIC_PRIVATE_CANARY", trace)
         self.assertNotIn(b"fixture/code.py", trace)
         receipt = verify_trajectory(*paths, **pins)
