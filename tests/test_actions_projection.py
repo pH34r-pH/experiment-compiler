@@ -173,3 +173,28 @@ class ActionsProjectionTests(unittest.TestCase):
         self.workflow["label"] = "x" * (1024 * 1024)
         with self.assertRaisesRegex(PackageError, "exceeds 1 MiB"):
             self.project()
+
+    def test_repository_backed_package_source_binds_location_and_blocks_public_archive(self):
+        package, profile, package_sha, profile_sha = self.build()
+        source = {"repository": "example/private-plans", "commit": "e" * 40,
+                  "path": "plans/study-v1.zip"}
+        result = project_actions(package, profile, expected_sha256=package_sha,
+                                 expected_profile_sha256=profile_sha, package_source=source)
+        self.assertFalse(result["dispatchAuthorized"])
+        self.assertEqual(result["packageSource"], source)
+        job_inputs = result["jobs"]["native"]["with"]
+        self.assertEqual(job_inputs["package-source-repo"], source["repository"])
+        self.assertEqual(job_inputs["package-source-commit"], source["commit"])
+        self.assertEqual(job_inputs["package-source-path"], source["path"])
+        self.assertIn("package-storage commit alone is not execution authority", result["blockers"])
+        for bad_source in (
+            {"repository": "pH34r-pH/compiled-experiments", "commit": "e" * 40, "path": "plans/x.zip"},
+            {"repository": "PH34R-PH/COMPILED-EXPERIMENTS", "commit": "e" * 40, "path": "plans/x.zip"},
+            {"repository": "example/private-plans", "commit": "main", "path": "plans/x.zip"},
+            {"repository": "example/private-plans", "commit": "e" * 40, "path": "../escape.zip"},
+            {"repository": "example/private-plans", "commit": "e" * 40, "path": "plans/not-a-zip.json"},
+            {"repository": "example/private-plans", "commit": "e" * 40},
+        ):
+            with self.subTest(bad_source=bad_source), self.assertRaises(PackageError):
+                project_actions(package, profile, expected_sha256=package_sha,
+                                expected_profile_sha256=profile_sha, package_source=bad_source)

@@ -192,3 +192,22 @@ authority, executable native adapter, durable transport, and physical profile
 qualification are still necessary. Its local receipt store remains POSIX-only.
 No workflow is wired to this consumer by this change, and no physical workload
 was launched in its tests.
+
+## Repository-backed package handoff and retry binding
+
+Both `project-actions` and `run_native_controller` accept an optional
+`packageSource` (`repository`, 40-character `commit`, and archive-relative
+`.zip` `path`) for controllers reading exact package bytes from a pinned Git
+repository rather than a workflow artifact. The CLI exposes this via
+`--package-source-repo`, `--package-source-commit`, and `--package-source-path`,
+which must be provided together. The package's scientific `source` identity is
+unchanged, `pH34r-pH/compiled-experiments` is rejected as a live execution
+intake, and `NativeRequest.specification` binds both `packageSource` and the
+verified package digest so `request.sha256` commits to location and bytes.
+
+For an explicitly authorized retry after a prior attempt, `selection` may
+declare `retryOfAttemptId` (12-character hex, distinct from `attemptId`). The
+controller binds `retryOfAttemptId` into `NativeRequest.specification`, yielding
+a distinct `request.sha256` while preserving one-shot directory creation for each
+scientific attempt ID. Duplicate redelivery of an existing attempt ID fails
+without launching a second execution.

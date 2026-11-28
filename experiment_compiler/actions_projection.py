@@ -21,6 +21,26 @@ _LIMITS = {"cores", "ramMiB", "tmpdirMiB", "outdirMiB", "wallSeconds"}
 _CAPABILITIES = {"foregroundExclusion", "processTreeCleanup", "resourceEnforcement",
                  "networkIsolation", "candidateCredentialIsolation", "assetVerification",
                  "startedTerminalRetention", "lossRecovery"}
+_REPO_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+_ARCHIVE_ONLY_REPOSITORIES = {"ph34r-ph/compiled-experiments"}
+
+
+def validate_package_source(package_source: dict | None) -> dict | None:
+    """Validate optional repository-backed package location without granting authority."""
+    if package_source is None:
+        return None
+    if not isinstance(package_source, dict) or set(package_source) != {"repository", "commit", "path"}:
+        raise PackageError("packageSource requires exact repository, commit, and path fields")
+    repo, commit, raw_path = package_source["repository"], package_source["commit"], package_source["path"]
+    if (not isinstance(repo, str) or not _REPO_PATTERN.fullmatch(repo) or
+            not isinstance(commit, str) or not _COMMIT_PATTERN.fullmatch(commit)):
+        raise PackageError("packageSource requires a valid repository and full commit SHA")
+    if repo.lower() in _ARCHIVE_ONLY_REPOSITORIES:
+        raise PackageError("public archive repository cannot be used as a live execution intake")
+    if not isinstance(raw_path, str) or not raw_path.endswith(".zip"):
+        raise PackageError("packageSource path must reference a portable .zip archive")
+    return {"repository": repo, "commit": commit, "path": safe_path(raw_path)}
 
 
 def _digest(value, label):
@@ -143,8 +163,21 @@ def _native_plan(payload, profile):
     return job, inputs, maximum
 
 
+def _attach_package_source(result: dict, validated_source: dict | None) -> dict:
+    if validated_source is None:
+        return result
+    result["packageSource"] = validated_source
+    result["blockers"].append("package-storage commit alone is not execution authority")
+    result["jobs"]["native"]["with"].update({
+        "package-source-repo": validated_source["repository"],
+        "package-source-commit": validated_source["commit"],
+        "package-source-path": validated_source["path"],
+    })
+    return result
+
+
 def project_actions(package: Path, profile_path: Path, *, expected_sha256: str,
-                    expected_profile_sha256: str) -> dict:
+                    expected_profile_sha256: str, package_source: dict | None = None) -> dict:
     """Derive inert Actions job data from independently pinned source/profile bytes.
 
     The caller selects trusted Fleet profile bytes outside the candidate package.
@@ -152,6 +185,7 @@ def project_actions(package: Path, profile_path: Path, *, expected_sha256: str,
     no workflow is dispatched, and no started/terminal receipt is manufactured.
     """
     _digest(expected_sha256, "package")
+    validated_source = validate_package_source(package_source)
     _, payload = _read_package(bounded_read(package), expected_sha256)
     profile = _pinned_profile(profile_path, expected_profile_sha256)
     assets = _closure(payload, profile)
@@ -165,7 +199,7 @@ def project_actions(package: Path, profile_path: Path, *, expected_sha256: str,
         blockers.append("missing profile qualification evidence")
     blockers.extend(["worker must authenticate qualification and verify staged asset bytes",
                      "native execution and compatible attempt-receipt transport require qualification"])
-    return {
+    result = {
         "schemaVersion": 1, "kind": "fleet-native-actions-projection", "dispatchAuthorized": False,
         "planPackageSha256": expected_sha256, "workerProfileSha256": expected_profile_sha256,
         "workflowSha256": hashlib.sha256(payload["experiment/workflow.cwl"]).hexdigest(),
@@ -177,3 +211,4 @@ def project_actions(package: Path, profile_path: Path, *, expected_sha256: str,
                             "with": {"plan-sha256": expected_sha256, "profile-sha256": expected_profile_sha256,
                                      "max-wall-seconds": maximum}}},
     }
+    return _attach_package_source(result, validated_source)
