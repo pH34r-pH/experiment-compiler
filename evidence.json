@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "kind": "requirement-evidence",
+  "revision": "f8b084135e0aac68996f05109255eeb59fb85963",
+  "features": [
+    "archive-read-policy"
+  ],
+  "cases": {
+    "ARP-001": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-001",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-002": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-002",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-003": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-003",
+        "archive-read-policy#ARP-FR-004",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-004": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-005",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-005": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-006",
+        "archive-read-policy#ARP-FR-003",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-006": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-007",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-007": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-008",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-008": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-009",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-009": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-010",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-010": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-011",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-011": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-012",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-012": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-013",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    },
+    "ARP-013": {
+      "requirements": [
+        "archive-read-policy#ARP-FR-014",
+        "archive-read-policy#ARP-SC-001"
+      ]
+    }
+  },
+  "tasks": {},
+  "results": {
+    "revision": "f8b084135e0aac68996f05109255eeb59fb85963",
+    "requirement_hashes": {
+      "archive-read-policy#ARP-FR-001": "ab12873a539070e88cf09cbf2484dda2b9d46c46b3e7f4455b51b5e00fbfe000",
+      "archive-read-policy#ARP-FR-002": "5a00521c66c67a7ccff3e0ff11784e5754c727b8570ee67a8d7d0694144247cf",
+      "archive-read-policy#ARP-FR-003": "a67ebdaf11f18df1d7d4d73c09ed2110b891cc8d8cebcb297a422499118029cd",
+      "archive-read-policy#ARP-FR-004": "694c7856f0be85021ee2144a23997ecc29fc7d4f70d81446d383b6bea343561b",
+      "archive-read-policy#ARP-FR-005": "ee52135b2e3f0ae41fbba525716b06021c6b0e1a1ef4bbdbc723addf9f70b947",
+      "archive-read-policy#ARP-FR-006": "80e821c67e339e18600fc0e7a872568f79dbca8997e41b3abe909fc5cd864aea",
+      "archive-read-policy#ARP-FR-007": "95e3180f76a477aa6f15904d8f0bbf3597191f2987ca4ccd13f828869daf625d",
+      "archive-read-policy#ARP-FR-008": "a3800fa15648cbc5f69669e6d3e0740bc585739b30f17ff45e3e4699e6949626",
+      "archive-read-policy#ARP-FR-009": "1b50d2bff4133bbda82e32733997f07b2857e9add6689a9659e3a5ede67e848a",
+      "archive-read-policy#ARP-FR-010": "7edaf321e58e9679042364abc597cf2e5f5cd323dd2ef88851c3d173fba6cff4",
+      "archive-read-policy#ARP-FR-011": "3104527030115d6023520e7f8151cf3b2c09605849d71ac2bfba159147b0a997",
+      "archive-read-policy#ARP-FR-012": "103bacb0a49f5efb2cbc492764a9d7bf118ef9e600ffb4d33195a3d4499b29d6",
+      "archive-read-policy#ARP-FR-013": "335a11d2f9d8f91a26052529913de66f66f1c1436459fdb0712e6376bebcce4b",
+      "archive-read-policy#ARP-FR-014": "b925648910a162c54ff1729be8025eb888e06d9da4682f833c60ac8d95a13cbe",
+      "archive-read-policy#ARP-SC-001": "e2ecbf24f271c337d6ffa998cb20f5b6bfafbf173e77281b833162c1de456961"
+    },
+    "cases": {
+      "ARP-001": "pass",
+      "ARP-002": "pass",
+      "ARP-003": "pass",
+      "ARP-004": "pass",
+      "ARP-005": "pass",
+      "ARP-006": "pass",
+      "ARP-007": "pass",
+      "ARP-008": "pass",
+      "ARP-009": "pass",
+      "ARP-010": "pass",
+      "ARP-011": "pass",
+      "ARP-012": "pass",
+      "ARP-013": "pass"
+    }
+  }
+}

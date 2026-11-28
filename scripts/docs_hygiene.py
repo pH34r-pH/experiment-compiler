@@ -20,6 +20,8 @@ BAD_LIVING_STEMS = {"draft", "new", "notes", "tmp", "temp", "untitled"}
 DESCRIPTIVE_SLUG = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 SEQUENCED_NAME = re.compile(r"^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$")
 CONVENTIONAL_NAME = re.compile(r"^(?:adr|spec)-?\d+$", re.IGNORECASE)
+# Specified Development feature records are tracked source, not build output.
+FEATURE_RECORD = re.compile(r"^build/[a-z0-9]+(?:-[a-z0-9]+)*/(?:plan|tests|tasks)\.md$")
 
 
 def _relative(path: str | Path, root: Path) -> Path:
@@ -66,6 +68,8 @@ def _check_doc_name(path: Path, new_paths: set[str]) -> list[str]:
 
 
 def _check_artifact(path: Path) -> list[str]:
+    if FEATURE_RECORD.fullmatch(path.as_posix()):
+        return []
     if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES:
         return [f"new or changed path is an unapproved temporary/build artifact: {path}"]
     if any(part in SUSPICIOUS_PARTS for part in path.parts):

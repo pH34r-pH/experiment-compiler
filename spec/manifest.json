@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "documents": {
+    "experiment-compiler/overview": {
+      "path": "index.md",
+      "role": "overview",
+      "normative_dependencies": [],
+      "assets": [],
+      "visibility": "public"
+    },
+    "experiment-compiler/archive-read-policy": {
+      "path": "features/archive-read-policy/index.md",
+      "role": "feature",
+      "normative_dependencies": [],
+      "assets": [],
+      "visibility": "public"
+    }
+  },
+  "features": {
+    "archive-read-policy": {
+      "root": "experiment-compiler/archive-read-policy"
+    }
+  },
+  "assets": {}
+}

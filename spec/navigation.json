@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "label": "Overview",
+      "document": "experiment-compiler/overview"
+    },
+    {
+      "label": "Archive read policy",
+      "document": "experiment-compiler/archive-read-policy"
+    }
+  ]
+}

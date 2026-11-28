@@ -25,6 +25,7 @@ Keep source paths relative and bounded, preserve declared member bytes, reject u
 
 ## Change routing and validation
 
+- Archive read policy and member reader (`archive_policy.py`, `archive_policy_cli.py`): the specification in `spec/features/archive-read-policy/`, then `tests/test_spec_archive_read_policy.py`; change the specification first.
 - Recipe/header/path/manifest rules: `core.py` + `tests/test_compiler.py`.
 - Execution admission and worker limits: `runner_admission.py` and `worker_limits.py` + `tests/test_runner.py` and `tests/test_worker_limits.py`.
 - Process handling and collection: `runner_process.py` and `runner_logs.py` + `tests/test_runner.py` and `tests/test_runner_cli.py`.

@@ -1,0 +1,315 @@
+{
+  "schema_version": 1,
+  "kind": "brownfield-onboarding-record",
+  "repository": "pH34r-pH/experiment-compiler",
+  "baseline_revision": "d5c579436d81207a72ec0236af2bfa5a9484eb8e",
+  "areas": [
+    {
+      "feature_id": "archive-read-policy",
+      "paths": [
+        "experiment_compiler/archive_policy.py",
+        "experiment_compiler/archive_policy_cli.py"
+      ]
+    }
+  ],
+  "requirements": {
+    "archive-read-policy#ARP-FR-001": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: Unset budgets impose no additional limit"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-002": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-003": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: Each flag is an optional inclusive positive integer"
+        },
+        {
+          "kind": "test",
+          "reference": "tests/test_compiler.py::test_archive_policy_accepts_exact_inclusive_limits_and_rejects_smaller_limits"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-004": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: checks declared ZIP sizes before opening members"
+        },
+        {
+          "kind": "test",
+          "reference": "tests/test_compiler.py::test_archive_policy_counts_manifest_and_refuses_before_opening_it"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-005": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "test",
+          "reference": "tests/test_compiler.py::test_archive_policy_checks_observed_bytes_before_retaining_them"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-006": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: The ratio compares each member's expanded bytes with its compressed bytes"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-007": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: A ResourcePolicyError reports a local refusal"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-008": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "test",
+          "reference": "tests/test_compiler.py::test_archive_policy_hashes_complete_members_with_optional_capture"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-009": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy_cli.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "docs/build-recipe.md: --max-member-bytes, --max-total-bytes, --max-members, --max-compression-ratio"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-010": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "documentation",
+          "reference": "Owner-approved spec-first change in the onboarding pilot"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-011": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "observed",
+          "reference": "ceil(expanded/compressed) observed; zero compressed size refuses nonempty members"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-012": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "observed",
+          "reference": "total_bytes is 20 after a refused read of a 10-byte member against a 15-byte budget"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-013": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy.py"
+        },
+        {
+          "kind": "observed",
+          "reference": "check_bytes tests member, total, then ratio"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-FR-014": {
+      "sources": [
+        {
+          "kind": "code",
+          "reference": "experiment_compiler/archive_policy_cli.py"
+        },
+        {
+          "kind": "observed",
+          "reference": "int() accepts +3, ' 3 ' and 1_000"
+        }
+      ]
+    },
+    "archive-read-policy#ARP-SC-001": {
+      "sources": [
+        {
+          "kind": "documentation",
+          "reference": "build/archive-read-policy/tests.md"
+        }
+      ]
+    }
+  },
+  "known_defects": [],
+  "oracle": [
+    {
+      "case": "ARP-001",
+      "requirements": [
+        "archive-read-policy#ARP-FR-001",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-002",
+      "requirements": [
+        "archive-read-policy#ARP-FR-002",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-003",
+      "requirements": [
+        "archive-read-policy#ARP-FR-003",
+        "archive-read-policy#ARP-FR-004",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-004",
+      "requirements": [
+        "archive-read-policy#ARP-FR-005",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-005",
+      "requirements": [
+        "archive-read-policy#ARP-FR-006",
+        "archive-read-policy#ARP-FR-003",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-006",
+      "requirements": [
+        "archive-read-policy#ARP-FR-007",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-007",
+      "requirements": [
+        "archive-read-policy#ARP-FR-008",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-008",
+      "requirements": [
+        "archive-read-policy#ARP-FR-009",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-009",
+      "requirements": [
+        "archive-read-policy#ARP-FR-010",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-010",
+      "requirements": [
+        "archive-read-policy#ARP-FR-011",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-011",
+      "requirements": [
+        "archive-read-policy#ARP-FR-012",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-012",
+      "requirements": [
+        "archive-read-policy#ARP-FR-013",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    },
+    {
+      "case": "ARP-013",
+      "requirements": [
+        "archive-read-policy#ARP-FR-014",
+        "archive-read-policy#ARP-SC-001"
+      ],
+      "expected_source": "accepted-spec"
+    }
+  ],
+  "acceptance": {
+    "state": "candidate"
+  },
+  "initial_gaps": [
+    "archive-read-policy#ARP-FR-010",
+    "archive-read-policy#ARP-FR-011",
+    "archive-read-policy#ARP-SC-001"
+  ],
+  "spec_kit_layout": null
+}
