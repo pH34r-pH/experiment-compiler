@@ -91,3 +91,68 @@ def retained_trajectory(task, terminal, *, repository_id=None, candidate=None):
     cleanup = HarnessCleanup(attempt_id=attempt.attempt_id, session_id=attempt.session_id, boundary="fixture",
                              process_tree_stopped=True, evidence=reference("cleanup"))
     return state.finish(events, cleanup, candidate), semantic_trace_bytes(events)
+
+
+def projected_trajectory(task):
+    """Produce synthetic wire events through the pinned upstream projector."""
+    from datetime import timedelta
+
+    from long_haul.adapters.fixture_harness import FixtureCodingHarness
+    from long_haul.adapters.harness_trace import TraceNormalizationPolicy, TraceNormalizer, TraceUseAdmission
+    from long_haul.resource_policy import PolicyRule, ResourceIdentity, ResourcePolicyProfile, ResourceUseRequest
+    from long_haul.work import WorkContract, WorkSession
+    from long_haul.work.harness import HarnessCleanup, HarnessIdentity, harness_attempt, semantic_trace_bytes
+    from long_haul.work.repository_models import DigestReference, content_digest
+
+    def digest_reference(name):
+        return DigestReference(reference="urn:fixture:" + name, digest=content_digest(name.encode()))
+
+    now = datetime(2026, 11, 27, tzinfo=timezone.utc)
+    contract = WorkContract(
+        contract_id="contract", mission_id="mission", objective="synthetic fixture",
+        allowed_paths=["fixture"], capabilities=["read"], budget={"wall_seconds": 30},
+        repository_work=task, success_predicates=[{
+            "predicate_id": "tests", "kind": "test", "description": "external fixture",
+            "command": ["trusted-check"],
+        }],
+    )
+    session = WorkSession(contract_id="contract", crew_id="crew", session_id="session")
+    identity = HarnessIdentity(
+        harness_id="fixture", package_name="fixture", package_version="1", protocol="fixture-v1",
+        source=digest_reference("source"), artifact=digest_reference("artifact"),
+        configuration=digest_reference("configuration"),
+    )
+    attempt = harness_attempt(contract, session, identity, "attempt")
+    profile = ResourcePolicyProfile(
+        identity=ResourceIdentity(resource_id="urn:fixture:trace", resource_type="operational-trace"),
+        authority_class="authoritative-control", lifecycle="active", policy_id="urn:fixture:policy",
+        policy_assigner="urn:fixture:operator", permissions=[PolicyRule(
+            rule_id="trace", actions=["annotate"], purposes=["operational-trace"],
+            crew_ids=["crew"], contract_ids=["contract"],
+        )],
+    )
+    request = ResourceUseRequest(
+        request_id="trace-request", resource_id=profile.identity.resource_id, caller_id="session",
+        crew_id="crew", contract_id="contract", mission_id="mission", repository_id=attempt.repository_id,
+        action="annotate", purpose="operational-trace", now=now,
+    )
+    normalizer = TraceNormalizer(
+        contract, attempt, TraceNormalizationPolicy(key_reference=digest_reference("key")),
+        b"synthetic fixture key material 32 bytes long!", TraceUseAdmission(profile, profile.fingerprint, request),
+    )
+    records = (
+        {"type": "tool_execution_start", "toolCallId": "one", "toolName": "read",
+         "args": {"path": "fixture/code.py"}},
+        {"type": "tool_execution_end", "toolCallId": "one", "toolName": "read", "isError": False,
+         "result": {"content": [{"type": "text", "text": "SYNTHETIC_PRIVATE_CANARY"}]}},
+        {"type": "agent_settled", "aborted": False},
+    )
+    harness = FixtureCodingHarness(normalizer, records)
+    harness.start(attempt)
+    for index in range(len(records)):
+        harness.poll(now + timedelta(milliseconds=index), index * 1_000_000)
+    cleanup = HarnessCleanup(
+        attempt_id=attempt.attempt_id, session_id=attempt.session_id, boundary="fixture",
+        process_tree_stopped=True, evidence=digest_reference("cleanup"),
+    )
+    return harness.finish(cleanup), semantic_trace_bytes(harness.projector.events)

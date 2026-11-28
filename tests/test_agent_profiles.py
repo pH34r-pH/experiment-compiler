@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from offline_fixture_helpers import offline_operations
-from repository_profile_helpers import composed_records, retained_trajectory
+from repository_profile_helpers import composed_records, projected_trajectory, retained_trajectory
 
 from experiment_compiler.agent_profiles import SOURCE, projection_fingerprint
 from experiment_compiler.archive_policy import PackageReadPolicy, ResourcePolicyError
@@ -310,6 +310,37 @@ class RepositoryAgentProfileTests(unittest.TestCase):
         self.assertEqual(receipt["resultFingerprint"], pins["expected_result_fingerprint"])
         self.assertEqual(receipt["traceDigest"], "sha256:" + sha256(paths[2].read_bytes()))
         self.assertEqual(receipt["packageSha256"], pins["expected_sha256"])
+
+    @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
+    def test_projected_wire_events_round_trip_through_compiler_readback(self):
+        def produce(task, terminal, *, repository_id, candidate):
+            self.assertEqual(terminal, "settled")
+            self.assertIsNone(repository_id)
+            self.assertIsNone(candidate)
+            return projected_trajectory(task)
+
+        with patch(__name__ + ".retained_trajectory", side_effect=produce):
+            paths, pins = self.trajectory_package()
+        trace = paths[2].read_bytes()
+        events = [json.loads(line) for line in trace.splitlines()]
+        self.assertEqual(
+            [(event["sequence"], event["phase"], event["action"], event["outcome"]) for event in events],
+            [(1, "start", "read", "unknown"), (2, "end", "read", "success"),
+             (3, "lifecycle", "recovery", "unknown")],
+        )
+        self.assertNotIn(b"SYNTHETIC_PRIVATE_CANARY", trace)
+        self.assertNotIn(b"fixture/code.py", trace)
+        receipt = verify_trajectory(*paths, **pins)
+        self.assertEqual(receipt["eventCount"], 3)
+        self.assertEqual(receipt["terminal"], "settled")
+        self.assertEqual(receipt["acceptance"], "not_evaluated")
+        self.assertEqual(receipt["trainingEligibility"], "not-granted")
+
+        changed = trace.replace(b'"sequence":2', b'"sequence":9', 1)
+        self.assertNotEqual(changed, trace)
+        paths[2].write_bytes(changed)
+        with self.assertRaises(PackageError):
+            verify_trajectory(*paths, **pins)
 
     @unittest.skipUnless(HAS_TRAJECTORY_EXTRA, "install the pinned trajectory extra")
     def test_trajectory_command_retains_a_zero_event_provider_failure(self):
