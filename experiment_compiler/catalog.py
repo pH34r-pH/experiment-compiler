@@ -61,6 +61,13 @@ def _markdown_section(text: str, title: str) -> str | None:
     return body or None
 
 
+def _attach_optional_publication_metadata(descriptor: dict, recipe: dict) -> None:
+    if "isPartOf" in recipe:
+        descriptor["isPartOf"] = recipe["isPartOf"]
+    if "archivalRelease" in recipe:
+        descriptor["archivalRelease"] = recipe["archivalRelease"]
+
+
 def describe_recipe(recipe_path: Path) -> dict:
     """Project a reviewed compiled-experiment-v1 recipe into display metadata."""
     recipe = load_recipe(recipe_path)
@@ -111,10 +118,7 @@ def describe_recipe(recipe_path: Path) -> dict:
         "package": expected,
         "backlinks": recipe.get("relatedArticles", []),
     }
-    if "isPartOf" in recipe:
-        descriptor["isPartOf"] = recipe["isPartOf"]
-    if "archivalRelease" in recipe:
-        descriptor["archivalRelease"] = recipe["archivalRelease"]
+    _attach_optional_publication_metadata(descriptor, recipe)
     return descriptor
 
 
@@ -191,10 +195,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],
         "backlinks": recipe.get("relatedArticles", []),
     }
-    if "isPartOf" in recipe:
-        descriptor["isPartOf"] = recipe["isPartOf"]
-    if "archivalRelease" in recipe:
-        descriptor["archivalRelease"] = recipe["archivalRelease"]
+    _attach_optional_publication_metadata(descriptor, recipe)
     identifier = root.get("identifier")
     if isinstance(identifier, str) and identifier.strip():
         descriptor["experimentIdentifier"] = identifier
