@@ -44,6 +44,18 @@ def _add_corpus_command(commands) -> None:
     add_archive_policy_options(corpus)
 
 
+def _add_project_actions_command(commands) -> None:
+    projection = commands.add_parser("project-actions", help="derive inert native Actions job data without dispatch")
+    projection.add_argument("package", type=Path)
+    projection.add_argument("--expected-sha256", required=True)
+    projection.add_argument("--profile", required=True, type=Path, help="separately trusted controller profile")
+    projection.add_argument("--expected-profile-sha256", required=True)
+    projection.add_argument("--package-source-repo", help="optional repository storing the pinned package archive")
+    projection.add_argument("--package-source-commit", help="optional 40-char commit in the package-storage repository")
+    projection.add_argument("--package-source-path", help="optional archive-relative .zip path in the storage repository")
+    projection.add_argument("--output", required=True, type=Path)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment-compiler")
     parser.add_argument("--version", action="version", version=__version__)
@@ -101,15 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
     coverage.add_argument("package", type=Path)
     coverage.add_argument("--expected-sha256", required=True, help="exact final-package digest")
 
-    projection = commands.add_parser("project-actions", help="derive inert native Actions job data without dispatch")
-    projection.add_argument("package", type=Path)
-    projection.add_argument("--expected-sha256", required=True)
-    projection.add_argument("--profile", required=True, type=Path, help="separately trusted controller profile")
-    projection.add_argument("--expected-profile-sha256", required=True)
-    projection.add_argument("--package-source-repo", help="optional repository storing the pinned package archive")
-    projection.add_argument("--package-source-commit", help="optional 40-char commit in the package-storage repository")
-    projection.add_argument("--package-source-path", help="optional archive-relative .zip path in the storage repository")
-    projection.add_argument("--output", required=True, type=Path)
+    _add_project_actions_command(commands)
 
     for command in (build, check):
         command.add_argument("--receipt", type=Path, help="write an integrity-only JSON receipt")
