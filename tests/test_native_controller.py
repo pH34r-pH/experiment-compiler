@@ -190,6 +190,47 @@ class NativeControllerTests(unittest.TestCase):
             self.attempt = self.attempt.parent / status
             self.assertEqual(self.run_fixture()["status"], status)
 
+    def test_package_source_and_retry_binding_validation_runs_before_authority(self):
+        package, profile, package_sha, profile_sha = self.fixture.build()
+        base = {"packageSha256": package_sha, "profileSha256": profile_sha,
+                "runtimeSha256": "c" * 64, "attemptId": "d" * 12, "controller": self.controller}
+        for extra in (
+            {"packageSource": None},
+            {"packageSource": {"repository": "pH34r-pH/compiled-experiments", "commit": "e" * 40, "path": "p.zip"}},
+            {"retryOfAttemptId": "d" * 12},
+            {"retryOfAttemptId": "not-hex"},
+        ):
+            with self.subTest(extra=extra), self.assertRaises(PackageError):
+                run_native_controller(package, profile, self.attempt,
+                                      selection={**base, **extra}, authority=self.authority)
+        self.assertEqual(self.authority.events, [])
+
+    @unittest.skipUnless(os.name == "posix", "native receipt publication requires POSIX directory fsync")
+    def test_package_source_and_explicit_retry_bind_distinct_request_digests(self):
+        package, profile, package_sha, profile_sha = self.fixture.build()
+        pkg_source = {"repository": "example/private-plans", "commit": "e" * 40, "path": "plans/p.zip"}
+        first = run_native_controller(
+            package, profile, self.fixture.root / "attempt-1",
+            selection={"packageSha256": package_sha, "profileSha256": profile_sha,
+                       "runtimeSha256": "c" * 64, "attemptId": "d" * 12,
+                       "controller": self.controller, "packageSource": pkg_source},
+            authority=self.authority,
+        )
+        retry = run_native_controller(
+            package, profile, self.fixture.root / "attempt-2",
+            selection={"packageSha256": package_sha, "profileSha256": profile_sha,
+                       "runtimeSha256": "c" * 64, "attemptId": "e" * 12,
+                       "controller": self.controller, "packageSource": pkg_source,
+                       "retryOfAttemptId": "d" * 12},
+            authority=self.authority,
+        )
+        self.assertNotEqual(first["requestSha256"], retry["requestSha256"])
+        first_spec = json.loads(self.authority.executed_requests[0].specification)
+        retry_spec = json.loads(self.authority.executed_requests[1].specification)
+        self.assertEqual(first_spec["packageSource"], pkg_source)
+        self.assertEqual(first_spec["identity"]["sourceRepository"], "pH34r-pH/experiment-compiler")
+        self.assertEqual(retry_spec["retryOfAttemptId"], "d" * 12)
+
 
 if __name__ == "__main__":
     unittest.main()

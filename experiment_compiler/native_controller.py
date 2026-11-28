@@ -8,10 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import re
 from pathlib import Path
 from typing import ContextManager, Protocol
 
-from .actions_projection import PROFILE_LIMIT, _pinned_profile, project_actions
+from .actions_projection import PROFILE_LIMIT, _pinned_profile, project_actions, validate_package_source
 from .core import PackageError, bounded_read, canonical, json_value
 from .native_receipts import _identity, finish_native_attempt, start_native_attempt
 from .runner_admission import _read_package
@@ -76,14 +77,33 @@ def _profile_admission(profile, controller):
     return evidence
 
 
+def _optional_selection_bindings(selection: dict) -> dict:
+    extras: dict = {}
+    if "packageSource" in selection:
+        extras["packageSource"] = validate_package_source(selection["packageSource"])
+        if extras["packageSource"] is None:
+            raise PackageError("native controller packageSource cannot be null when provided")
+    if "retryOfAttemptId" in selection:
+        prior = selection["retryOfAttemptId"]
+        if not isinstance(prior, str) or re.fullmatch(r"[0-9a-f]{12}", prior) is None:
+            raise PackageError("native retryOfAttemptId must be a 12-character hex attempt ID")
+        if prior == selection["attemptId"]:
+            raise PackageError("explicit native retry must use a distinct attempt ID")
+        extras["retryOfAttemptId"] = prior
+    return extras
+
+
 def _prepare(package: Path, profile_path: Path, selection: dict):
-    fields = {"packageSha256", "profileSha256", "runtimeSha256", "attemptId", "controller"}
-    if not isinstance(selection, dict) or set(selection) != fields:
+    required = {"packageSha256", "profileSha256", "runtimeSha256", "attemptId", "controller"}
+    optional = {"packageSource", "retryOfAttemptId"}
+    if not isinstance(selection, dict) or not required <= set(selection) or set(selection) - required - optional:
         raise PackageError("native controller requires explicit selected identities")
+    bindings = _optional_selection_bindings(selection)
     # Reuse owning projection admission without interpreting dispatchAuthorized=false
     # as an authorization. Only the independent authority below can admit execution.
     projection = project_actions(package, profile_path, expected_sha256=selection["packageSha256"],
-                                 expected_profile_sha256=selection["profileSha256"])
+                                 expected_profile_sha256=selection["profileSha256"],
+                                 package_source=bindings.get("packageSource"))
     package_bytes = bounded_read(package)
     manifest, _ = _read_package(package_bytes, selection["packageSha256"])
     profile = _pinned_profile(profile_path, selection["profileSha256"])
@@ -98,13 +118,14 @@ def _prepare(package: Path, profile_path: Path, selection: dict):
     _identity(identity)
     evidence = _profile_admission(profile, identity["controller"])
     del identity["requestSha256"]
-    specification = canonical({"schemaVersion": 1, "kind": "fleet-native-controller-request",
-                               "identity": identity, "qualificationEvidenceSha256": evidence,
-                               "workflowSha256": projection["workflowSha256"],
-                               "jobSha256": projection["jobSha256"], "platform": projection["platform"],
-                               "resourceLimits": projection["resourceLimits"],
-                               "maxWallSeconds": projection["jobs"]["native"]["with"]["max-wall-seconds"],
-                               "stagedAssets": projection["stagedAssets"]})
+    spec_payload = {"schemaVersion": 1, "kind": "fleet-native-controller-request",
+                    "identity": identity, "qualificationEvidenceSha256": evidence,
+                    "workflowSha256": projection["workflowSha256"],
+                    "jobSha256": projection["jobSha256"], "platform": projection["platform"],
+                    "resourceLimits": projection["resourceLimits"],
+                    "maxWallSeconds": projection["jobs"]["native"]["with"]["max-wall-seconds"],
+                    "stagedAssets": projection["stagedAssets"], **bindings}
+    specification = canonical(spec_payload)
     request = NativeRequest(package_bytes, profile_bytes, specification)
     return request, evidence
 
