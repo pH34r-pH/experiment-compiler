@@ -306,6 +306,10 @@
   "acceptance": {
     "state": "candidate"
   },
-  "initial_gaps": [],
+  "initial_gaps": [
+    "archive-read-policy#ARP-FR-010",
+    "archive-read-policy#ARP-FR-011",
+    "archive-read-policy#ARP-SC-001"
+  ],
   "spec_kit_layout": null
 }
