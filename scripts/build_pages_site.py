@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from experiment_compiler.catalog import describe_catalog, discover_recipes
 from experiment_compiler.core import (
+    _validate_archival_release,
     _validate_related_articles,
     canonical,
     compile_package,
@@ -323,10 +324,29 @@ def protocol_guide(package_hash: str) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def render_archival_release(experiment: dict) -> str:
+    """Render optional immutable archival release and DOI citation metadata."""
+    archival = experiment.get("archivalRelease")
+    if archival is None:
+        return "Not archived / no DOI declared. Package integrity and reproducibility do not require a DOI."
+    _validate_archival_release(archival)
+    parts = [
+        f'<a href="{html.escape(archival["releaseUrl"], quote=True)}" target="_blank" rel="noreferrer">'
+        f'{html.escape(archival["repository"])}@{html.escape(archival["releaseTag"])}</a>'
+    ]
+    if "doi" in archival:
+        doi = archival["doi"]
+        parts.append(f'DOI <a href="https://doi.org/{quote(doi, safe="/")}" target="_blank" rel="noreferrer">{html.escape(doi)}</a>')
+    if "zenodoRecordUrl" in archival:
+        parts.append(f'<a href="{html.escape(archival["zenodoRecordUrl"], quote=True)}" target="_blank" rel="noreferrer">Zenodo record ↗</a>')
+    return " · ".join(parts) + " — citation/archive metadata only; not a lifecycle state or scientific acceptance."
+
+
 def render_detail(experiment: dict) -> str:
     """Render a static package detail route from Compiler-derived metadata."""
     title = html.escape(experiment["title"])
     identifier = html.escape(experiment["id"])
+    canonical_url = f"https://experiments.tyharbin.com/experiments/{quote(experiment['id'])}/"
     source = experiment.get("source") or {}
     source_repository = source.get("repository", "")
     source_commit = source.get("commit", "")
@@ -345,13 +365,14 @@ def render_detail(experiment: dict) -> str:
     verification = (f'<pre><code>python -m experiment_compiler verify {html.escape(package_hash)}.zip --expected-sha256 {html.escape(package_hash)}</code></pre>' if package_hash else '<p>No package is available to verify.</p>')
     prerequisites = render_prerequisites(experiment)
     protocol_html = render_protocol(experiment.get("protocol"))
+    archival_html = render_archival_release(experiment)
     profile = html.escape(experiment.get("profile", ""))
     package_identity = (f"SHA-256 {html.escape(package_hash)} · {package.get('size', 0):,} bytes"
                         if package_hash else "Package identity not declared")
     provenance = html.escape(f"{source_repository}@{source_commit}")
     records = html.escape(json.dumps({key: experiment.get(key) for key in
         ("experimentIdentifier", "lineage", "lifecycle", "executionAttempts", "acceptance", "result",
-         "scientificInterpretation", "environment", "resources", "contents")
+         "scientificInterpretation", "environment", "resources", "contents", "archivalRelease")
         if experiment.get(key) is not None}, indent=2, sort_keys=True))
     backlinks = experiment.get("backlinks", [])
     _validate_related_articles(backlinks)
@@ -363,11 +384,13 @@ def render_detail(experiment: dict) -> str:
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Exact package identity, provenance, and lifecycle projection for {title}.">
 <meta name="theme-color" content="#f4f9fd">
+<link rel="canonical" href="{canonical_url}">
+<link rel="alternate" type="application/json" href="/data/experiments.json" title="Compiled experiment catalog JSON">
 <title>{title} — Experiment Compiler</title><link rel="preload" href="/assets/fonts/long-measure/NimbusSansNarrow-Regular.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/assets/site.css"><script src="/assets/instrument.js" defer></script></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a><header class="topbar"><a class="brand" href="/">TJHG <span>/ experiments</span></a><nav aria-label="Primary"><a class="cross-site-link" href="https://tyharbin.com/research/">Research ↗</a><a href="/#experiments">Catalog</a><a href="https://github.com/pH34r-pH/experiment-compiler">GitHub ↗</a></nav><details class="theme-panel"><summary>Theme <span data-theme-label>Auto</span></summary><div class="theme-options" role="group" aria-label="Theme"><button type="button" data-theme-choice="auto" aria-pressed="false">Auto</button><button type="button" data-theme-choice="light" aria-pressed="false">Light</button><button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button></div></details></header>
 <main id="main-content" class="detail-page" tabindex="-1"><p class="eyebrow">COMPILED EXPERIMENT · {identifier}</p><h1>{title}</h1><p class="lede">{summary}</p>
 <section class="result-summary"><h2>Result and interpretation</h2>{result_html}<h3>Recorded status</h3><p>{status_html}</p><p>Recorded attempts: {attempt_display}</p><p>A plan, a reference fixture, and an observed result answer different questions. Family membership does not make their metrics directly comparable.</p><div class="actions">{package_action}<a href="#verify-package">Verify or inspect prerequisites</a></div></section>
-<section class="identity"><details><summary>Exact package identity and provenance</summary><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd></dl></details></section>
+<section class="identity"><details><summary>Exact package identity and provenance</summary><dl><dt>Profile</dt><dd>{profile}</dd><dt>Package</dt><dd class="digest">{package_identity}</dd><dt>Source</dt><dd><a href="{source_url}" target="_blank" rel="noreferrer">{provenance}</a></dd><dt>Archive / DOI</dt><dd>{archival_html}</dd></dl></details></section>
 <section><h2>Research question</h2><p>{question}</p><h2>Method</h2><p>{method}</p></section>
 {protocol_guide(package_hash)}
 {protocol_html}

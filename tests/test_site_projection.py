@@ -347,6 +347,61 @@ class SiteProjectionTest(unittest.TestCase):
         self.assertIn("--parallax-y", css)
         self.assertIn(".catalog-table", css)
         self.assertIn(".table-scroll", css)
+        index_html = (ROOT / "site/index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="canonical" href="https://experiments.tyharbin.com/">', index_html)
+        self.assertIn('<link rel="alternate" type="application/json" href="/data/experiments.json"', index_html)
+
+    def test_detail_page_canonical_and_archival_release_metadata(self):
+        import shutil
+        import tempfile
+        archival = {
+            "repository": "pH34r-pH/compiled-experiments",
+            "releaseTag": "dsl-issue-152-v1.0.0",
+            "releaseUrl": "https://github.com/pH34r-pH/compiled-experiments/releases/tag/dsl-issue-152-v1.0.0",
+            "doi": "10.5281/zenodo.1234567",
+            "zenodoRecordUrl": "https://zenodo.org/records/1234567",
+        }
+        base = {
+            "id": "archived-study",
+            "title": "Archived study",
+            "profile": "compiled-experiment-v1",
+            "source": {"repository": "owner/research", "commit": "b" * 40},
+            "package": {"sha256": "a" * 64, "size": 123},
+        }
+        unarchived_page = render_detail(base)
+        self.assertIn('<link rel="canonical" href="https://experiments.tyharbin.com/experiments/archived-study/">', unarchived_page)
+        self.assertIn('<link rel="alternate" type="application/json" href="/data/experiments.json"', unarchived_page)
+        self.assertIn("Not archived / no DOI declared.", unarchived_page)
+
+        archived_page = render_detail({**base, "archivalRelease": archival})
+        self.assertIn("pH34r-pH/compiled-experiments@dsl-issue-152-v1.0.0", archived_page)
+        self.assertIn("https://doi.org/10.5281/zenodo.1234567", archived_page)
+        self.assertIn("https://zenodo.org/records/1234567", archived_page)
+        self.assertIn("citation/archive metadata only; not a lifecycle state", archived_page)
+
+        for bad_archival in (
+            {**archival, "releaseTag": "latest", "releaseUrl": "https://github.com/pH34r-pH/compiled-experiments/releases/tag/latest"},
+            {**archival, "releaseTag": "v1-latest", "releaseUrl": "https://github.com/pH34r-pH/compiled-experiments/releases/tag/v1-latest"},
+            {**archival, "repository": "evil/compiled-experiments"},
+            {**archival, "releaseUrl": "https://github.com/pH34r-pH/compiled-experiments/releases/tag/other"},
+            {**archival, "doi": "https://doi.org/10.5281/zenodo.1234567"},
+            {**archival, "zenodoRecordUrl": "https://evil.test/records/123"},
+            {**archival, "extra": True},
+        ):
+            with self.subTest(bad_archival=bad_archival), self.assertRaises(PackageError):
+                render_detail({**base, "archivalRelease": bad_archival})
+
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "fixture"
+            shutil.copytree(ROOT / "examples/linear-regression-v1", copied)
+            recipe_path = copied / "experiment.json"
+            original = compile_package(recipe_path, Path(directory) / "orig.zip")
+            recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+            recipe["archivalRelease"] = archival
+            recipe_path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
+            with_archival = compile_package(recipe_path, Path(directory) / "archival.zip")
+            self.assertEqual(original["packageSha256"], with_archival["packageSha256"])
+            self.assertEqual(original["packageSizeBytes"], with_archival["packageSizeBytes"])
 
 
 if __name__ == "__main__":

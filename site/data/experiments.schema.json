@@ -168,6 +168,18 @@
               "@type": { "const": "CreativeWork" },
               "name": { "type": "string", "minLength": 1, "pattern": "\\S" }
             }
+          },
+          "archivalRelease": {
+            "type": "object",
+            "required": ["repository", "releaseTag", "releaseUrl"],
+            "additionalProperties": false,
+            "properties": {
+              "repository": { "const": "pH34r-pH/compiled-experiments" },
+              "releaseTag": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+              "releaseUrl": { "type": "string", "pattern": "^https://github\\.com/pH34r-pH/compiled-experiments/releases/tag/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+              "doi": { "type": "string", "pattern": "^10\\.\\d{4,9}/[-._;()/:A-Za-z0-9]+$" },
+              "zenodoRecordUrl": { "type": "string", "pattern": "^https://zenodo\\.org/records/[1-9][0-9]*$" }
+            }
           }
         },
         "additionalProperties": true

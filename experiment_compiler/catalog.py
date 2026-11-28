@@ -16,6 +16,7 @@ from .core import (
     _as_refs,
     _execution_action_nodes,
     _types,
+    _validate_archival_release,
     _validate_related_articles,
     bounded_read,
     compile_package,
@@ -58,6 +59,13 @@ def _markdown_section(text: str, title: str) -> str | None:
         return None
     body = match.group("body").strip()
     return body or None
+
+
+def _attach_optional_publication_metadata(descriptor: dict, recipe: dict) -> None:
+    if "isPartOf" in recipe:
+        descriptor["isPartOf"] = recipe["isPartOf"]
+    if "archivalRelease" in recipe:
+        descriptor["archivalRelease"] = recipe["archivalRelease"]
 
 
 def describe_recipe(recipe_path: Path) -> dict:
@@ -110,8 +118,7 @@ def describe_recipe(recipe_path: Path) -> dict:
         "package": expected,
         "backlinks": recipe.get("relatedArticles", []),
     }
-    if "isPartOf" in recipe:
-        descriptor["isPartOf"] = recipe["isPartOf"]
+    _attach_optional_publication_metadata(descriptor, recipe)
     return descriptor
 
 
@@ -188,8 +195,7 @@ def _describe_lifecycle_recipe(recipe: dict, recipe_path: Path) -> dict:
         "package": None if recipe.get("expectedPackage") is None else recipe["expectedPackage"],
         "backlinks": recipe.get("relatedArticles", []),
     }
-    if "isPartOf" in recipe:
-        descriptor["isPartOf"] = recipe["isPartOf"]
+    _attach_optional_publication_metadata(descriptor, recipe)
     identifier = root.get("identifier")
     if isinstance(identifier, str) and identifier.strip():
         descriptor["experimentIdentifier"] = identifier
@@ -288,6 +294,8 @@ def resolve_article_reference(catalog: dict, reference: dict, *, article: dict |
         raise PackageError("Expected experiment identity mismatch")
     backlinks = record.get("backlinks")
     _validate_related_articles(backlinks)
+    if "archivalRelease" in record:
+        _validate_archival_release(record["archivalRelease"])
     if article is not None:
         _validate_related_articles([article])
         if not any(item["url"] == article["url"] and

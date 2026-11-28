@@ -202,10 +202,47 @@ def _validate_is_part_of(is_part_of: Any) -> None:
         raise PackageError("isPartOf @id must be a canonical bounded family URL")
 
 
+def _validate_archival_release(archival_release: Any) -> None:
+    required = {"repository", "releaseTag", "releaseUrl"}
+    optional = {"doi", "zenodoRecordUrl"}
+    if (not isinstance(archival_release, dict) or not required <= set(archival_release) or
+            set(archival_release) - required - optional):
+        raise PackageError("archivalRelease has unexpected or missing fields")
+    if archival_release["repository"] != "pH34r-pH/compiled-experiments":
+        raise PackageError("archivalRelease must reference pH34r-pH/compiled-experiments")
+    tag = archival_release["releaseTag"]
+    if (not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", tag) or
+            "latest" in re.split(r"[-._]", tag.lower())):
+        raise PackageError("archivalRelease releaseTag must be an immutable non-latest tag")
+    expected_url = f"https://github.com/pH34r-pH/compiled-experiments/releases/tag/{tag}"
+    if archival_release["releaseUrl"] != expected_url:
+        raise PackageError("archivalRelease releaseUrl must match the exact GitHub release tag URL")
+    _validate_archival_citations(archival_release)
+
+
+def _validate_archival_citations(archival_release: dict) -> None:
+    if "doi" in archival_release:
+        doi = archival_release["doi"]
+        if not isinstance(doi, str) or not re.fullmatch(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", doi):
+            raise PackageError("archivalRelease doi must be a valid canonical DOI string")
+    if "zenodoRecordUrl" in archival_release:
+        record_url = archival_release["zenodoRecordUrl"]
+        if not isinstance(record_url, str) or not re.fullmatch(r"https://zenodo\.org/records/[1-9][0-9]*", record_url):
+            raise PackageError("archivalRelease zenodoRecordUrl must be a canonical Zenodo record URL")
+
+
+def _validate_recipe_metadata(recipe: dict) -> None:
+    _validate_related_articles(recipe.get("relatedArticles", []))
+    if "isPartOf" in recipe:
+        _validate_is_part_of(recipe["isPartOf"])
+    if "archivalRelease" in recipe:
+        _validate_archival_release(recipe["archivalRelease"])
+
+
 def load_recipe(path: Path) -> dict:
     recipe = json_value(bounded_read(path))
     required = {"buildRecipeVersion", "id", "title", "profile", "manifest", "members"}
-    optional = {"expectedPackage", "relatedArticles", "isPartOf"}
+    optional = {"expectedPackage", "relatedArticles", "isPartOf", "archivalRelease"}
     if not isinstance(recipe, dict) or not required <= set(recipe) or set(recipe) - required - optional:
         raise PackageError("Recipe has unexpected or missing fields")
     if (type(recipe["buildRecipeVersion"]) is not int or recipe["buildRecipeVersion"] != 1 or
@@ -216,9 +253,7 @@ def load_recipe(path: Path) -> dict:
         raise PackageError("Recipe requires a portable ID and title")
     if validate_header(recipe["manifest"]) != recipe["profile"]:
         raise PackageError("Recipe profile differs from manifest profile")
-    _validate_related_articles(recipe.get("relatedArticles", []))
-    if "isPartOf" in recipe:
-        _validate_is_part_of(recipe["isPartOf"])
+    _validate_recipe_metadata(recipe)
     members = recipe["members"]
     if not isinstance(members, list) or not members:
         raise PackageError("Recipe requires a nonempty member list")
