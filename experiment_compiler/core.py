@@ -231,6 +231,14 @@ def _validate_archival_citations(archival_release: dict) -> None:
             raise PackageError("archivalRelease zenodoRecordUrl must be a canonical Zenodo record URL")
 
 
+def _validate_recipe_metadata(recipe: dict) -> None:
+    _validate_related_articles(recipe.get("relatedArticles", []))
+    if "isPartOf" in recipe:
+        _validate_is_part_of(recipe["isPartOf"])
+    if "archivalRelease" in recipe:
+        _validate_archival_release(recipe["archivalRelease"])
+
+
 def load_recipe(path: Path) -> dict:
     recipe = json_value(bounded_read(path))
     required = {"buildRecipeVersion", "id", "title", "profile", "manifest", "members"}
@@ -245,11 +253,7 @@ def load_recipe(path: Path) -> dict:
         raise PackageError("Recipe requires a portable ID and title")
     if validate_header(recipe["manifest"]) != recipe["profile"]:
         raise PackageError("Recipe profile differs from manifest profile")
-    _validate_related_articles(recipe.get("relatedArticles", []))
-    if "isPartOf" in recipe:
-        _validate_is_part_of(recipe["isPartOf"])
-    if "archivalRelease" in recipe:
-        _validate_archival_release(recipe["archivalRelease"])
+    _validate_recipe_metadata(recipe)
     members = recipe["members"]
     if not isinstance(members, list) or not members:
         raise PackageError("Recipe requires a nonempty member list")
